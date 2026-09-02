@@ -46,11 +46,16 @@ LoginWindow::LoginWindow(QWidget *parent) : QWidget(parent)
     });
     connect(m_net, &NetClient::errorText, this, [this](const QString &s) { m_status->setText(s); });
     connect(m_net, &NetClient::response, this,
-            [this](int cmd, int, int code, const QString &msg, const QJsonObject &) {
+            [this](int cmd, int, int code, const QString &msg, const QJsonObject &data) {
         if (cmd == 0 && code == ecp::ERR_OK) { m_status->setText(QStringLiteral("链路正常，可以登录")); return; }
         if (cmd == ecp::CMD_ADMIN_LOGIN) {
             if (code != ecp::ERR_OK) { m_status->setText(msg); return; }
-            // TODO(L3)：保存 token，切换到主窗口
+            const QString token = data.value(QStringLiteral("token")).toString();
+            if (token.isEmpty()) {
+                m_status->setText(QStringLiteral("登录响应异常：服务端未返回 token，请稍后重试"));
+                return;
+            }
+            m_net->setToken(token);
             auto *w = new MainWindow(m_net);
             w->setAttribute(Qt::WA_DeleteOnClose);
             w->show();
@@ -64,11 +69,10 @@ LoginWindow::LoginWindow(QWidget *parent) : QWidget(parent)
 
 void LoginWindow::onLogin()
 {
-    // TODO(L3)：接入命令字 2001。服务端 handler 由 L2 实现后即可打通。
-    // 当前 handler 未注册，服务端会返回 ERR_CMD_UNKNOWN(1005)，属预期行为。
-    m_status->setText(QStringLiteral("发起登录…（业务 handler 待 L2 实现）"));
+    m_status->setText(QStringLiteral("发起登录…"));
     m_net->send(ecp::CMD_ADMIN_LOGIN, QJsonObject{
         {"account",  m_account->text()},
-        {"password", m_password->text()}   // TODO(L3)：改为 SHA-256 摘要后再发送
+        // 协议约定发送明文密码，由服务端执行 SHA-256 后与数据库摘要比对。
+        {"password", m_password->text()}
     });
 }
