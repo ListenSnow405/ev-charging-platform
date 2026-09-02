@@ -35,8 +35,13 @@ static void onSignal(int sig)
 //  TODO(L2)：在 server/biz/ 下实现各服务后，在此逐个注册。
 //            清单见 server/biz/README.md 与 docs/protocol.md 第 4 节。
 // -----------------------------------------------------------------------------
+namespace ecp { void registerUserService(); void registerAdminService(); }
+
 static void registerAllServices()
 {
+    registerUserService();      // 1001 / 1002   [说明书] 1.4 手机号免密登录
+    registerAdminService();     // 2001          [说明书] 1.4 管理员登录
+
     // 骨架自带的连通性探针：客户端可用它确认链路打通（不在协议表内，仅供联调）
     Dispatcher::instance().registerHandler(0, [](const Request &, QJsonObject &out) -> int {
         out["pong"]    = true;
@@ -44,7 +49,7 @@ static void registerAllServices()
         return ERR_OK;
     }, /*needAuth=*/false);
 
-    LOG_W(QStringLiteral("业务 handler 尚未注册 —— 除探针外所有命令字将返回 ERR_CMD_UNKNOWN(1005)"));
+    LOG_W(QStringLiteral("其余业务 handler 尚未注册 —— 未实现的命令字返回 ERR_CMD_UNKNOWN(1005)"));
 }
 
 int main(int argc, char *argv[])
@@ -67,6 +72,7 @@ int main(int argc, char *argv[])
     if (QFileInfo::exists(cfgPath)) {
         QSettings cfg(cfgPath, QSettings::IniFormat);
         port     = static_cast<quint16>(cfg.value(QStringLiteral("server/port"), port).toUInt());
+        poolSize = cfg.value(QStringLiteral("server/pool_size"), poolSize).toInt();
         dbFile   = cfg.value(QStringLiteral("server/db"), dbFile).toString();
         dbFile   = resPath(dbFile);
         LOG_I(QStringLiteral("已加载配置 %1").arg(cfgPath));

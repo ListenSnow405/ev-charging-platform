@@ -21,7 +21,9 @@ SOURCES += \
     net/tcp_server.cpp \
     net/session.cpp \
     net/dispatcher.cpp \
-    dao/db.cpp
+    dao/db.cpp \
+    biz/user_service.cpp \
+    biz/admin_service.cpp
 
 HEADERS += \
     net/thread_pool.h \

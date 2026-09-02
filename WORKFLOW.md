@@ -105,3 +105,5 @@ bash scripts/build-all.sh && ./build/bin/ecp-server &
 | 报 Qt5/Qt6 错误 | 提醒它本项目是 **Qt 6.2.4**，让它查 Qt6 正确用法 |
 | 想新增命令字 | 先在 `docs/protocol.md` 占号（走 §5），再写代码 |
 | 连续两三轮修不好同一个错 | 停下自己读报错。通常是它误解了某个前提，直接告诉它前提更快 |
+| GUI 程序报 `could not connect to display` | SSH 会话没有 `DISPLAY`，不是 Qt 坏了。见 [conventions.md 第 5 节](docs/conventions.md) |
+| 客户端报「不支持的请求类型」 | 该命令字的 handler 还没实现（L2 的活），不是链路故障。服务端能打印出命令字就说明链路是通的 |

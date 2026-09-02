@@ -32,6 +32,9 @@
 | 2026-09-02 | `common/logger.h` | 修正编译错误：`pthread_t → quintptr` 的 `reinterpret_cast` 在 64 位 Linux 非法，改 `static_cast<quint64>` | PRL | ✅ |
 | 2026-09-02 | `common/app_path.h` | 新增 `resPath()`：从 Qt Creator 运行时工作目录是构建目录，原先按相对路径找 `config/app.ini` 与 `charging.db` 会失败。改为可执行文件上溯两级定位项目根 | L1 | ✅ |
 | 2026-09-02 | 全部文档 | 消除跨文件重复，按「每份内容只留一处」重排，总量减少约六成 | 全组 | ✅ |
+| 2026-09-02 | `config/app.ini` | 线程池大小改为可配置项 `pool_size`，原先在 `main.cpp` 写死；每条连接占一个线程直到断开，该值即最大并发连接数 | L1 | ✅ |
+| 2026-09-02 | `.gitignore` | `config/` 规则收紧为默认全挡、仅放行 `*.example`；原 `config/*.ini` 挡不住其他后缀的凭据文件 | SCML | ✅ |
+| 2026-09-02 | `server/biz/` | 实现 1001 手机号免密登录（含自动注册、冻结拦截）、1002 用户信息、2001 管理员登录，作为 L2 的样板实现 | L2 | ✅ |
 
 ## 4. 评审记录
 
@@ -66,17 +69,44 @@ bash scripts/check-env.sh L3     # 只查自己这条线
 
 L3 需要 QtCharts（`[说明书]` 1.4 营收趋势用 QChart），L4 需要 QtWebEngineWidgets（`[说明书]` 1.4 一键导航用 QWebEngineView），两者都不在 `qt6-base-dev` 里。这是 agent 完全帮不上的环境问题，拖到联调周会连累全组。
 
+### SSH 登录时 GUI 程序起不来
+
+从宿主机 SSH 进虚拟机跑 `ecp-admin` / `ecp-user` 会报：
+
+```
+qt.qpa.xcb: could not connect to display
+This application failed to start because no Qt platform plugin could be initialized.
+Reinstalling the application may fix this problem.
+```
+
+**不是 Qt 装坏了**，最后那句提示极具误导性。原因是 SSH 会话没有 `DISPLAY`，Qt 不知道往哪儿画窗口。服务端与电桩模拟器是控制台程序，不受影响。
+
+三种做法：
+
+1. **在虚拟机桌面的终端里跑 GUI 程序**（推荐）。SSH 留给服务端、模拟器、大屏这些控制台程序，分工正好。
+2. 想留在 SSH 里跑，借用桌面的显示（窗口出现在虚拟机桌面上，不在 SSH 终端里）：
+
+   ```bash
+   export DISPLAY=:0
+   export XAUTHORITY=$(ls /run/user/1000/.mutter-Xwaylandauth.* 2>/dev/null | head -1)
+   ```
+
+   认证文件名里的随机串每次重启桌面会变，**必须用 `ls` 通配，不要写死**。可加进 `~/.bashrc`。
+3. `ssh -X` X11 转发，窗口显示在宿主机。Qt 程序走转发较卡，调界面不推荐。
+
 ## 6. 配置与密钥
 
 `[说明书]` 2.2：合理考虑数据安全问题。
 
-**凭据不进仓库。** `config/app.ini` 已被 `.gitignore` 忽略，仓库只留模板：
+**凭据不进仓库。** `config/` 默认整个被 `.gitignore` 挡下，只放行 `*.example` 模板——这样以后往里放任何凭据文件（`map_key.txt`、`secrets.json` 等）都不会误提交。仓库只留模板：
 
 ```bash
 cp config/app.ini.example config/app.ini   # 首次克隆后执行，填入自己的值
 ```
 
 模板改了要提交，实际配置永不提交。已验证 `git add config/` 只会加入 `.example`。
+
+`app.ini` 可配置项：`server/host`、`server/port`、`server/pool_size`（= 最大并发连接数）、`map/key`、`dataviz/*`。
 
 ### 腾讯地图 Key
 
