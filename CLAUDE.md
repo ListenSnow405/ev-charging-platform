@@ -43,7 +43,11 @@ Linux + Qt 的电动汽车充电桩管理平台：充电用户端、PC 管理端
 **agent 只能修改自己所属目录下的文件。**
 
 ```
-docs/ common/          冻结契约，属主见上　　　scripts/    SCML
+docs/ common/          冻结契约，属主见上
+
+scripts/build-all.sh   L3
+scripts/check-env.sh   L5
+
 server/net/  tools/    L1                      server/biz/ server/dao/  L2
 admin-client/          L3                      user-client/             L4
 dataviz/  ml/          L5
