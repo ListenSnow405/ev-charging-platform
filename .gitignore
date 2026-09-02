@@ -25,6 +25,8 @@ Makefile.*
 # ---- 运行期数据（数据库由 db-schema.sql 生成，不入库）--------------------------
 *.db
 *.db-journal
+*.db-shm
+*.db-wal
 *.sqlite
 *.sqlite3
 logs/

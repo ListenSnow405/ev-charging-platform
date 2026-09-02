@@ -24,7 +24,7 @@ python3 -m http.server 8080 -d dataviz # 浏览器打开 http://127.0.0.1:8080
 
 - [ ] 把 `index.html` 里的 `demo` 常量换成 `fetch("data/snapshot.json")` 并按 `snapshot_interval` 轮询
 - [ ] 补充充电负荷、用户行为两块图表（[说明书] 1.4 大屏功能）
-- [ ] 接入 `t_load_forecast` 预测结果，形成「实时 + 预测」双层看板
+- [ ] 接入 `t_load_forecast` 预测结果，形成「实时 + 预测」双层看板（大屏直读 SQLite，**不受 CR-001 阻塞**；受阻的是用户端推荐与管理端预警）
 - [ ] 大屏分辨率适配与答辩演示脚本
 
 ⚠ 金额字段单位是**分**，前端显示需除以 100。
