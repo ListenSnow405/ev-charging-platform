@@ -42,3 +42,6 @@ venv/
 .idea/
 *.swp
 .DS_Store
+
+# ---- 大屏运行期快照（由 ml/export_snapshot.py 生成）----
+dataviz/data/*.json

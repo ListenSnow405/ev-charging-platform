@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>充电桩运营数据大屏</title>
+<!-- [说明书] 1.4 大数据可视化大屏：Web 页面形式，采用 ECharts 图表库构建 -->
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+<style>
+  body{margin:0;background:#0b1a2b;color:#cfe6ff;font-family:sans-serif}
+  h1{font-size:20px;padding:14px 20px;margin:0;border-bottom:1px solid #1d3busa}
+  h1{border-bottom:1px solid #1d3b5c}
+  .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;padding:14px}
+  .card{background:#11253c;border:1px solid #1d3b5c;border-radius:6px;padding:12px}
+  .card h2{font-size:13px;margin:0 0 8px;color:#7fb4e8;font-weight:normal}
+  .chart{height:240px}
+  .tip{padding:10px 20px;color:#6f90b0;font-size:12px}
+</style>
+</head>
+<body>
+<h1>充电桩运营数据大屏 <span style="font-size:12px;color:#6f90b0">（骨架 · 占位数据）</span></h1>
+<div class="grid">
+  <div class="card"><h2>营收趋势</h2><div id="c1" class="chart"></div></div>
+  <div class="card"><h2>电桩状态分布</h2><div id="c2" class="chart"></div></div>
+  <div class="card"><h2>各站点营收排行</h2><div id="c3" class="chart"></div></div>
+</div>
+<p class="tip">
+  TODO(L5)：数据源为 <code>dataviz/data/snapshot.json</code>，由 <code>ml/export_snapshot.py</code>
+  只读 SQLite 定时导出，本页轮询刷新（技术基线见 CLAUDE.md 第 2 节「大屏取数」）。
+</p>
+<script>
+// TODO(L5)：改为 fetch('data/snapshot.json') 并按 snapshot_interval 轮询
+const demo = {
+  trend:  { dates:['08-27','08-28','08-29','08-30','08-31','09-01','09-02'], amount:[138,126,131,155,182,96,0] },
+  status: [ {name:'闲置',value:12}, {name:'在用',value:8}, {name:'故障',value:4} ],
+  rank:   { names:['福田CBD','南山科技园','市民中心','深圳湾','宝安中心','龙岗大运'], amount:[777,720,350,205,110,60] }
+};
+const dark = {textStyle:{color:'#cfe6ff'}};
+echarts.init(document.getElementById('c1')).setOption({...dark,
+  tooltip:{trigger:'axis'},
+  xAxis:{type:'category',data:demo.trend.dates,axisLine:{lineStyle:{color:'#2b5077'}}},
+  yAxis:{type:'value',splitLine:{lineStyle:{color:'#1d3b5c'}}},
+  series:[{type:'line',smooth:true,data:demo.trend.amount,areaStyle:{opacity:.15}}]});
+echarts.init(document.getElementById('c2')).setOption({...dark,
+  tooltip:{trigger:'item'},
+  series:[{type:'pie',radius:['45%','70%'],data:demo.status,label:{color:'#cfe6ff'}}]});
+echarts.init(document.getElementById('c3')).setOption({...dark,
+  tooltip:{trigger:'axis'},
+  xAxis:{type:'category',data:demo.rank.names,axisLabel:{interval:0,rotate:30},axisLine:{lineStyle:{color:'#2b5077'}}},
+  yAxis:{type:'value',splitLine:{lineStyle:{color:'#1d3b5c'}}},
+  series:[{type:'bar',data:demo.rank.amount}]});
+</script>
+</body>
+</html>

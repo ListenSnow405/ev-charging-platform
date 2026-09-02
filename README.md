@@ -83,11 +83,19 @@
 │   ├── conventions.md        # 规范与变更记录（SCML 维护）
 │   └── assets/project-spec/  # 界面参考图、系统结构图
 ├── common/                   # 全项目共享基座（冻结契约，属主 L1）
+├── server/                   # 业务服务端  net/=L1  biz/ dao/=L2
+├── admin-client/             # PC 管理端           L3
+├── user-client/              # 充电用户端         L4
+├── dataviz/                  # ECharts 大屏       L5
+├── ml/                       # 机器学习与数据生成  L5
+├── tools/pile-simulator/     # 电桩模拟器         L1
 ├── config/                   # 本地配置模板（app.ini 不入库）
-├── scripts/                  # check-env.sh 环境自检
+├── scripts/                  # check-env.sh 环境自检 / build-all.sh 一键构建
+├── ev-charging-platform.pro  # 顶层 qmake 工程
 ├── CLAUDE.md                 # 全组 agent 共享上下文
 ├── AGENTS.md                 # Codex 等工具入口，内容以 CLAUDE.md 为准
 ├── DIVISION-OF-LABOR.md      # 团队分工方案
+├── WORKFLOW.md               # 日常开发流程（agent 使用步骤）
 └── README.md
 ```
 
@@ -99,6 +107,20 @@
 
 五人编制的具体任务划分、技术基线、以及全员 agent 辅助开发下的协作约束，见 [分工方案](DIVISION-OF-LABOR.md)。
 
-开发前请先阅读 [CLAUDE.md](CLAUDE.md)（使用 Codex 的成员从 [AGENTS.md](AGENTS.md) 进入），其中的技术基线、目录归属与硬性规则适用于全组。
+开发前请先阅读 [CLAUDE.md](CLAUDE.md)（使用 Codex 的成员从 [AGENTS.md](AGENTS.md) 进入），其中的技术基线、目录归属与硬性规则适用于全组；日常怎么配合 agent 干活见 [开发流程](WORKFLOW.md)。
+
+## 快速开始
+
+```bash
+bash scripts/check-env.sh        # 环境自检（先跑这个）
+bash scripts/build-all.sh        # 一键构建 + 建库 + 生成 config/app.ini
+
+./build/bin/ecp-server           # 服务端（先启动）
+./build/bin/ecp-admin            # PC 管理端
+./build/bin/ecp-user             # 充电用户端
+./build/bin/ecp-pile-sim SZ001-01   # 电桩模拟器
+```
+
+大屏：`python3 ml/export_snapshot.py && python3 -m http.server 8080 -d dataviz`
 
 > **技术选型约定**：一律以说明书**正文文字说明**为准，系统结构图仅作模块与界面参考，不作为选型依据。全部文档与代码注释用 `[说明书]` / `[本组自定]` 两个标记区分「说明书明文要求」与「本组自行决定」。

@@ -17,7 +17,8 @@ HEADERS += \
     $$PWD/error_code.h \
     $$PWD/frame.h \
     $$PWD/logger.h \
-    $$PWD/time_util.h
+    $$PWD/time_util.h \
+    $$PWD/app_path.h
 
 # [说明书] 1.6 多线程 pthread —— 服务端与电桩模拟器需显式链接 pthread
 unix: LIBS += -lpthread
