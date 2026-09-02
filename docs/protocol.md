@@ -1,0 +1,193 @@
+# 通信协议 `docs/protocol.md`
+
+> **冻结契约** · 属主 **L1**，其他人只读。变更走 [CLAUDE.md](../CLAUDE.md) 第 3 节流程。
+> 标记约定见 CLAUDE.md 第 0 节：`[说明书]` 不得擅自更改，`[本组自定]` 可评审后调整。
+
+## 1. 依据与自定范围
+
+- `[说明书]` 1.6：**网络通信由 Socket 编程实现其功能**
+- `[说明书]` 1.6：程序的主框架应该是一个**多线程**结构（本项目为 pthread 线程池）
+- `[说明书]` 2.2：通信数据结构设计，能够**安全稳定**地实现数据传输；合理考虑数据安全问题
+- `[说明书]` 2.3：需设计完整的**错误处理**机制
+
+说明书**只规定了「用 Socket」和「要设计数据结构」，没有规定具体报文格式**。以下第 2 节起的帧格式、命令字编号、错误码编号、会话机制全部为 `[本组自定]`。
+
+## 2. 帧格式 `[本组自定]`
+
+```
+ 0        4                          4+N
+ +--------+---------------------------+
+ | length |   payload (UTF-8 JSON)    |
+ | uint32 |         N bytes           |
+ +--------+---------------------------+
+```
+
+- `length`：**网络字节序（大端）uint32**，值为 payload 字节数，**不含自身 4 字节**
+- `payload`：UTF-8 编码的 JSON 文本，不以 `\0` 结尾
+- 单帧 payload 上限 **1 MB**，超出直接断开连接并记日志（防御性上限，头像等大数据不走此通道）
+
+> **⚠ TCP 是字节流，没有消息边界。** 必须循环读满 4 字节长度头、再循环读满 N 字节体，才算收到一帧。禁止假设一次 `read()` / `readyRead()` 就对应一个完整包——这是本项目 [五条硬性规则](../CLAUDE.md#5-五条硬性规则agent-最常踩的坑) 第 1 条。统一使用 `common/frame.h` 的 `FrameCodec`，不要自己写解析。
+
+## 3. 报文信封 `[本组自定]`
+
+### 请求
+
+```json
+{
+  "cmd":   1001,
+  "seq":   12,
+  "token": "登录后下发，未登录接口填空串",
+  "data":  { }
+}
+```
+
+### 响应
+
+```json
+{
+  "cmd":  1001,
+  "seq":  12,
+  "code": 0,
+  "msg":  "ok",
+  "data": { }
+}
+```
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `cmd` | int | 命令字，见第 4 节。响应原样回填请求的 `cmd` |
+| `seq` | int | 客户端自增序号，服务端原样回填，用于匹配请求与响应 |
+| `token` | string | 登录后由服务端下发；除登录/注册类接口外均需携带 |
+| `code` | int | 错误码，`0` 表示成功，见第 5 节 |
+| `msg` | string | 错误描述，成功时为 `"ok"` |
+| `data` | object | 业务数据；无数据时为 `{}`，不要用 `null` |
+
+**服务端推送**（无对应请求，如电桩状态变化）：`seq` 固定为 `0`，`code` 固定为 `0`。
+
+## 4. 命令字 `[本组自定]`
+
+编号分段便于扩展：新增功能先在本表占号，再写代码。
+
+### 4.1 用户端 · 用户与鉴权（1000–1099）
+
+| 命令字 | 名称 | 请求 `data` | 响应 `data` |
+| --- | --- | --- | --- |
+| 1001 | 手机号免密登录 / 首次自动注册 `[说明书]` 1.4 | `{phone}` | `{token, userId, phone, nickname, avatar, balance, status}` |
+| 1002 | 获取用户信息 | `{}` | 同上（不含 token） |
+| 1003 | 修改昵称 | `{nickname}` | `{}` |
+| 1004 | 修改头像 | `{avatarPath}` | `{}` |
+| 1005 | 钱包充值（模拟支付）`[说明书]` 1.4 | `{amount}` 单位**分** | `{balance}` |
+| 1006 | 查询钱包流水 | `{page, size}` | `{total, list[]}` |
+
+### 4.2 用户端 · 充电站与电桩（1100–1199）
+
+| 命令字 | 名称 | 请求 `data` | 响应 `data` |
+| --- | --- | --- | --- |
+| 1101 | 附近充电站列表（按距离升序）`[说明书]` 1.4 | `{lng, lat, keyword}` | `{list:[{stationId, name, address, price, pileTotal, pileIdle, distance}]}` |
+| 1102 | 充电站内电桩详情 `[说明书]` 1.4 | `{stationId}` | `{list:[{pileId, code, type, status, power}]}` |
+
+`price` 单位为**分/度**；`distance` 单位为**米**（显示层换算为公里）。
+
+### 4.3 用户端 · 充电与订单（1200–1299）
+
+| 命令字 | 名称 | 请求 `data` | 响应 `data` |
+| --- | --- | --- | --- |
+| 1201 | **查询未完成订单** `[说明书]` 1.4 进入充电页必调 | `{}` | `{hasUnfinished, order}` |
+| 1202 | 预约电桩 | `{pileId}` | `{orderId}` |
+| 1203 | 开始充电 | `{orderId}` | `{startTime}` |
+| 1204 | 结束充电（计费） | `{orderId}` | `{endTime, kwh, amount}` |
+| 1205 | 订单结算（扣钱包余额） | `{orderId}` | `{amount, balance}` |
+| 1206 | 取消预约 | `{orderId}` | `{}` |
+| 1207 | 我的订单列表 | `{page, size, status}` | `{total, list[]}` |
+| 1208 | 充电中实时数据推送 → | 服务端推送 | `{orderId, kwh, amount, duration}` |
+
+### 4.4 管理端（2000–2399）
+
+| 命令字 | 名称 | 请求 `data` | 响应 `data` |
+| --- | --- | --- | --- |
+| 2001 | 管理员登录 `[说明书]` 1.4 默认 admin/123456 | `{account, password}` | `{token, adminId, account}` |
+| 2101 | 充电站列表 `[说明书]` 1.4 | `{page, size}` | `{total, list:[{stationId, name, address, lng, lat, pileTotal, onlineRate}]}` |
+| 2102 | 新增充电站 `[说明书]` 1.4 | `{name, address, lng, lat, price, pileCount}` | `{stationId}` |
+| 2103 | 站内电桩明细 `[说明书]` 1.4 | `{stationId}` | `{list[]}` |
+| 2111 | 电桩列表 `[说明书]` 1.4 | `{page, size, stationId, status}` | `{total, list:[{pileId, code, stationName, type, power, status, chargeCount, chargeDuration}]}` |
+| 2112 | **远程重启电桩** `[说明书]` 1.4 | `{pileId}` | `{}` |
+| 2201 | 用户列表 + 手机号模糊搜索 `[说明书]` 1.4 | `{page, size, phoneLike}` | `{total, list:[{userId, phone, nickname, balance, createTime, status}]}` |
+| 2202 | **冻结 / 解冻用户** `[说明书]` 1.4 | `{userId, status}` | `{}` |
+| 2301 | 营收概览 `[说明书]` 1.4 今日/本月/总营收 | `{}` | `{today, month, total}` 单位**分** |
+| 2302 | 营收趋势 `[说明书]` 1.4 近 7 / 30 日 | `{days}` 取 7 或 30 | `{list:[{date, amount}]}` |
+| 2303 | 电桩状态分布 `[说明书]` 1.4 在用/闲置/故障 | `{}` | `{inUse, idle, fault, total}` |
+| 2304 | 订单列表 | `{page, size, status, dateFrom, dateTo}` | `{total, list[]}` |
+
+### 4.5 设备侧 · 电桩模拟器（9000–9099）
+
+| 命令字 | 名称 | 方向 | `data` |
+| --- | --- | --- | --- |
+| 9001 | 电桩注册上线 | 设备 → 服务端 | `{pileCode}` |
+| 9002 | 状态与电量上报 | 设备 → 服务端 | `{pileCode, status, kwh, power}` |
+| 9003 | 重启指令下发 `[说明书]` 1.4 | 服务端 → 设备 | `{pileCode}` |
+| 9004 | 心跳 | 设备 → 服务端 | `{pileCode}` |
+
+## 5. 错误码 `[本组自定]`
+
+对应 `[说明书]` 2.3「需设计完整的错误处理机制」。所有对外接口必须返回本表中的码，**不得返回未定义的错误码**。
+
+| 码 | 常量 | 含义 |
+| --- | --- | --- |
+| 0 | `ERR_OK` | 成功 |
+| **1000 段 · 通用** | | |
+| 1001 | `ERR_PARAM` | 参数缺失或格式错误 |
+| 1002 | `ERR_NOT_LOGIN` | 未登录 / token 为空 |
+| 1003 | `ERR_TOKEN_INVALID` | token 无效或已过期 |
+| 1004 | `ERR_NO_PERMISSION` | 无权限（用户 token 调管理端接口等） |
+| 1005 | `ERR_CMD_UNKNOWN` | 未知命令字 |
+| 1006 | `ERR_FRAME` | 报文格式错误（JSON 解析失败、长度越界） |
+| 1099 | `ERR_INTERNAL` | 服务端内部错误（DB 异常等） |
+| **2000 段 · 用户** | | |
+| 2001 | `ERR_PHONE_FORMAT` | 手机号格式错误（需 11 位）`[说明书]` 1.4 |
+| 2002 | `ERR_USER_NOT_FOUND` | 用户不存在 |
+| 2003 | `ERR_USER_FROZEN` | 账号已冻结 `[说明书]` 1.4 |
+| 2004 | `ERR_BALANCE_NOT_ENOUGH` | 钱包余额不足 |
+| 2005 | `ERR_AMOUNT_INVALID` | 金额非法（≤0 或超上限） |
+| **3000 段 · 电站与电桩** | | |
+| 3001 | `ERR_STATION_NOT_FOUND` | 充电站不存在 |
+| 3002 | `ERR_PILE_NOT_FOUND` | 电桩不存在 |
+| 3003 | `ERR_PILE_BUSY` | 电桩已被占用（非闲置） |
+| 3004 | `ERR_PILE_FAULT` | 电桩故障 `[说明书]` 1.4 |
+| 3005 | `ERR_PILE_OFFLINE` | 电桩未上线，指令无法下发 |
+| **4000 段 · 订单** | | |
+| 4001 | `ERR_ORDER_NOT_FOUND` | 订单不存在 |
+| 4002 | `ERR_ORDER_UNFINISHED` | **存在未结算订单，请先结算** `[说明书]` 1.4 |
+| 4003 | `ERR_ORDER_STATUS` | 订单状态不允许此操作 |
+| 4004 | `ERR_ORDER_SETTLED` | 订单已结算，不可重复结算 |
+| **5000 段 · 管理员** | | |
+| 5001 | `ERR_ADMIN_AUTH` | 账号或密码错误 `[说明书]` 1.4 |
+
+错误码常量定义见 `common/error_code.h`，**协议表与头文件必须一致**，改一处必须同步另一处。
+
+## 6. 会话与安全 `[本组自定]`
+
+对应 `[说明书]` 2.2「合理考虑数据安全问题」：
+
+- 登录成功后服务端生成 **32 位十六进制 token**，存于内存会话表（`token → {userId | adminId, role, 最后活跃时间}`）
+- token **有效期 2 小时**，每次成功请求刷新最后活跃时间；过期返回 `ERR_TOKEN_INVALID`，客户端需重新登录
+- 用户 token 与管理员 token **分属不同角色**，用户 token 调用 2000 段命令返回 `ERR_NO_PERMISSION`
+- 管理员密码在库中存 **SHA-256 摘要**，不存明文（初始 `admin/123456` 的摘要见 `docs/db-schema.sql`）
+- 服务端对所有入参做长度与类型校验；SQL 一律使用 `QSqlQuery::prepare` + `bindValue` **参数绑定**，禁止字符串拼接 SQL
+
+> 本项目为实训环境，**不做 TLS 加密**，属于已知取舍，需在设计文档中写明。
+
+## 7. 线程模型 `[本组自定]`
+
+对应 `[说明书]` 1.6「程序的主框架应该是一个多线程结构」「多线程 pthread 编程」：
+
+- 主线程：`accept` 循环，接受连接后把 fd 投入任务队列
+- **pthread 线程池**：固定 `N = 8` 个工作线程，从任务队列取连接处理读写与业务分发
+- 任务队列：`pthread_mutex_t` + `pthread_cond_t` 保护，**不使用 QThread 替代**（说明书点名 pthread，是考核点）
+- 会话表跨线程共享，读写均加 `pthread_rwlock_t`
+- **每个工作线程持有自己的 QSqlDatabase 连接**，连接名由线程 id 生成；禁止跨线程共享连接（硬性规则第 2 条）
+
+## 8. 变更记录
+
+| 日期 | 版本 | 变更 | 提出人 | 评审 |
+| --- | --- | --- | --- | --- |
+| — | v1.0 | 初版冻结 | L1 | 待全组评审 |
