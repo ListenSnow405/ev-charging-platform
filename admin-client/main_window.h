@@ -17,7 +17,6 @@ public:
 
 private:
     QWidget *makePlaceholder(const QString &title, const QString &todo);
-    QWidget *makeOverviewPage();          // [说明书] 1.4 销售业绩 + 电桩状态
 
     NetClient      *m_net = nullptr;
     QListWidget    *m_nav = nullptr;
