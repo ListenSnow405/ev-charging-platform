@@ -9,6 +9,8 @@
 
 class NetClient;
 class QComboBox;
+class QJsonObject;
+class QLabel;
 class QPushButton;
 class QTableWidget;
 
@@ -18,24 +20,29 @@ public:
     explicit PilePage(NetClient *net, QWidget *parent = nullptr);
 
 private:
-    struct PileMock
+    struct PileData
     {
-        int pileId = 0;
+        qint64 pileId = 0;
         QString code;
-        int stationId = 0;
         QString stationName;
         int type = 0;
         qreal powerKw = 0;
         int status = 0;
-        int chargeCount = 0;
+        qint64 chargeCount = 0;
         qint64 chargeDurationSeconds = 0;
     };
 
     void setupUi();
-    void loadMockData();
+    void requestStationOptions();
+    void requestPileList();
+    void handleResponse(int cmd, int seq, int code, const QString &msg,
+                        const QJsonObject &data);
+    void handleStationOptionsResponse(int code, const QString &msg,
+                                      const QJsonObject &data);
+    void handlePileListResponse(int code, const QString &msg,
+                                const QJsonObject &data);
     void refreshTable();
-    void handleRemoteReboot();
-    const PileMock *selectedPile() const;
+    void resetFilters();
 
     static QString typeText(int type);
     static QString statusText(int status);
@@ -46,5 +53,9 @@ private:
     QComboBox    *m_statusFilter = nullptr;
     QTableWidget *m_table = nullptr;
     QPushButton  *m_rebootButton = nullptr;
-    QVector<PileMock> m_piles;
+    QLabel       *m_statusLabel = nullptr;
+    QVector<PileData> m_piles;
+
+    int m_stationOptionsSeq = -1;
+    int m_pileListSeq = -1;
 };

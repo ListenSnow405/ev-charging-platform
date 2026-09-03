@@ -1,13 +1,16 @@
 #include "pile_page.h"
+#include "net_client.h"
 #include "protocol.h"
 #include <QAbstractItemView>
 #include <QComboBox>
 #include <QFont>
 #include <QHeaderView>
 #include <QHBoxLayout>
+#include <QJsonArray>
+#include <QJsonObject>
 #include <QLabel>
-#include <QMessageBox>
 #include <QPushButton>
+#include <QSignalBlocker>
 #include <QTableWidget>
 #include <QTableWidgetItem>
 #include <QVBoxLayout>
@@ -27,14 +30,16 @@ PilePage::PilePage(NetClient *net, QWidget *parent)
     : QWidget(parent), m_net(net)
 {
     setupUi();
-    loadMockData();
+    connect(m_net, &NetClient::response, this, &PilePage::handleResponse);
+    requestStationOptions();
+    requestPileList();
 }
 
 void PilePage::setupUi()
 {
     auto *pageLayout = new QVBoxLayout(this);
     pageLayout->setContentsMargins(24, 20, 24, 20);
-    pageLayout->setSpacing(16);
+    pageLayout->setSpacing(12);
 
     auto *title = new QLabel(QStringLiteral("充电桩管理"), this);
     QFont titleFont = title->font();
@@ -47,7 +52,7 @@ void PilePage::setupUi()
     filterLayout->addWidget(new QLabel(QStringLiteral("所属电站"), this));
     m_stationFilter = new QComboBox(this);
     m_stationFilter->setMinimumWidth(190);
-    m_stationFilter->addItem(QStringLiteral("全部"), -1);
+    m_stationFilter->addItem(QStringLiteral("全部"), qint64(0));
     filterLayout->addWidget(m_stationFilter);
 
     filterLayout->addSpacing(16);
@@ -58,12 +63,22 @@ void PilePage::setupUi()
     m_statusFilter->addItem(QStringLiteral("闲置"), ecp::PILE_IDLE);
     m_statusFilter->addItem(QStringLiteral("故障"), ecp::PILE_FAULT);
     filterLayout->addWidget(m_statusFilter);
+
+    auto *searchButton = new QPushButton(QStringLiteral("查询"), this);
+    auto *resetButton = new QPushButton(QStringLiteral("重置"), this);
+    filterLayout->addWidget(searchButton);
+    filterLayout->addWidget(resetButton);
     filterLayout->addStretch();
 
     m_rebootButton = new QPushButton(QStringLiteral("远程重启"), this);
     m_rebootButton->setEnabled(false);
+    m_rebootButton->setToolTip(QStringLiteral("服务端 2112 尚未接入"));
     filterLayout->addWidget(m_rebootButton);
     pageLayout->addLayout(filterLayout);
+
+    m_statusLabel = new QLabel(QStringLiteral("准备加载电桩列表"), this);
+    m_statusLabel->setStyleSheet(QStringLiteral("color:#667085"));
+    pageLayout->addWidget(m_statusLabel);
 
     m_table = new QTableWidget(0, 7, this);
     m_table->setHorizontalHeaderLabels({
@@ -80,67 +95,128 @@ void PilePage::setupUi()
     m_table->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch);
     pageLayout->addWidget(m_table, 1);
 
-    connect(m_stationFilter, &QComboBox::currentIndexChanged,
-            this, [this](int) { refreshTable(); });
-    connect(m_statusFilter, &QComboBox::currentIndexChanged,
-            this, [this](int) { refreshTable(); });
-    connect(m_table, &QTableWidget::itemSelectionChanged, this, [this] {
-        m_rebootButton->setEnabled(selectedPile() != nullptr);
-    });
-    connect(m_rebootButton, &QPushButton::clicked,
-            this, &PilePage::handleRemoteReboot);
+    connect(searchButton, &QPushButton::clicked, this, &PilePage::requestPileList);
+    connect(resetButton, &QPushButton::clicked, this, &PilePage::resetFilters);
 }
 
-void PilePage::loadMockData()
+void PilePage::requestStationOptions()
 {
-    // Mock 数据集中于此，待 2111 接入后替换为服务端响应。
-    struct StationSeed { int id; QString name; };
-    const QVector<StationSeed> stations = {
-        { 1, QStringLiteral("福田CBD充电站") },
-        { 2, QStringLiteral("南山科技园充电站") },
-        { 3, QStringLiteral("深圳市民中心充电站") },
-        { 4, QStringLiteral("深圳湾公园充电站") },
-        { 5, QStringLiteral("宝安中心充电站") },
-        { 6, QStringLiteral("龙岗大运充电站") }
-    };
+    const int seq = m_net->send(ecp::CMD_STATION_LIST, QJsonObject{
+        { QStringLiteral("page"), 1 },
+        { QStringLiteral("size"), 100 }
+    });
+    if (seq < 0) {
+        m_stationOptionsSeq = -1;
+        m_stationFilter->setItemText(0, QStringLiteral("全部（电站选项加载失败）"));
+        m_stationFilter->setToolTip(
+            QStringLiteral("电站筛选项请求发送失败，请检查网络连接"));
+        return;
+    }
+    m_stationOptionsSeq = seq;
+    m_stationFilter->setToolTip(QStringLiteral("正在加载电站筛选项…"));
+}
 
-    m_piles.clear();
-    int pileId = 1;
-    for (const StationSeed &station : stations) {
-        m_stationFilter->addItem(station.name, station.id);
-        for (int number = 1; number <= 4; ++number) {
-            const int type = number <= 2 ? ecp::PILE_FAST : ecp::PILE_SLOW;
-            int status = ecp::PILE_IDLE;
-            if ((station.id + number) % 7 == 0) status = ecp::PILE_FAULT;
-            else if ((station.id + number) % 3 == 0) status = ecp::PILE_IN_USE;
+void PilePage::requestPileList()
+{
+    m_statusLabel->setText(QStringLiteral("正在加载电桩列表…"));
+    const int seq = m_net->send(ecp::CMD_PILE_LIST, QJsonObject{
+        { QStringLiteral("page"), 1 },
+        { QStringLiteral("size"), 100 },
+        { QStringLiteral("stationId"), m_stationFilter->currentData().toLongLong() },
+        { QStringLiteral("status"), m_statusFilter->currentData().toInt() }
+    });
+    if (seq < 0) {
+        m_pileListSeq = -1;
+        m_statusLabel->setText(QStringLiteral("电桩列表请求发送失败，请检查网络连接"));
+        return;
+    }
+    m_pileListSeq = seq;
+}
 
-            const QString code = QStringLiteral("SZ%1-%2")
-                .arg(station.id, 3, 10, QLatin1Char('0'))
-                .arg(number, 2, 10, QLatin1Char('0'));
-            const qreal powerKw = type == ecp::PILE_FAST ? qreal(120) : qreal(7);
-            const int chargeCount = station.id * 37 + number * 11;
-            const qint64 durationSeconds =
-                qint64(station.id * 10 + number * 3) * 3600 + qint64(number * 17) * 60;
-            m_piles.append({ pileId++, code, station.id, station.name, type, powerKw,
-                             status, chargeCount, durationSeconds });
-        }
+void PilePage::handleResponse(int cmd, int seq, int code, const QString &msg,
+                              const QJsonObject &data)
+{
+    if (cmd == ecp::CMD_STATION_LIST) {
+        if (seq != m_stationOptionsSeq) return;
+        m_stationOptionsSeq = -1;
+        handleStationOptionsResponse(code, msg, data);
+        return;
+    }
+    if (cmd == ecp::CMD_PILE_LIST) {
+        if (seq != m_pileListSeq) return;
+        m_pileListSeq = -1;
+        handlePileListResponse(code, msg, data);
+    }
+}
+
+void PilePage::handleStationOptionsResponse(int code, const QString &msg,
+                                            const QJsonObject &data)
+{
+    if (code != ecp::ERR_OK) {
+        m_stationFilter->setItemText(0, QStringLiteral("全部（电站选项加载失败）"));
+        m_stationFilter->setToolTip(
+            QStringLiteral("电站筛选项加载失败：%1").arg(msg));
+        return;
     }
 
+    const qint64 selectedStationId = m_stationFilter->currentData().toLongLong();
+    const QSignalBlocker blocker(m_stationFilter);
+    m_stationFilter->clear();
+    m_stationFilter->addItem(QStringLiteral("全部"), qint64(0));
+
+    const QJsonArray list = data.value(QStringLiteral("list")).toArray();
+    for (const QJsonValue &value : list) {
+        if (!value.isObject()) continue;
+        const QJsonObject item = value.toObject();
+        const qint64 stationId = item.value(QStringLiteral("stationId")).toInteger();
+        const QString name = item.value(QStringLiteral("name")).toString();
+        if (stationId <= 0 || name.isEmpty()) continue;
+        m_stationFilter->addItem(name, stationId);
+    }
+
+    const int selectedIndex = m_stationFilter->findData(selectedStationId);
+    m_stationFilter->setCurrentIndex(selectedIndex >= 0 ? selectedIndex : 0);
+    m_stationFilter->setToolTip(
+        QStringLiteral("已加载 %1 个电站筛选项").arg(m_stationFilter->count() - 1));
+}
+
+void PilePage::handlePileListResponse(int code, const QString &msg,
+                                      const QJsonObject &data)
+{
+    if (code != ecp::ERR_OK) {
+        m_statusLabel->setText(QStringLiteral("电桩列表加载失败：%1").arg(msg));
+        return;
+    }
+
+    QVector<PileData> piles;
+    const QJsonArray list = data.value(QStringLiteral("list")).toArray();
+    piles.reserve(list.size());
+    for (const QJsonValue &value : list) {
+        if (!value.isObject()) continue;
+        const QJsonObject item = value.toObject();
+        piles.append({
+            item.value(QStringLiteral("pileId")).toInteger(),
+            item.value(QStringLiteral("code")).toString(),
+            item.value(QStringLiteral("stationName")).toString(),
+            item.value(QStringLiteral("type")).toInt(),
+            item.value(QStringLiteral("power")).toDouble(),
+            item.value(QStringLiteral("status")).toInt(),
+            item.value(QStringLiteral("chargeCount")).toInteger(),
+            item.value(QStringLiteral("chargeDuration")).toInteger()
+        });
+    }
+
+    m_piles = piles;
     refreshTable();
+    const qint64 total = data.value(QStringLiteral("total")).toInteger(m_piles.size());
+    m_statusLabel->setText(QStringLiteral("已加载 %1 个电桩，共 %2 个")
+                               .arg(m_piles.size()).arg(total));
 }
 
 void PilePage::refreshTable()
 {
-    const int stationId = m_stationFilter->currentData().toInt();
-    const int status = m_statusFilter->currentData().toInt();
-
-    // TODO(L3)：服务端实现后，将本地过滤替换为 2111 请求：
-    // {page, size, stationId, status}。当前不得发送真实网络请求。
     m_table->setRowCount(0);
-    for (const PileMock &pile : m_piles) {
-        if (stationId >= 0 && pile.stationId != stationId) continue;
-        if (status >= 0 && pile.status != status) continue;
-
+    for (const PileData &pile : m_piles) {
         const int row = m_table->rowCount();
         m_table->insertRow(row);
         auto *codeItem = centeredItem(pile.code);
@@ -155,41 +231,13 @@ void PilePage::refreshTable()
     }
 
     m_table->clearSelection();
-    m_rebootButton->setEnabled(false);
 }
 
-void PilePage::handleRemoteReboot()
+void PilePage::resetFilters()
 {
-    const PileMock *pile = selectedPile();
-    if (!pile) {
-        QMessageBox::information(this, QStringLiteral("远程重启"),
-                                 QStringLiteral("请先选择一个电桩"));
-        return;
-    }
-
-    const auto answer = QMessageBox::question(
-        this, QStringLiteral("确认远程重启"),
-        QStringLiteral("确定要远程重启电桩 %1 吗？").arg(pile->code),
-        QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
-    if (answer != QMessageBox::Yes) return;
-
-    // TODO(L3)：服务端实现后替换为 2112 请求：{pileId}。
-    // 当前仅模拟操作，不发送真实网络请求。
-    QMessageBox::information(this, QStringLiteral("操作成功"),
-                             QStringLiteral("重启指令已模拟发送"));
-}
-
-const PilePage::PileMock *PilePage::selectedPile() const
-{
-    const int row = m_table->currentRow();
-    const QTableWidgetItem *codeItem = row >= 0 ? m_table->item(row, 0) : nullptr;
-    if (!codeItem) return nullptr;
-
-    const int pileId = codeItem->data(Qt::UserRole).toInt();
-    for (const PileMock &pile : m_piles) {
-        if (pile.pileId == pileId) return &pile;
-    }
-    return nullptr;
+    m_stationFilter->setCurrentIndex(0);
+    m_statusFilter->setCurrentIndex(0);
+    requestPileList();
 }
 
 QString PilePage::typeText(int type)
