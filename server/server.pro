@@ -23,7 +23,13 @@ SOURCES += \
     net/dispatcher.cpp \
     dao/db.cpp \
     biz/user_service.cpp \
-    biz/admin_service.cpp
+    biz/admin_service.cpp \
+    biz/wallet_service.cpp \
+    biz/user_management_service.cpp \
+    biz/station_service.cpp \
+    biz/pile_service.cpp \
+    biz/reservation_service.cpp \
+    biz/order_service.cpp
 
 HEADERS += \
     net/thread_pool.h \
