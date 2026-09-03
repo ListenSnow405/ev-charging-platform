@@ -8,6 +8,8 @@
 #include <QWidget>
 
 class NetClient;
+class QJsonObject;
+class QLabel;
 class QLineEdit;
 class QPushButton;
 class QTableWidget;
@@ -18,9 +20,9 @@ public:
     explicit UserPage(NetClient *net, QWidget *parent = nullptr);
 
 private:
-    struct UserMock
+    struct UserData
     {
-        int userId = 0;
+        qint64 userId = 0;
         QString phone;
         QString nickname;
         qint64 balanceFen = 0;
@@ -29,12 +31,17 @@ private:
     };
 
     void setupUi();
-    void loadMockData();
+    void requestUserList();
+    void handleResponse(int cmd, int seq, int code, const QString &msg,
+                        const QJsonObject &data);
+    void handleUserListResponse(int code, const QString &msg,
+                                const QJsonObject &data);
+    void handleUserStatusResponse(int code, const QString &msg);
     void refreshTable();
     void clearSearch();
     void updateStatusButton();
     void handleUserStatusChange();
-    UserMock *selectedUser();
+    const UserData *selectedUser() const;
 
     static QString statusText(int status);
 
@@ -42,5 +49,12 @@ private:
     QLineEdit    *m_phoneSearch = nullptr;
     QTableWidget *m_table = nullptr;
     QPushButton  *m_statusButton = nullptr;
-    QVector<UserMock> m_users;
+    QLabel       *m_statusLabel = nullptr;
+    QVector<UserData> m_users;
+
+    int m_userListSeq = -1;
+    int m_userStatusSeq = -1;
+    qint64 m_pendingStatusUserId = 0;
+    QString m_pendingStatusPhone;
+    int m_pendingNewStatus = 0;
 };

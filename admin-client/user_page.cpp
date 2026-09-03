@@ -1,10 +1,13 @@
 #include "user_page.h"
+#include "net_client.h"
 #include "protocol.h"
 #include "time_util.h"
 #include <QAbstractItemView>
 #include <QFont>
 #include <QHeaderView>
 #include <QHBoxLayout>
+#include <QJsonArray>
+#include <QJsonObject>
 #include <QLabel>
 #include <QLineEdit>
 #include <QMessageBox>
@@ -28,14 +31,15 @@ UserPage::UserPage(NetClient *net, QWidget *parent)
     : QWidget(parent), m_net(net)
 {
     setupUi();
-    loadMockData();
+    connect(m_net, &NetClient::response, this, &UserPage::handleResponse);
+    requestUserList();
 }
 
 void UserPage::setupUi()
 {
     auto *pageLayout = new QVBoxLayout(this);
     pageLayout->setContentsMargins(24, 20, 24, 20);
-    pageLayout->setSpacing(16);
+    pageLayout->setSpacing(12);
 
     auto *title = new QLabel(QStringLiteral("用户管理"), this);
     QFont titleFont = title->font();
@@ -64,6 +68,10 @@ void UserPage::setupUi()
     toolbar->addWidget(m_statusButton);
     pageLayout->addLayout(toolbar);
 
+    m_statusLabel = new QLabel(QStringLiteral("准备加载用户列表"), this);
+    m_statusLabel->setStyleSheet(QStringLiteral("color:#667085"));
+    pageLayout->addWidget(m_statusLabel);
+
     m_table = new QTableWidget(0, 6, this);
     m_table->setHorizontalHeaderLabels({
         QStringLiteral("用户ID"), QStringLiteral("手机号"), QStringLiteral("昵称"),
@@ -78,8 +86,8 @@ void UserPage::setupUi()
     m_table->horizontalHeader()->setSectionResizeMode(2, QHeaderView::Stretch);
     pageLayout->addWidget(m_table, 1);
 
-    connect(searchButton, &QPushButton::clicked, this, &UserPage::refreshTable);
-    connect(m_phoneSearch, &QLineEdit::returnPressed, this, &UserPage::refreshTable);
+    connect(searchButton, &QPushButton::clicked, this, &UserPage::requestUserList);
+    connect(m_phoneSearch, &QLineEdit::returnPressed, this, &UserPage::requestUserList);
     connect(clearButton, &QPushButton::clicked, this, &UserPage::clearSearch);
     connect(m_table, &QTableWidget::itemSelectionChanged,
             this, &UserPage::updateStatusButton);
@@ -87,53 +95,98 @@ void UserPage::setupUi()
             this, &UserPage::handleUserStatusChange);
 }
 
-void UserPage::loadMockData()
+void UserPage::requestUserList()
 {
-    // Mock 数据集中于此，待 2201 接入后替换为服务端响应。
-    m_users = {
-        { 1,  QStringLiteral("13800138001"), QStringLiteral("用户8001"), 20000,
-          QStringLiteral("2026-07-03 09:12:30"), ecp::USER_NORMAL },
-        { 2,  QStringLiteral("13800138002"), QStringLiteral("用户8002"), 5000,
-          QStringLiteral("2026-07-04 11:28:16"), ecp::USER_NORMAL },
-        { 3,  QStringLiteral("13900139003"), QStringLiteral("南山车主"), 12680,
-          QStringLiteral("2026-07-08 18:05:42"), ecp::USER_NORMAL },
-        { 4,  QStringLiteral("13800138004"), QStringLiteral("用户8004"), 150,
-          QStringLiteral("2026-07-12 08:44:09"), ecp::USER_NORMAL },
-        { 5,  QStringLiteral("13600136005"), QStringLiteral("鹏城小李"), 30800,
-          QStringLiteral("2026-07-18 14:21:55"), ecp::USER_NORMAL },
-        { 6,  QStringLiteral("13800138006"), QStringLiteral("用户8006"), 8000,
-          QStringLiteral("2026-07-23 20:16:38"), ecp::USER_FROZEN },
-        { 7,  QStringLiteral("13700137007"), QStringLiteral("福田通勤族"), 15640,
-          QStringLiteral("2026-08-01 07:35:24"), ecp::USER_NORMAL },
-        { 8,  QStringLiteral("13500135008"), QStringLiteral("新能源达人"), 42150,
-          QStringLiteral("2026-08-05 16:48:11"), ecp::USER_NORMAL },
-        { 9,  QStringLiteral("18800188009"), QStringLiteral("湾区出行"), 980,
-          QStringLiteral("2026-08-09 10:02:47"), ecp::USER_FROZEN },
-        { 10, QStringLiteral("13812345610"), QStringLiteral("用户5610"), 24300,
-          QStringLiteral("2026-08-13 13:19:05"), ecp::USER_NORMAL },
-        { 11, QStringLiteral("18600186011"), QStringLiteral("宝安车友"), 6750,
-          QStringLiteral("2026-08-18 19:27:33"), ecp::USER_NORMAL },
-        { 12, QStringLiteral("13876543212"), QStringLiteral("用户3212"), 11200,
-          QStringLiteral("2026-08-22 12:08:58"), ecp::USER_NORMAL },
-        { 13, QStringLiteral("15900159013"), QStringLiteral("龙岗小陈"), 35680,
-          QStringLiteral("2026-08-27 17:42:20"), ecp::USER_FROZEN },
-        { 14, QStringLiteral("13888888814"), QStringLiteral("用户8814"), 18600,
-          QStringLiteral("2026-09-01 09:56:14"), ecp::USER_NORMAL }
-    };
+    const QString phoneLike = m_phoneSearch->text().trimmed();
+    m_statusLabel->setText(QStringLiteral("正在加载用户列表…"));
+    const int seq = m_net->send(ecp::CMD_ADMIN_USER_LIST, QJsonObject{
+        { QStringLiteral("page"), 1 },
+        { QStringLiteral("size"), 100 },
+        { QStringLiteral("phoneLike"), phoneLike }
+    });
+    if (seq < 0) {
+        m_userListSeq = -1;
+        m_statusLabel->setText(QStringLiteral("用户列表请求发送失败，请检查网络连接"));
+        return;
+    }
+    m_userListSeq = seq;
+}
 
+void UserPage::handleResponse(int cmd, int seq, int code, const QString &msg,
+                              const QJsonObject &data)
+{
+    if (cmd == ecp::CMD_ADMIN_USER_LIST) {
+        if (seq != m_userListSeq) return;
+        m_userListSeq = -1;
+        handleUserListResponse(code, msg, data);
+        return;
+    }
+    if (cmd == ecp::CMD_ADMIN_USER_STATUS) {
+        if (seq != m_userStatusSeq) return;
+        m_userStatusSeq = -1;
+        handleUserStatusResponse(code, msg);
+    }
+}
+
+void UserPage::handleUserListResponse(int code, const QString &msg,
+                                      const QJsonObject &data)
+{
+    if (code != ecp::ERR_OK) {
+        m_statusLabel->setText(QStringLiteral("用户列表加载失败：%1").arg(msg));
+        return;
+    }
+
+    QVector<UserData> users;
+    const QJsonArray list = data.value(QStringLiteral("list")).toArray();
+    users.reserve(list.size());
+    for (const QJsonValue &value : list) {
+        if (!value.isObject()) continue;
+        const QJsonObject item = value.toObject();
+        users.append({
+            item.value(QStringLiteral("userId")).toInteger(),
+            item.value(QStringLiteral("phone")).toString(),
+            item.value(QStringLiteral("nickname")).toString(),
+            item.value(QStringLiteral("balance")).toInteger(),
+            item.value(QStringLiteral("createTime")).toString(),
+            item.value(QStringLiteral("status")).toInt()
+        });
+    }
+
+    m_users = users;
     refreshTable();
+    const qint64 total = data.value(QStringLiteral("total")).toInteger(m_users.size());
+    m_statusLabel->setText(QStringLiteral("已加载 %1 个用户，共 %2 个")
+                               .arg(m_users.size()).arg(total));
+}
+
+void UserPage::handleUserStatusResponse(int code, const QString &msg)
+{
+    const QString phone = m_pendingStatusPhone;
+    const int newStatus = m_pendingNewStatus;
+    m_pendingStatusUserId = 0;
+    m_pendingStatusPhone.clear();
+    m_pendingNewStatus = ecp::USER_NORMAL;
+
+    if (code != ecp::ERR_OK) {
+        m_statusLabel->setText(QStringLiteral("用户状态更新失败：%1").arg(msg));
+        QMessageBox::warning(this, QStringLiteral("用户状态更新失败"), msg);
+        updateStatusButton();
+        return;
+    }
+
+    m_table->clearSelection();
+    updateStatusButton();
+    const QString action = newStatus == ecp::USER_FROZEN
+        ? QStringLiteral("冻结") : QStringLiteral("解冻");
+    QMessageBox::information(this, QStringLiteral("操作成功"),
+                             QStringLiteral("用户 %1 已%2").arg(phone, action));
+    requestUserList();
 }
 
 void UserPage::refreshTable()
 {
-    const QString phoneLike = m_phoneSearch->text().trimmed();
-
-    // TODO(L3)：服务端实现后，将本地筛选替换为 2201 请求：
-    // {page, size, phoneLike}。当前不得发送真实网络请求。
     m_table->setRowCount(0);
-    for (const UserMock &user : m_users) {
-        if (!phoneLike.isEmpty() && !user.phone.contains(phoneLike)) continue;
-
+    for (const UserData &user : m_users) {
         const int row = m_table->rowCount();
         m_table->insertRow(row);
         auto *idItem = centeredItem(QString::number(user.userId));
@@ -153,14 +206,15 @@ void UserPage::refreshTable()
 void UserPage::clearSearch()
 {
     m_phoneSearch->clear();
-    refreshTable();
+    requestUserList();
     m_phoneSearch->setFocus();
 }
 
 void UserPage::updateStatusButton()
 {
-    const UserMock *user = selectedUser();
-    m_statusButton->setEnabled(user != nullptr);
+    const UserData *user = selectedUser();
+    const bool waitingForStatus = m_userStatusSeq >= 0;
+    m_statusButton->setEnabled(user != nullptr && !waitingForStatus);
     m_statusButton->setText(user && user->status == ecp::USER_FROZEN
         ? QStringLiteral("解冻用户")
         : QStringLiteral("冻结用户"));
@@ -168,7 +222,7 @@ void UserPage::updateStatusButton()
 
 void UserPage::handleUserStatusChange()
 {
-    UserMock *user = selectedUser();
+    const UserData *user = selectedUser();
     if (!user) {
         QMessageBox::information(this, QStringLiteral("用户状态"),
                                  QStringLiteral("请先选择一个用户"));
@@ -176,6 +230,7 @@ void UserPage::handleUserStatusChange()
     }
 
     const bool freezing = user->status == ecp::USER_NORMAL;
+    const int newStatus = freezing ? ecp::USER_FROZEN : ecp::USER_NORMAL;
     const QString action = freezing ? QStringLiteral("冻结") : QStringLiteral("解冻");
     const auto answer = QMessageBox::question(
         this, QStringLiteral("确认%1用户").arg(action),
@@ -183,35 +238,32 @@ void UserPage::handleUserStatusChange()
         QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
     if (answer != QMessageBox::Yes) return;
 
-    const int userId = user->userId;
-    const QString phone = user->phone;
-    const int newStatus = freezing ? ecp::USER_FROZEN : ecp::USER_NORMAL;
-
-    // TODO(L3)：服务端实现后替换为 2202 请求：{userId, status}。
-    // 当前仅修改本地 Mock 数据，不发送真实网络请求。
-    user->status = newStatus;
-    refreshTable();
-    for (int row = 0; row < m_table->rowCount(); ++row) {
-        const QTableWidgetItem *idItem = m_table->item(row, 0);
-        if (idItem && idItem->data(Qt::UserRole).toInt() == userId) {
-            m_table->selectRow(row);
-            m_table->scrollToItem(idItem);
-            break;
-        }
+    const int seq = m_net->send(ecp::CMD_ADMIN_USER_STATUS, QJsonObject{
+        { QStringLiteral("userId"), user->userId },
+        { QStringLiteral("status"), newStatus }
+    });
+    if (seq < 0) {
+        QMessageBox::warning(this, QStringLiteral("用户状态更新失败"),
+                             QStringLiteral("请求发送失败，请检查网络连接"));
+        return;
     }
 
-    QMessageBox::information(this, QStringLiteral("操作成功"),
-                             QStringLiteral("用户 %1 已%2").arg(phone, action));
+    m_userStatusSeq = seq;
+    m_pendingStatusUserId = user->userId;
+    m_pendingStatusPhone = user->phone;
+    m_pendingNewStatus = newStatus;
+    m_statusButton->setEnabled(false);
+    m_statusLabel->setText(QStringLiteral("正在%1用户 %2…").arg(action, user->phone));
 }
 
-UserPage::UserMock *UserPage::selectedUser()
+const UserPage::UserData *UserPage::selectedUser() const
 {
     const int row = m_table->currentRow();
     const QTableWidgetItem *idItem = row >= 0 ? m_table->item(row, 0) : nullptr;
     if (!idItem) return nullptr;
 
-    const int userId = idItem->data(Qt::UserRole).toInt();
-    for (UserMock &user : m_users) {
+    const qint64 userId = idItem->data(Qt::UserRole).toLongLong();
+    for (const UserData &user : m_users) {
         if (user.userId == userId) return &user;
     }
     return nullptr;
