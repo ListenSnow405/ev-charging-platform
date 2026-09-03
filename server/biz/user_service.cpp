@@ -103,11 +103,70 @@ static int handleUserInfo(const Request &req, QJsonObject &out)
     return ERR_OK;
 }
 
+static int handleSetNickname(const Request &req, QJsonObject &out)
+{
+    Q_UNUSED(out);
+
+    const QJsonValue value = req.data.value("nickname");
+    if (!value.isString()) return ERR_PARAM;
+    const QString nickname = value.toString().trimmed();
+    if (nickname.isEmpty()) return ERR_PARAM;
+
+    QSqlDatabase db = threadDb();
+    if (!db.isOpen()) return ERR_INTERNAL;
+
+    QSqlQuery q(db);
+    q.prepare(QStringLiteral(
+        "UPDATE t_user SET nickname = ?, update_time = ? WHERE user_id = ?"));
+    q.addBindValue(nickname);
+    q.addBindValue(nowStr());
+    q.addBindValue(req.session.id);       // 来自 token，不信任客户端传的 id
+    if (!q.exec()) {
+        LOG_E(QStringLiteral("修改用户昵称失败: %1").arg(q.lastError().text()));
+        return ERR_INTERNAL;
+    }
+    if (q.numRowsAffected() == 0) return ERR_USER_NOT_FOUND;
+
+    LOG_I(QStringLiteral("用户昵称修改成功: userId=%1").arg(req.session.id));
+    return ERR_OK;
+}
+
+static int handleSetAvatar(const Request &req, QJsonObject &out)
+{
+    Q_UNUSED(out);
+
+    const QJsonValue value = req.data.value("avatarPath");
+    if (!value.isString()) return ERR_PARAM;
+    const QString avatarPath = value.toString().trimmed();
+    if (avatarPath.isEmpty()) return ERR_PARAM;
+
+    QSqlDatabase db = threadDb();
+    if (!db.isOpen()) return ERR_INTERNAL;
+
+    QSqlQuery q(db);
+    q.prepare(QStringLiteral(
+        "UPDATE t_user SET avatar = ?, update_time = ? WHERE user_id = ?"));
+    q.addBindValue(avatarPath);
+    q.addBindValue(nowStr());
+    q.addBindValue(req.session.id);       // 来自 token，不信任客户端传的 id
+    if (!q.exec()) {
+        LOG_E(QStringLiteral("修改用户头像失败: %1").arg(q.lastError().text()));
+        return ERR_INTERNAL;
+    }
+    if (q.numRowsAffected() == 0) return ERR_USER_NOT_FOUND;
+
+    LOG_I(QStringLiteral("用户头像修改成功: userId=%1").arg(req.session.id));
+    return ERR_OK;
+}
+
 void registerUserService()
 {
-    Dispatcher::instance().registerHandler(CMD_USER_LOGIN, handleLogin, /*needAuth=*/false);
-    Dispatcher::instance().registerHandler(CMD_USER_INFO,  handleUserInfo);
-    LOG_I(QStringLiteral("用户服务已注册: 1001 登录 / 1002 用户信息"));
+    Dispatcher::instance().registerHandler(CMD_USER_LOGIN,        handleLogin, /*needAuth=*/false);
+    Dispatcher::instance().registerHandler(CMD_USER_INFO,         handleUserInfo);
+    Dispatcher::instance().registerHandler(CMD_USER_SET_NICKNAME, handleSetNickname);
+    Dispatcher::instance().registerHandler(CMD_USER_SET_AVATAR,   handleSetAvatar);
+    LOG_I(QStringLiteral("用户服务已注册: 1001 登录 / 1002 用户信息 / "
+                         "1003 修改昵称 / 1004 修改头像"));
 }
 
 } // namespace ecp
