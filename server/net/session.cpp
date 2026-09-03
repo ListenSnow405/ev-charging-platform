@@ -57,6 +57,18 @@ void SessionTable::remove(const QString &token)
     pthread_rwlock_unlock(&m_lock);
 }
 
+int SessionTable::invalidateSessions(int id, Role role)
+{
+    int n = 0;
+    pthread_rwlock_wrlock(&m_lock);
+    for (auto it = m_map.begin(); it != m_map.end(); ) {
+        if (it->id == id && it->role == role) { it = m_map.erase(it); ++n; }
+        else                                    ++it;
+    }
+    pthread_rwlock_unlock(&m_lock);
+    return n;
+}
+
 void SessionTable::sweepExpired()
 {
     const qint64 now = QDateTime::currentSecsSinceEpoch();

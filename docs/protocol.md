@@ -83,10 +83,16 @@
 
 | 命令字 | 名称 | 请求 `data` | 响应 `data` |
 | --- | --- | --- | --- |
-| 1101 | 附近充电站列表（按距离升序）`[说明书]` 1.4 | `{lng, lat, keyword}` | `{list:[{stationId, name, address, price, pileTotal, pileIdle, distance}]}` |
+| 1101 | 附近充电站列表 `[说明书]` 1.4 | `{lng, lat, keyword, sortBy}` | `{list:[{stationId, name, address, price, pileTotal, pileIdle, distance, congestion, idleForecast}]}` |
 | 1102 | 充电站内电桩详情 `[说明书]` 1.4 | `{stationId}` | `{list:[{pileId, code, type, status, power}]}` |
 
 `price` 单位为**分/度**；`distance` 单位为**米**（显示层换算为公里）。
+
+`sortBy`（`[本组自定]` v1.1，可选，缺省 `0`）：
+- `0` 按距离升序 `[说明书]` 1.4「按距离由近及远展示充电站列表」
+- `1` 按拥堵度升序，同拥堵度再按距离 `[说明书]` 1.4「优先推荐低拥堵、高空闲率的充电站」
+
+`congestion`（double，0..1，`[本组自定]` v1.1）/ `idleForecast`（int，`[本组自定]` v1.1）：取 `t_load_forecast` 中 `horizon=1` 的最新一条。**无预测数据时两字段均填 `-1`**——`0` 在拥堵度语义中代表「最不拥堵」，不能兼职表示「没有数据」，否则新站或模型未跑到的站会被排到推荐最前面。
 
 ### 4.3 用户端 · 充电与订单（1200–1299）
 
@@ -117,6 +123,9 @@
 | 2302 | 营收趋势 `[说明书]` 1.4 近 7 / 30 日 | `{days}` 取 7 或 30 | `{list:[{date, amount}]}` |
 | 2303 | 电桩状态分布 `[说明书]` 1.4 在用/闲置/故障 | `{}` | `{inUse, idle, fault, total}` |
 | 2304 | 订单列表 | `{page, size, status, dateFrom, dateTo}` | `{total, list[]}` |
+| 2305 | 站点负荷预测 / 负荷预警 `[说明书]` 1.4（v1.1） | `{stationId, horizon}` | `{list:[{stationId, stationName, horizon, predictTime, loadKw, idlePile, isPeak, congestion, modelVersion}]}` |
+
+`2305`：`stationId=0` 表示全部站点；`horizon` 取 `1`/`6`/`24`，非法值返回 `ERR_PARAM`。取 `t_load_forecast` 中同一 `model_version` 下 `create_time` 最大的一批。**无预测数据返回 `code=0` + 空 `list`**，不新增错误码——预测缺失是正常状态，不是错误。管理端按 `congestion ≥ 0.8` 本地判定预警，阈值不进协议。`loadKw` 单位 kW，是物理量不是金额，不受「金额整数分」规则约束。
 
 ### 4.5 设备侧 · 电桩模拟器（9000–9099）
 
@@ -173,6 +182,7 @@
 - 用户 token 与管理员 token **分属不同角色**，用户 token 调用 2000 段命令返回 `ERR_NO_PERMISSION`
 - 管理员密码在库中存 **SHA-256 摘要**，不存明文（初始 `admin/123456` 的摘要见 `docs/db-schema.sql`）
 - 服务端对所有入参做长度与类型校验；SQL 一律使用 `QSqlQuery::prepare` + `bindValue` **参数绑定**，禁止字符串拼接 SQL
+- 管理员冻结用户（2202）后，该用户**全部在线会话立即失效**，后续请求返回 `ERR_TOKEN_INVALID`（客户端应清空本地 token 并跳转登录页，而非静默重试）`[本组自定]` v1.1
 
 > 本项目为实训环境，**不做 TLS 加密**，属于已知取舍，需在设计文档中写明。
 
@@ -191,3 +201,4 @@
 | 日期 | 版本 | 变更 | 提出人 | 评审 |
 | --- | --- | --- | --- | --- |
 | — | v1.0 | 初版冻结 | L1 | 待全组评审 |
+| 2026-09-03 | v1.1 | CR-001：1101 增加 congestion/idleForecast/sortBy；新增 2305 站点负荷预测。CR-003：第 6 节增加冻结用户会话失效说明 | L5（代 L1 落地，L1/L2 暂时无法操作，详见 docs/conventions.md 第 3.2 节） | 待 L1 归队复核 |

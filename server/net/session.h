@@ -31,6 +31,12 @@ public:
     bool validate(const QString &token, SessionInfo &out);
 
     void remove(const QString &token);
+
+    // 按角色踢除指定身份的全部会话；返回被清除的数量。
+    // 必须按 role 过滤——user_id 与 admin_id 是两套独立自增序列，
+    // 同一个 id 值在两种角色下都存在，不过滤会误踢管理员会话。
+    int invalidateSessions(int id, Role role);
+
     void sweepExpired();          // 清理过期会话，可由定时任务调用
     int  count() const;
 

@@ -15,6 +15,7 @@
 #include "logger.h"
 #include "time_util.h"
 #include "net/dispatcher.h"
+#include "net/session.h"
 #include "dao/db.h"
 
 namespace ecp {
@@ -179,6 +180,11 @@ static int handleUserStatus(const Request &req, QJsonObject &out)
 
     LOG_I(QStringLiteral("管理员操作用户状态: adminId=%1 action=%2 userId=%3")
               .arg(req.session.id).arg(action).arg(userId));
+
+    if (status == USER_FROZEN) {
+        const int kicked = SessionTable::instance().invalidateSessions(static_cast<int>(userId), ROLE_USER);
+        LOG_I(QStringLiteral("冻结用户已踢下线: userId=%1 会话数=%2").arg(userId).arg(kicked));
+    }
     return ERR_OK;
 }
 
