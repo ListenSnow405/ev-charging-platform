@@ -2,6 +2,7 @@
 #include "overview_page.h"
 #include "pile_page.h"
 #include "station_page.h"
+#include "user_page.h"
 #include <QHBoxLayout>
 #include <QVBoxLayout>
 #include <QFont>
@@ -24,8 +25,7 @@ MainWindow::MainWindow(NetClient *net, QWidget *parent) : QWidget(parent), m_net
     m_pages->addWidget(new PilePage(m_net, m_pages));
     m_pages->addWidget(makePlaceholder(QStringLiteral("订单管理"),
         QStringLiteral("TODO(L3)：订单列表与筛选\n对应命令字 2304")));
-    m_pages->addWidget(makePlaceholder(QStringLiteral("用户管理"),
-        QStringLiteral("TODO(L3)：用户列表 / 手机号模糊搜索 / 冻结解冻\n对应命令字 2201 / 2202")));
+    m_pages->addWidget(new UserPage(m_net, m_pages));
 
     connect(m_nav, &QListWidget::currentRowChanged, m_pages, &QStackedWidget::setCurrentIndex);
     m_nav->setCurrentRow(0);
