@@ -24,5 +24,5 @@ qtHaveModule(charts) {
 
 INCLUDEPATH += $$PWD
 
-SOURCES += main.cpp net_client.cpp login_window.cpp main_window.cpp
-HEADERS +=          net_client.h   login_window.h   main_window.h
+SOURCES += main.cpp net_client.cpp login_window.cpp main_window.cpp overview_page.cpp
+HEADERS +=          net_client.h   login_window.h   main_window.h   overview_page.h
