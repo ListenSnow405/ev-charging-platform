@@ -56,8 +56,10 @@ static int handleReserve(const Request &req, QJsonObject &out)
         LOG_E(QStringLiteral("预约获取数据库连接失败: %1").arg(db.lastError().text()));
         return ERR_INTERNAL;
     }
-    if (!db.transaction()) {
-        LOG_E(QStringLiteral("开启预约事务失败: %1").arg(db.lastError().text()));
+    QSqlQuery begin(db);
+    begin.prepare(QStringLiteral("BEGIN IMMEDIATE"));
+    if (!begin.exec()) {
+        LOG_E(QStringLiteral("开启预约立即事务失败: %1").arg(begin.lastError().text()));
         return ERR_INTERNAL;
     }
 
