@@ -35,7 +35,7 @@ static void onSignal(int sig)
 //  TODO(L2)：在 server/biz/ 下实现各服务后，在此逐个注册。
 //            清单见 server/biz/README.md 与 docs/protocol.md 第 4 节。
 // -----------------------------------------------------------------------------
-namespace ecp { void registerUserService(); void registerAdminService(); void registerWalletService(); void registerUserManagementService(); void registerStationService(); }
+namespace ecp { void registerUserService(); void registerAdminService(); void registerWalletService(); void registerUserManagementService(); void registerStationService(); void registerPileService(); }
 
 static void registerAllServices()
 {
@@ -44,6 +44,7 @@ static void registerAllServices()
     registerWalletService();    // 1005 / 1006   [说明书] 1.4 钱包充值
     registerUserManagementService(); // 2201 / 2202 [说明书] 1.4 用户管理
     registerStationService();   // 1101 / 2101–2103 [说明书] 1.4 电站管理
+    registerPileService();      // 1102 / 2111   [说明书] 1.4 电桩查询
 
     // 骨架自带的连通性探针：客户端可用它确认链路打通（不在协议表内，仅供联调）
     Dispatcher::instance().registerHandler(0, [](const Request &, QJsonObject &out) -> int {
