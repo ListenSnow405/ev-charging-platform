@@ -3,11 +3,13 @@
 //  admin-client/station_page.h  —  PC 管理端充电站管理页
 //  归属 L3。 [说明书] 1.4 电站列表、站内详情与新增电站
 // -----------------------------------------------------------------------------
-#include <QVector>
 #include <QString>
+#include <QVector>
 #include <QWidget>
 
 class NetClient;
+class QJsonObject;
+class QLabel;
 class QPushButton;
 class QTableWidget;
 
@@ -17,37 +19,55 @@ public:
     explicit StationPage(NetClient *net, QWidget *parent = nullptr);
 
 private:
-    struct PileMock
+    struct StationData
     {
-        QString code;
-        QString type;
-        qreal powerKw = 0;
-        QString status;
-    };
-
-    struct StationMock
-    {
-        int stationId = 0;
+        qint64 stationId = 0;
         QString name;
         QString address;
         qreal longitude = 0;
         qreal latitude = 0;
-        qint64 priceFen = 0;
-        int pileTotal = 0;
-        int onlineCount = 0;
-        QVector<PileMock> piles;
+        qint64 pileTotal = 0;
+        qreal onlineRatePercent = 0;
+    };
+
+    struct PileData
+    {
+        QString code;
+        int type = 0;
+        int status = 0;
+        qreal powerKw = 0;
     };
 
     void setupUi();
-    void loadMockStations();
-    void appendStationRow(const StationMock &station);
-    void showSelectedStationDetails();
-    void showStationDetails(int row);
+    void requestStationList();
+    void requestStationDetail(int row);
     void addStation();
-    int nextStationId() const;
+    void handleResponse(int cmd, int seq, int code, const QString &msg,
+                        const QJsonObject &data);
+    void handleStationListResponse(int code, const QString &msg,
+                                   const QJsonObject &data);
+    void handleStationAddResponse(int code, const QString &msg,
+                                  const QJsonObject &data);
+    void handleStationDetailResponse(int code, const QString &msg,
+                                     const QJsonObject &data);
+    void appendStationRow(const StationData &station);
+    void showSelectedStationDetails();
+    void showStationDetailDialog(const QVector<PileData> &piles);
+
+    static QString typeText(int type);
+    static QString statusText(int status);
 
     NetClient    *m_net = nullptr;
     QTableWidget *m_table = nullptr;
     QPushButton  *m_detailsButton = nullptr;
-    QVector<StationMock> m_stations;
+    QPushButton  *m_addButton = nullptr;
+    QLabel       *m_statusLabel = nullptr;
+    QVector<StationData> m_stations;
+
+    int m_stationListSeq = -1;
+    int m_stationAddSeq = -1;
+    int m_stationDetailSeq = -1;
+    qint64 m_pendingDetailStationId = 0;
+    QString m_pendingDetailStationName;
+    QString m_pendingDetailStationAddress;
 };

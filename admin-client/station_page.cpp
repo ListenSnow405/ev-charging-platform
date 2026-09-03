@@ -1,11 +1,14 @@
 #include "station_page.h"
 #include "add_station_dialog.h"
-#include "time_util.h"
+#include "net_client.h"
+#include "protocol.h"
 #include <QAbstractItemView>
 #include <QDialog>
 #include <QFont>
 #include <QHeaderView>
 #include <QHBoxLayout>
+#include <QJsonArray>
+#include <QJsonObject>
 #include <QLabel>
 #include <QMessageBox>
 #include <QPushButton>
@@ -14,13 +17,6 @@
 #include <QVBoxLayout>
 
 namespace {
-
-QString onlineRateText(int onlineCount, int total)
-{
-    if (total <= 0) return QStringLiteral("0.0%");
-    const int tenths = (onlineCount * 1000 + total / 2) / total;
-    return QStringLiteral("%1.%2%").arg(tenths / 10).arg(tenths % 10);
-}
 
 QTableWidgetItem *centeredItem(const QString &text)
 {
@@ -35,14 +31,15 @@ StationPage::StationPage(NetClient *net, QWidget *parent)
     : QWidget(parent), m_net(net)
 {
     setupUi();
-    loadMockStations();
+    connect(m_net, &NetClient::response, this, &StationPage::handleResponse);
+    requestStationList();
 }
 
 void StationPage::setupUi()
 {
     auto *pageLayout = new QVBoxLayout(this);
     pageLayout->setContentsMargins(24, 20, 24, 20);
-    pageLayout->setSpacing(16);
+    pageLayout->setSpacing(12);
 
     auto *toolbar = new QHBoxLayout;
     auto *title = new QLabel(QStringLiteral("充电站管理"), this);
@@ -55,10 +52,16 @@ void StationPage::setupUi()
 
     m_detailsButton = new QPushButton(QStringLiteral("查看详情"), this);
     m_detailsButton->setEnabled(false);
-    auto *addButton = new QPushButton(QStringLiteral("新增电站"), this);
+    auto *refreshButton = new QPushButton(QStringLiteral("刷新"), this);
+    m_addButton = new QPushButton(QStringLiteral("新增电站"), this);
     toolbar->addWidget(m_detailsButton);
-    toolbar->addWidget(addButton);
+    toolbar->addWidget(refreshButton);
+    toolbar->addWidget(m_addButton);
     pageLayout->addLayout(toolbar);
+
+    m_statusLabel = new QLabel(QStringLiteral("准备加载电站列表"), this);
+    m_statusLabel->setStyleSheet(QStringLiteral("color:#667085"));
+    pageLayout->addWidget(m_statusLabel);
 
     m_table = new QTableWidget(0, 7, this);
     m_table->setHorizontalHeaderLabels({
@@ -80,74 +83,30 @@ void StationPage::setupUi()
         m_detailsButton->setEnabled(m_table->currentRow() >= 0);
     });
     connect(m_table, &QTableWidget::cellDoubleClicked, this,
-            [this](int row, int) { showStationDetails(row); });
+            [this](int row, int) { requestStationDetail(row); });
     connect(m_detailsButton, &QPushButton::clicked,
             this, &StationPage::showSelectedStationDetails);
-    connect(addButton, &QPushButton::clicked, this, &StationPage::addStation);
+    connect(refreshButton, &QPushButton::clicked,
+            this, &StationPage::requestStationList);
+    connect(m_addButton, &QPushButton::clicked, this, &StationPage::addStation);
 }
 
-void StationPage::loadMockStations()
+void StationPage::requestStationList()
 {
-    // Mock 数据集中于此，待 2101/2103 接入后替换为服务端响应。
-    const auto pilesForStation = [](int stationId, int pileCount) {
-        QVector<PileMock> piles;
-        piles.reserve(pileCount);
-        for (int i = 1; i <= pileCount; ++i) {
-            const QString code = QStringLiteral("SZ%1-%2")
-                .arg(stationId, 3, 10, QLatin1Char('0'))
-                .arg(i, 2, 10, QLatin1Char('0'));
-            const QString type = i <= 2 ? QStringLiteral("快充") : QStringLiteral("慢充");
-            const qreal powerKw = i <= 2 ? 120 : 7;
-            QString status = QStringLiteral("闲置");
-            if ((stationId + i) % 7 == 0) status = QStringLiteral("故障");
-            else if ((stationId + i) % 3 == 0) status = QStringLiteral("在用");
-            piles.append({ code, type, powerKw, status });
-        }
-        return piles;
-    };
-
-    m_stations = {
-        { 1, QStringLiteral("福田CBD充电站"), QStringLiteral("深圳市福田区福华三路 88 号"),
-          114.0579, 22.5410, 152, 4, 4, pilesForStation(1, 4) },
-        { 2, QStringLiteral("南山科技园充电站"), QStringLiteral("深圳市南山区科苑南路 3009 号"),
-          113.9455, 22.5390, 148, 4, 3, pilesForStation(2, 4) },
-        { 3, QStringLiteral("深圳市民中心充电站"), QStringLiteral("深圳市福田区福中三路 1 号"),
-          114.0650, 22.5470, 160, 4, 4, pilesForStation(3, 4) },
-        { 4, QStringLiteral("深圳湾公园充电站"), QStringLiteral("深圳市南山区望海路 99 号"),
-          113.9720, 22.5130, 145, 4, 3, pilesForStation(4, 4) },
-        { 5, QStringLiteral("宝安中心充电站"), QStringLiteral("深圳市宝安区新湖路 99 号"),
-          113.8830, 22.5550, 140, 4, 4, pilesForStation(5, 4) },
-        { 6, QStringLiteral("龙岗大运充电站"), QStringLiteral("深圳市龙岗区龙翔大道 8 号"),
-          114.2180, 22.6900, 138, 4, 2, pilesForStation(6, 4) }
-    };
-
-    m_table->setRowCount(0);
-    for (const StationMock &station : m_stations) appendStationRow(station);
+    m_statusLabel->setText(QStringLiteral("正在加载电站列表…"));
+    const int seq = m_net->send(ecp::CMD_STATION_LIST, QJsonObject{
+        { QStringLiteral("page"), 1 },
+        { QStringLiteral("size"), 100 }
+    });
+    if (seq < 0) {
+        m_stationListSeq = -1;
+        m_statusLabel->setText(QStringLiteral("电站列表请求发送失败，请检查网络连接"));
+        return;
+    }
+    m_stationListSeq = seq;
 }
 
-void StationPage::appendStationRow(const StationMock &station)
-{
-    const int row = m_table->rowCount();
-    m_table->insertRow(row);
-
-    auto *idItem = centeredItem(QString::number(station.stationId));
-    idItem->setData(Qt::DisplayRole, station.stationId);
-    m_table->setItem(row, 0, idItem);
-    m_table->setItem(row, 1, new QTableWidgetItem(station.name));
-    m_table->setItem(row, 2, new QTableWidgetItem(station.address));
-    m_table->setItem(row, 3, centeredItem(QString::number(station.longitude, 'f', 4)));
-    m_table->setItem(row, 4, centeredItem(QString::number(station.latitude, 'f', 4)));
-    m_table->setItem(row, 5, centeredItem(QString::number(station.pileTotal)));
-    m_table->setItem(row, 6, centeredItem(onlineRateText(station.onlineCount,
-                                                        station.pileTotal)));
-}
-
-void StationPage::showSelectedStationDetails()
-{
-    showStationDetails(m_table->currentRow());
-}
-
-void StationPage::showStationDetails(int row)
+void StationPage::requestStationDetail(int row)
 {
     if (row < 0 || row >= m_stations.size()) {
         QMessageBox::information(this, QStringLiteral("查看详情"),
@@ -155,19 +114,193 @@ void StationPage::showStationDetails(int row)
         return;
     }
 
-    const StationMock &station = m_stations.at(row);
+    const StationData &station = m_stations.at(row);
+    const int seq = m_net->send(ecp::CMD_STATION_DETAIL, QJsonObject{
+        { QStringLiteral("stationId"), station.stationId }
+    });
+    if (seq < 0) {
+        QMessageBox::warning(this, QStringLiteral("查看详情失败"),
+                             QStringLiteral("请求发送失败，请检查网络连接"));
+        return;
+    }
+
+    m_stationDetailSeq = seq;
+    m_pendingDetailStationId = station.stationId;
+    m_pendingDetailStationName = station.name;
+    m_pendingDetailStationAddress = station.address;
+    m_statusLabel->setText(QStringLiteral("正在加载“%1”的电桩详情…").arg(station.name));
+}
+
+void StationPage::addStation()
+{
+    AddStationDialog dialog(this);
+    if (dialog.exec() != QDialog::Accepted) return;
+
+    const StationFormData &input = dialog.stationData();
+    const int seq = m_net->send(ecp::CMD_STATION_ADD, QJsonObject{
+        { QStringLiteral("name"), input.name },
+        { QStringLiteral("address"), input.address },
+        { QStringLiteral("lng"), input.longitude },
+        { QStringLiteral("lat"), input.latitude },
+        { QStringLiteral("price"), input.priceFen },
+        { QStringLiteral("pileCount"), input.pileCount }
+    });
+    if (seq < 0) {
+        QMessageBox::warning(this, QStringLiteral("新增电站失败"),
+                             QStringLiteral("请求发送失败，请检查网络连接"));
+        return;
+    }
+
+    m_stationAddSeq = seq;
+    m_addButton->setEnabled(false);
+    m_statusLabel->setText(QStringLiteral("正在新增电站…"));
+}
+
+void StationPage::handleResponse(int cmd, int seq, int code, const QString &msg,
+                                 const QJsonObject &data)
+{
+    if (cmd == ecp::CMD_STATION_LIST) {
+        if (seq != m_stationListSeq) return;
+        m_stationListSeq = -1;
+        handleStationListResponse(code, msg, data);
+        return;
+    }
+    if (cmd == ecp::CMD_STATION_ADD) {
+        if (seq != m_stationAddSeq) return;
+        m_stationAddSeq = -1;
+        m_addButton->setEnabled(true);
+        handleStationAddResponse(code, msg, data);
+        return;
+    }
+    if (cmd == ecp::CMD_STATION_DETAIL) {
+        if (seq != m_stationDetailSeq) return;
+        m_stationDetailSeq = -1;
+        handleStationDetailResponse(code, msg, data);
+    }
+}
+
+void StationPage::handleStationListResponse(int code, const QString &msg,
+                                            const QJsonObject &data)
+{
+    if (code != ecp::ERR_OK) {
+        m_statusLabel->setText(QStringLiteral("电站列表加载失败：%1").arg(msg));
+        return;
+    }
+
+    QVector<StationData> stations;
+    const QJsonArray list = data.value(QStringLiteral("list")).toArray();
+    stations.reserve(list.size());
+    for (const QJsonValue &value : list) {
+        if (!value.isObject()) continue;
+        const QJsonObject item = value.toObject();
+        stations.append({
+            item.value(QStringLiteral("stationId")).toInteger(),
+            item.value(QStringLiteral("name")).toString(),
+            item.value(QStringLiteral("address")).toString(),
+            item.value(QStringLiteral("lng")).toDouble(),
+            item.value(QStringLiteral("lat")).toDouble(),
+            item.value(QStringLiteral("pileTotal")).toInteger(),
+            item.value(QStringLiteral("onlineRate")).toDouble()
+        });
+    }
+
+    m_stations = stations;
+    m_table->setRowCount(0);
+    for (const StationData &station : m_stations) appendStationRow(station);
+    m_table->clearSelection();
+    m_detailsButton->setEnabled(false);
+
+    const qint64 total = data.value(QStringLiteral("total")).toInteger(m_stations.size());
+    m_statusLabel->setText(QStringLiteral("已加载 %1 个电站，共 %2 个")
+                               .arg(m_stations.size()).arg(total));
+}
+
+void StationPage::handleStationAddResponse(int code, const QString &msg,
+                                           const QJsonObject &data)
+{
+    if (code != ecp::ERR_OK) {
+        m_statusLabel->setText(QStringLiteral("新增电站失败：%1").arg(msg));
+        QMessageBox::warning(this, QStringLiteral("新增电站失败"), msg);
+        return;
+    }
+
+    const qint64 stationId = data.value(QStringLiteral("stationId")).toInteger();
+    if (stationId <= 0) {
+        m_statusLabel->setText(QStringLiteral("新增电站响应异常：缺少有效电站 ID"));
+        QMessageBox::warning(this, QStringLiteral("新增电站失败"),
+                             QStringLiteral("服务器响应缺少有效电站 ID"));
+        requestStationList();
+        return;
+    }
+
+    QMessageBox::information(this, QStringLiteral("新增电站成功"),
+                             QStringLiteral("新增电站成功，电站 ID：%1").arg(stationId));
+    requestStationList();
+}
+
+void StationPage::handleStationDetailResponse(int code, const QString &msg,
+                                              const QJsonObject &data)
+{
+    if (code != ecp::ERR_OK) {
+        m_statusLabel->setText(QStringLiteral("电桩详情加载失败：%1").arg(msg));
+        QMessageBox::warning(this, QStringLiteral("查看详情失败"), msg);
+        return;
+    }
+
+    QVector<PileData> piles;
+    const QJsonArray list = data.value(QStringLiteral("list")).toArray();
+    piles.reserve(list.size());
+    for (const QJsonValue &value : list) {
+        if (!value.isObject()) continue;
+        const QJsonObject item = value.toObject();
+        piles.append({
+            item.value(QStringLiteral("code")).toString(),
+            item.value(QStringLiteral("type")).toInt(),
+            item.value(QStringLiteral("status")).toInt(),
+            item.value(QStringLiteral("power")).toDouble()
+        });
+    }
+
+    m_statusLabel->setText(QStringLiteral("已加载“%1”的 %2 个电桩")
+                               .arg(m_pendingDetailStationName).arg(piles.size()));
+    showStationDetailDialog(piles);
+}
+
+void StationPage::appendStationRow(const StationData &station)
+{
+    const int row = m_table->rowCount();
+    m_table->insertRow(row);
+    m_table->setItem(row, 0, centeredItem(QString::number(station.stationId)));
+    m_table->setItem(row, 1, new QTableWidgetItem(station.name));
+    m_table->setItem(row, 2, new QTableWidgetItem(station.address));
+    m_table->setItem(row, 3, centeredItem(QString::number(station.longitude, 'f', 4)));
+    m_table->setItem(row, 4, centeredItem(QString::number(station.latitude, 'f', 4)));
+    m_table->setItem(row, 5, centeredItem(QString::number(station.pileTotal)));
+    m_table->setItem(row, 6, centeredItem(
+        QStringLiteral("%1%").arg(QString::number(station.onlineRatePercent, 'f', 1))));
+}
+
+void StationPage::showSelectedStationDetails()
+{
+    requestStationDetail(m_table->currentRow());
+}
+
+void StationPage::showStationDetailDialog(const QVector<PileData> &piles)
+{
     QDialog dialog(this);
-    dialog.setWindowTitle(QStringLiteral("%1 · 电桩实时状态明细").arg(station.name));
+    dialog.setWindowTitle(QStringLiteral("%1 · 电桩实时状态明细")
+                              .arg(m_pendingDetailStationName));
     dialog.resize(680, 420);
 
     auto *layout = new QVBoxLayout(&dialog);
     auto *summary = new QLabel(
-        QStringLiteral("电站 ID：%1　地址：%2").arg(station.stationId).arg(station.address),
+        QStringLiteral("电站 ID：%1　地址：%2")
+            .arg(m_pendingDetailStationId).arg(m_pendingDetailStationAddress),
         &dialog);
     summary->setWordWrap(true);
     layout->addWidget(summary);
 
-    auto *table = new QTableWidget(station.piles.size(), 4, &dialog);
+    auto *table = new QTableWidget(piles.size(), 4, &dialog);
     table->setHorizontalHeaderLabels({
         QStringLiteral("电桩编号"), QStringLiteral("类型"),
         QStringLiteral("功率（kW）"), QStringLiteral("状态")
@@ -177,12 +310,12 @@ void StationPage::showStationDetails(int row)
     table->setSelectionMode(QAbstractItemView::SingleSelection);
     table->verticalHeader()->setVisible(false);
     table->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
-    for (int pileRow = 0; pileRow < station.piles.size(); ++pileRow) {
-        const PileMock &pile = station.piles.at(pileRow);
-        table->setItem(pileRow, 0, centeredItem(pile.code));
-        table->setItem(pileRow, 1, centeredItem(pile.type));
-        table->setItem(pileRow, 2, centeredItem(QString::number(pile.powerKw, 'f', 1)));
-        table->setItem(pileRow, 3, centeredItem(pile.status));
+    for (int row = 0; row < piles.size(); ++row) {
+        const PileData &pile = piles.at(row);
+        table->setItem(row, 0, centeredItem(pile.code));
+        table->setItem(row, 1, centeredItem(typeText(pile.type)));
+        table->setItem(row, 2, centeredItem(QString::number(pile.powerKw, 'f', 1)));
+        table->setItem(row, 3, centeredItem(statusText(pile.status)));
     }
     layout->addWidget(table, 1);
 
@@ -195,48 +328,21 @@ void StationPage::showStationDetails(int row)
     dialog.exec();
 }
 
-void StationPage::addStation()
+QString StationPage::typeText(int type)
 {
-    AddStationDialog dialog(this);
-    if (dialog.exec() != QDialog::Accepted) return;
-
-    const StationFormData &input = dialog.stationData();
-    const int stationId = nextStationId();
-    StationMock station;
-    station.stationId = stationId;
-    station.name = input.name;
-    station.address = input.address;
-    station.longitude = input.longitude;
-    station.latitude = input.latitude;
-    station.priceFen = input.priceFen;
-    station.pileTotal = input.pileCount;
-    station.onlineCount = 0;
-    for (int i = 1; i <= input.pileCount; ++i) {
-        const QString code = QStringLiteral("SZ%1-%2")
-            .arg(stationId, 3, 10, QLatin1Char('0'))
-            .arg(i, 2, 10, QLatin1Char('0'));
-        const bool fast = i % 2 == 1;
-        station.piles.append({ code,
-                               fast ? QStringLiteral("快充") : QStringLiteral("慢充"),
-                               fast ? qreal(120) : qreal(7),
-                               QStringLiteral("闲置") });
+    switch (type) {
+    case ecp::PILE_FAST: return QStringLiteral("快充");
+    case ecp::PILE_SLOW: return QStringLiteral("慢充");
+    default:             return QStringLiteral("未知");
     }
-
-    // TODO(L3)：服务端实现后替换为 2102 请求；当前只追加到本地 Mock 数据。
-    m_stations.append(station);
-    appendStationRow(station);
-    m_table->selectRow(m_table->rowCount() - 1);
-    QMessageBox::information(
-        this, QStringLiteral("新增成功"),
-        QStringLiteral("已临时新增“%1”\n充电价格：%2 元/度\n本次数据仅在当前运行期间有效。")
-            .arg(station.name, ecp::fenToYuan(station.priceFen)));
 }
 
-int StationPage::nextStationId() const
+QString StationPage::statusText(int status)
 {
-    int nextId = 1;
-    for (const StationMock &station : m_stations) {
-        if (station.stationId >= nextId) nextId = station.stationId + 1;
+    switch (status) {
+    case ecp::PILE_IN_USE: return QStringLiteral("在用");
+    case ecp::PILE_IDLE:   return QStringLiteral("闲置");
+    case ecp::PILE_FAULT:  return QStringLiteral("故障");
+    default:               return QStringLiteral("未知");
     }
-    return nextId;
 }

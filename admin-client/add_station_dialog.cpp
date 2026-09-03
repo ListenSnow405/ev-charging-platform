@@ -27,7 +27,7 @@ AddStationDialog::AddStationDialog(QWidget *parent) : QDialog(parent)
     m_longitude->setPlaceholderText(QStringLiteral("-180 至 180，例如 114.0579"));
     m_latitude->setPlaceholderText(QStringLiteral("-90 至 90，例如 22.5410"));
     m_priceYuan->setPlaceholderText(QStringLiteral("例如 1.52"));
-    m_pileCount->setRange(1, 200);
+    m_pileCount->setRange(1, 99);
     m_pileCount->setValue(4);
 
     auto *form = new QFormLayout;
