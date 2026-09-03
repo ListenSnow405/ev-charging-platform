@@ -34,11 +34,12 @@
 | 文件 | 用途 |
 | --- | --- |
 | `export_snapshot.py` | 大屏数据快照导出，已可运行 |
+| `gen_history.py` | 历史订单/设备日志生成器，已实现并测试；落库需 CR-002 批准 |
 | `requirements.txt` | pandas / numpy / scikit-learn |
 
 ## TODO
 
-- [ ] **`gen_history.py` 历史数据生成器**——含时段、时长、电量、天气、节假日特征。这是大屏和模型共同的燃料，**W1 就要交付**，优先级最高。🟡 落库待 CR-002
+- [x] **`gen_history.py` 历史数据生成器**——含时段、时长、电量、天气、节假日特征。dry-run 已验证（60 天约 2000 单，见脚本输出）；天气/节假日无对应表列，写入独立的 `ml/data/day_features.csv`。**落库（`--commit`）待 CR-002 批准**
 - [ ] 特征工程与时序建模，输出 1h / 6h / 24h 预测
 - [ ] 预测结果回写 `t_load_forecast`
 - [ ] 拥堵度计算，供用户端站点推荐排序

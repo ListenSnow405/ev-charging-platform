@@ -37,6 +37,8 @@
 | 2026-09-02 | `config/app.ini` | 线程池大小改为可配置项 `pool_size`，原先在 `main.cpp` 写死；每条连接占一个线程直到断开，该值即最大并发连接数 | L1 | ✅ |
 | 2026-09-02 | `.gitignore` | `config/` 规则收紧为默认全挡、仅放行 `*.example`；原 `config/*.ini` 挡不住其他后缀的凭据文件 | SCML | ✅ |
 | 2026-09-02 | `server/biz/` | 实现 1001 手机号免密登录（含自动注册、冻结拦截）、1002 用户信息、2001 管理员登录，作为 L2 的样板实现 | L2 | ✅ |
+| 2026-09-03 | `server/biz/` | L2 服务批量合入（PR #3）：1003–1006 / 1101–1102 / 1201–1202 / 1206–1207 / 2101–2103 / 2111 / 2201–2202 / 2304，共 20 个命令字注册 | L2 | ✅ |
+| 2026-09-03 | `admin-client/` | L3 六个界面 mock 完成，充电站管理与用户管理已切真实接口 | L3 | ✅ |
 | 2026-09-02 | `docs/conventions.md` | 第 3 节拆为 3.1 已生效 / **3.2 待评审变更申请**；原先只有「改完之后」的记录，没有「提出到批准之间」的落点，CR 只能停在群聊里翻不到 | SCML | ⬜ |
 | 2026-09-02 | `.gitignore` | 补 `*.db-shm` / `*.db-wal`；原规则只挡 `*.db` 和 `*.db-journal`，SQLite 走 WAL 模式时这两个边车文件会漏进仓库 | SCML | ⬜ |
 | 2026-09-02 | `ml/CLAUDE.md` | 数据库权限改为「运行期只读 / 离线播种可写」两条并列规则，并挂 CR-002 未批前禁止 `--commit` | SCML | ⬜ |
@@ -47,8 +49,9 @@
 
 | 编号 | 契约 | 摘要 | 提出人 | 属主 | 状态 |
 | --- | --- | --- | --- | --- | --- |
-| CR-001 | `docs/protocol.md` | 增加负荷预测结果通道（1101 扩字段 + 新增 2305） | L5 | **L1** | 🟡 待群内提出 |
-| CR-002 | `ml/` 规范 + `t_order` 等业务表 | 授权 `gen_history.py` 离线写入业务表播种历史数据 | L5 | **L2** | 🟡 待群内提出 |
+| CR-001 | `docs/protocol.md` | 增加负荷预测结果通道（1101 扩字段 + 新增 2305） | L5 | **L1** | 🟢 设计已定稿，附补丁，待属主落地 |
+| CR-002 | `ml/` 规范 + `t_order` 等业务表 | 授权 `gen_history.py` 离线写入业务表播种历史数据 | L5 | **L2** | 🟢 脚本已实现（dry-run 可跑），落库待批 |
+| CR-003 | `docs/protocol.md` 第 6 节 + `server/net/session.h` | 冻结用户后会话立即失效（`invalidateSessions`） | L2 | **L1** | 🟢 设计已定稿，附补丁，待属主落地 |
 
 ---
 
@@ -109,6 +112,42 @@
 
 保证 `t_load_forecast` 中每个 `station_id × horizon` 至少有一条当前有效预测；`model_version` + `create_time` 可供 L2 稳定取到「最新一批」。
 
+**设计已定稿，以下补丁供 L1 复核后直接采用**（属主仍需亲自落笔改 `docs/protocol.md`，本组规则不允许他人代改冻结契约）：
+
+*补丁 1 — 替换 4.2 节整段*
+
+```markdown
+### 4.2 用户端 · 充电站与电桩（1100–1199）
+
+| 命令字 | 名称 | 请求 `data` | 响应 `data` |
+| --- | --- | --- | --- |
+| 1101 | 附近充电站列表 `[说明书]` 1.4 | `{lng, lat, keyword, sortBy}` | `{list:[{stationId, name, address, price, pileTotal, pileIdle, distance, congestion, idleForecast}]}` |
+| 1102 | 充电站内电桩详情 `[说明书]` 1.4 | `{stationId}` | `{list:[{pileId, code, type, status, power}]}` |
+
+`price` 单位为**分/度**；`distance` 单位为**米**（显示层换算为公里）。
+
+`sortBy`（`[本组自定]` CR-001，可选，缺省 `0`）：
+- `0` 按距离升序 `[说明书]` 1.4「按距离由近及远展示充电站列表」
+- `1` 按拥堵度升序，同拥堵度再按距离 `[说明书]` 1.4「优先推荐低拥堵、高空闲率的充电站」
+
+`congestion`（double，0..1，`[本组自定]` CR-001）/ `idleForecast`（int，`[本组自定]` CR-001）：取 `t_load_forecast` 中 `horizon=1` 的最新一条。**无预测数据时两字段均填 `-1`**——`0` 在拥堵度语义中代表「最不拥堵」，不能兼职表示「没有数据」，否则新站或模型未跑到的站会被排到推荐最前面。
+```
+
+*补丁 2 — 4.4 节 2304 行之后新增一行 + 表后加一段说明*
+
+```markdown
+| 2305 | 站点负荷预测 / 负荷预警 `[说明书]` 1.4（CR-001） | `{stationId, horizon}` | `{list:[{stationId, stationName, horizon, predictTime, loadKw, idlePile, isPeak, congestion, modelVersion}]}` |
+```
+```markdown
+`2305`：`stationId=0` 表示全部站点；`horizon` 取 `1`/`6`/`24`，非法值返回 `ERR_PARAM`。取 `t_load_forecast` 中同一 `model_version` 下 `create_time` 最大的一批。**无预测数据返回 `code=0` + 空 `list`**，不新增错误码——预测缺失是正常状态，不是错误，新增错误码要同时改协议第 5 节和 `common/error_code.h` 两处冻结契约，不值得。管理端按 `congestion ≥ 0.8` 本地判定预警，阈值不进协议，将来要调不必再走变更流程。`loadKw` 单位 kW，是物理量不是金额，不受「金额整数分」规则约束。
+```
+
+*补丁 3 — 第 8 节变更记录加一行*
+
+```markdown
+| 2026-09-03 | v1.1 | CR-001：1101 增加 congestion/idleForecast/sortBy；新增 2305 站点负荷预测 | L5 | 待评审 |
+```
+
 ---
 
 #### CR-002 · 授权 `gen_history.py` 离线写入业务表
@@ -148,6 +187,101 @@ t_order 0　　t_pile_log 0　　t_wallet_tx 0　　t_load_forecast 0
 1. 授权范围是否就是上表这三张表，有无遗漏或需要收紧的
 2. `--reset` 清空 `t_order` 是否可接受 —— 会连带清掉 L2 自测产生的订单，需约定「谁在什么时候可以跑」
 3. 是否需要在 `t_sys_config` 增加一行 `data_seed_version` 记录播种批次。该表属 L2，**L5 不自行插入**，需要的话请 L2 加
+
+---
+
+#### CR-003 · 冻结用户后会话立即失效
+
+**提出人** L2　**属主** L1（`docs/protocol.md` 第 6 节 + `server/net/session.h`）　**日期** 2026-09-03
+**影响** L1 实现接口 · L2 调用 · **L4 客户端要处理 `ERR_TOKEN_INVALID`** · L3 无感
+
+**问题**
+
+2202 冻结/解冻已实现（`server/biz/user_management_service.cpp`），冻结只 `UPDATE t_user.status`。1001 登录会拦截冻结账号（`user_service.cpp:82`），但**冻结前已签发的 token 不受影响**，会话表在 `server/net/session.h`，L2 无权改，也不应该改。
+
+**⚠ 风险比提出时描述的更严重。** L2 原话是「最长可能继续有效 2 小时」，这个说法不成立：
+
+`SessionTable::validate()` 每次校验成功都会 `it->lastActive = now`（`session.cpp`），`docs/protocol.md` 第 6 节也明文「**每次成功请求刷新最后活跃时间**」。所以 7200 秒是**空闲超时**，不是签发后的绝对有效期。
+
+> **结论：一个被冻结但仍在操作客户端的用户，token 永不过期，风控措施等于没生效。** 上限不是 2 小时，是无限。
+
+实测当前已注册的 20 个命令字中，冻结用户凭旧 token 仍可调用的包括 **1005 钱包充值**（`wallet_service.cpp` 全程未查 `t_user.status`）、1003 改昵称、1004 改头像。1202 预约有复查（`reservation_service.cpp:78`），是唯一挡住的。`[说明书]` 1.4 明文「管理员可手动冻结用户账号（用于风控场景）」——现状不满足。
+
+**建议实现**（L1 定夺）
+
+L2 建议的 `void invalidateUserSessions(int userId)` 方向正确，建议签名调整为：
+
+```cpp
+// 踢掉指定身份的全部会话，返回被清除的会话数（供日志与审计）。
+// 必须按 role 过滤：user_id 与 admin_id 是两套独立自增序列，同一个 id 值
+// 在两种角色下都存在，不过滤会误踢管理员。
+int invalidateSessions(int id, Role role);
+```
+
+两点理由：
+
+1. **返回值不要 void** —— L2 提交事务后要 `LOG_I` 记一句「踢掉 N 个会话」，否则联调时无法判断到底生效没有
+2. **带 `Role` 参数而非写死 ROLE_USER** —— `docs/db-schema.sql` 的 `t_admin.status` 已有 `1=停用`，管理员停用迟早要同样的能力，一次做好省得再改一遍接口
+
+实现上是一次写锁下的全表扫描（`m_map` 量级为在线连接数，`pool_size = 8`），成本可忽略。
+
+**协议第 6 节需同步加一条**（这才是本条必须走变更流程的原因）：
+
+> - 管理员冻结用户（2202）后，该用户**全部在线会话立即失效**，后续请求返回 `ERR_TOKEN_INVALID`
+
+**L4 必须知道的连带影响**
+
+会话被踢后，客户端下一个请求收到的是 `ERR_TOKEN_INVALID` →「登录已过期，请重新登录」，**不是**「该账号已被冻结」。用户重新用手机号登录时 1001 才返回 `ERR_USER_FROZEN` 显示真实原因。
+
+所以 **L4 收到 `ERR_TOKEN_INVALID` 必须清空本地 token 并跳转登录页**，不能静默重试——否则会拿着已失效的 token 死循环。这条不写清楚，联调周必踩。
+
+**错误码：不新增。** 复用 `ERR_TOKEN_INVALID`，理由同 CR-001：新增错误码要同步改 `docs/protocol.md` 第 5 节和 `common/error_code.h` 两处冻结契约，为一个能靠两步流程表达清楚的语义不值得。
+
+**附带建议（属 L2，不入本 CR）**：1005 充值补一次 `t_user.status` 复查。本 CR 落地后冻结用户已拿不到有效 token，该检查属纵深防御，但资金接口值得多一道，且能覆盖「冻结事务提交」与「踢会话」之间的瞬时窗口。
+
+**设计已定稿，以下补丁供 L1 / L2 复核后直接采用**（分属两位属主，各改各的文件；SCML 不代劳）：
+
+*补丁 1（L1）— `server/net/session.h`，`remove()` 声明之后新增*
+
+```cpp
+    // 按角色踢除指定身份的全部会话；返回被清除的数量。
+    // 必须按 role 过滤——user_id 与 admin_id 是两套独立自增序列，
+    // 同一个 id 值在两种角色下都存在，不过滤会误踢管理员会话。
+    int invalidateSessions(int id, Role role);
+```
+
+*补丁 2（L1）— `server/net/session.cpp`，`remove()` 实现之后新增*
+
+```cpp
+int SessionTable::invalidateSessions(int id, Role role)
+{
+    int n = 0;
+    pthread_rwlock_wrlock(&m_lock);
+    for (auto it = m_map.begin(); it != m_map.end(); ) {
+        if (it->id == id && it->role == role) { it = m_map.erase(it); ++n; }
+        else ++it;
+    }
+    pthread_rwlock_unlock(&m_lock);
+    return n;
+}
+```
+
+*补丁 3（L1）— `docs/protocol.md` 第 6 节末尾追加一条*
+
+```markdown
+- 管理员冻结用户（2202）后，该用户**全部在线会话立即失效**，后续请求返回 `ERR_TOKEN_INVALID`（客户端应清空本地 token 并跳转登录页，而非静默重试）
+```
+
+*补丁 4（L2）— `server/biz/user_management_service.cpp`，`handleUserStatus` 内 `db.commit()` 成功之后、`return ERR_OK` 之前插入*（`net/session.h` 的 include 方式与文件里已有的 `net/dispatcher.h` 一致，不必新加 include 路径写法）：
+
+```cpp
+    if (status == USER_FROZEN) {
+        const int kicked = SessionTable::instance().invalidateSessions(static_cast<int>(userId), ROLE_USER);
+        LOG_I(QStringLiteral("冻结用户已踢下线: userId=%1 会话数=%2").arg(userId).arg(kicked));
+    }
+```
+
+需要在文件顶部 `#include "net/dispatcher.h"` 之后加一行 `#include "net/session.h"`。**L1 的补丁 1/2 落地之后 L2 补丁 4 才能编译通过**，两人需要协调落地顺序（L1 先合，L2 再合，或 L2 先在本地叠加 L1 的分支自测）。
 
 ---
 
@@ -274,3 +408,4 @@ cp config/app.ini.example config/app.ini   # 首次克隆后执行，填入自�
 - [ ] W1 结束各线在骨架上交出本线「能跑的空壳」，L3 汇总验证
 - [ ] **CR-001 群内提出**（第 3.2 节）——协议缺预测通道，L1 定夺。**卡 L3 负荷预警 / L4 推荐排序，W3 才发现来不及**
 - [ ] **CR-002 群内提出**（第 3.2 节）——`gen_history.py` 写业务表授权，L2 定夺。**卡 W1 最高优先级交付物**
+- [ ] **CR-003 群内提出**（第 3.2 节）——冻结后会话立即失效，L1 定夺。L2 已提出，SCML 已登记并修正风险描述

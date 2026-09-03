@@ -48,3 +48,6 @@ venv/
 
 # ---- 大屏运行期快照（由 ml/export_snapshot.py 生成）----
 dataviz/data/*.json
+
+# ---- 历史数据生成器产物（由 ml/gen_history.py 生成）----
+ml/data/*.csv
