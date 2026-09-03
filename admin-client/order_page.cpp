@@ -1,13 +1,17 @@
 #include "order_page.h"
+#include "net_client.h"
 #include "protocol.h"
 #include "time_util.h"
 #include <QAbstractItemView>
+#include <QCheckBox>
 #include <QComboBox>
 #include <QDateEdit>
 #include <QDateTime>
 #include <QFont>
 #include <QHeaderView>
 #include <QHBoxLayout>
+#include <QJsonArray>
+#include <QJsonObject>
 #include <QLabel>
 #include <QMessageBox>
 #include <QPushButton>
@@ -31,7 +35,8 @@ OrderPage::OrderPage(NetClient *net, QWidget *parent)
     : QWidget(parent), m_net(net)
 {
     setupUi();
-    loadMockData();
+    connect(m_net, &NetClient::response, this, &OrderPage::handleResponse);
+    requestOrderList();
 }
 
 void OrderPage::setupUi()
@@ -59,16 +64,22 @@ void OrderPage::setupUi()
     filterLayout->addWidget(m_statusFilter);
 
     filterLayout->addSpacing(12);
+    m_dateFilterEnabled = new QCheckBox(QStringLiteral("按日期筛选"), this);
+    filterLayout->addWidget(m_dateFilterEnabled);
     filterLayout->addWidget(new QLabel(QStringLiteral("起始日期"), this));
     m_dateFrom = new QDateEdit(this);
     m_dateFrom->setCalendarPopup(true);
     m_dateFrom->setDisplayFormat(QStringLiteral("yyyy-MM-dd"));
+    m_dateFrom->setDate(QDate::currentDate().addMonths(-1));
+    m_dateFrom->setEnabled(false);
     filterLayout->addWidget(m_dateFrom);
 
     filterLayout->addWidget(new QLabel(QStringLiteral("结束日期"), this));
     m_dateTo = new QDateEdit(this);
     m_dateTo->setCalendarPopup(true);
     m_dateTo->setDisplayFormat(QStringLiteral("yyyy-MM-dd"));
+    m_dateTo->setDate(QDate::currentDate());
+    m_dateTo->setEnabled(false);
     filterLayout->addWidget(m_dateTo);
 
     auto *searchButton = new QPushButton(QStringLiteral("查询"), this);
@@ -77,6 +88,10 @@ void OrderPage::setupUi()
     filterLayout->addWidget(resetButton);
     filterLayout->addStretch();
     pageLayout->addLayout(filterLayout);
+
+    m_statusLabel = new QLabel(QStringLiteral("准备加载订单列表"), this);
+    m_statusLabel->setStyleSheet(QStringLiteral("color:#667085"));
+    pageLayout->addWidget(m_statusLabel);
 
     m_table = new QTableWidget(0, 12, this);
     m_table->setHorizontalHeaderLabels({
@@ -95,75 +110,91 @@ void OrderPage::setupUi()
     m_table->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
     pageLayout->addWidget(m_table, 1);
 
-    connect(searchButton, &QPushButton::clicked, this, &OrderPage::refreshTable);
+    connect(m_dateFilterEnabled, &QCheckBox::toggled, m_dateFrom, &QWidget::setEnabled);
+    connect(m_dateFilterEnabled, &QCheckBox::toggled, m_dateTo, &QWidget::setEnabled);
+    connect(searchButton, &QPushButton::clicked, this, &OrderPage::requestOrderList);
     connect(resetButton, &QPushButton::clicked, this, &OrderPage::resetFilters);
 }
 
-void OrderPage::loadMockData()
+void OrderPage::requestOrderList()
 {
-    // Mock 数据集中于此，仅对照 t_order；待 2304 接入后由服务端响应替换。
-    m_orders.clear();
-    const QDateTime firstReserve(QDate(2026, 8, 5), QTime(8, 0));
-
-    for (int index = 0; index < 25; ++index) {
-        const int orderId = 1001 + index;
-        const int status = index % 5;
-        const int stationId = index % 6 + 1;
-        const int pileId = (stationId - 1) * 4 + index % 4 + 1;
-        const QDateTime reserve = firstReserve.addDays(index).addSecs((index % 6) * 1800);
-        const QString orderNo = QStringLiteral("ORD%1%2")
-            .arg(reserve.toString(QStringLiteral("yyyyMMddHHmmss")))
-            .arg(orderId, 4, 10, QLatin1Char('0'));
-
-        QString startTime;
-        QString endTime;
-        QString settleTime;
-        int kwhX100 = 0;
-        qint64 amountFen = 0;
-        const qint64 priceFen = 138 + stationId * 2;
-
-        if (status == ecp::ORDER_CHARGING || status == ecp::ORDER_TO_SETTLE
-            || status == ecp::ORDER_SETTLED) {
-            const QDateTime start = reserve.addSecs(10 * 60);
-            startTime = ecp::toStr(start);
-            kwhX100 = 1250 + index * 137;
-            amountFen = priceFen * kwhX100 / 100;
-
-            if (status == ecp::ORDER_TO_SETTLE || status == ecp::ORDER_SETTLED) {
-                const QDateTime end = start.addSecs(45 * 60 + (index % 4) * 20 * 60);
-                endTime = ecp::toStr(end);
-                if (status == ecp::ORDER_SETTLED) {
-                    settleTime = ecp::toStr(end.addSecs(5 * 60));
-                }
-            }
+    QString dateFrom;
+    QString dateTo;
+    if (m_dateFilterEnabled->isChecked()) {
+        if (m_dateFrom->date() > m_dateTo->date()) {
+            QMessageBox::warning(this, QStringLiteral("筛选条件有误"),
+                                 QStringLiteral("起始日期不能晚于结束日期"));
+            return;
         }
-
-        m_orders.append({ orderId, orderNo, index % 14 + 1, pileId, stationId,
-                          status, priceFen, kwhX100, amountFen, ecp::toStr(reserve),
-                          startTime, endTime, settleTime });
+        dateFrom = ecp::toStr(QDateTime(m_dateFrom->date(), QTime(0, 0, 0)));
+        dateTo = ecp::toStr(QDateTime(m_dateTo->date(), QTime(23, 59, 59)));
     }
 
-    resetFilters();
+    m_statusLabel->setText(QStringLiteral("正在加载订单…"));
+    const int seq = m_net->send(ecp::CMD_ADMIN_ORDER_LIST, QJsonObject{
+        { QStringLiteral("page"), 1 },
+        { QStringLiteral("size"), 100 },
+        { QStringLiteral("status"), m_statusFilter->currentData().toInt() },
+        { QStringLiteral("dateFrom"), dateFrom },
+        { QStringLiteral("dateTo"), dateTo }
+    });
+    if (seq < 0) {
+        m_orderListSeq = -1;
+        m_statusLabel->setText(QStringLiteral("订单列表请求发送失败，请检查网络连接"));
+        return;
+    }
+    m_orderListSeq = seq;
+}
+
+void OrderPage::handleResponse(int cmd, int seq, int code, const QString &msg,
+                               const QJsonObject &data)
+{
+    if (cmd != ecp::CMD_ADMIN_ORDER_LIST || seq != m_orderListSeq) return;
+    m_orderListSeq = -1;
+    handleOrderListResponse(code, msg, data);
+}
+
+void OrderPage::handleOrderListResponse(int code, const QString &msg,
+                                        const QJsonObject &data)
+{
+    if (code != ecp::ERR_OK) {
+        m_statusLabel->setText(QStringLiteral("订单加载失败：%1").arg(msg));
+        return;
+    }
+
+    QVector<OrderData> orders;
+    const QJsonArray list = data.value(QStringLiteral("list")).toArray();
+    orders.reserve(list.size());
+    for (const QJsonValue &value : list) {
+        if (!value.isObject()) continue;
+        const QJsonObject item = value.toObject();
+        orders.append({
+            item.value(QStringLiteral("orderId")).toInteger(),
+            item.value(QStringLiteral("orderNo")).toString(),
+            item.value(QStringLiteral("userId")).toInteger(),
+            item.value(QStringLiteral("stationId")).toInteger(),
+            item.value(QStringLiteral("pileId")).toInteger(),
+            item.value(QStringLiteral("status")).toInt(),
+            item.value(QStringLiteral("kwh")).toDouble(),
+            item.value(QStringLiteral("amount")).toInteger(),
+            item.value(QStringLiteral("reserveTime")).toString(),
+            item.value(QStringLiteral("startTime")).toString(),
+            item.value(QStringLiteral("endTime")).toString(),
+            item.value(QStringLiteral("settleTime")).toString()
+        });
+    }
+
+    m_orders = orders;
+    refreshTable();
+    const qint64 total = data.value(QStringLiteral("total")).toInteger(m_orders.size());
+    m_statusLabel->setText(QStringLiteral("已加载 %1 条订单，共 %2 条")
+                               .arg(m_orders.size()).arg(total));
 }
 
 void OrderPage::refreshTable()
 {
-    const QDate dateFrom = m_dateFrom->date();
-    const QDate dateTo = m_dateTo->date();
-    if (dateFrom > dateTo) {
-        QMessageBox::warning(this, QStringLiteral("筛选条件有误"),
-                             QStringLiteral("起始日期不能晚于结束日期"));
-        return;
-    }
-    const int status = m_statusFilter->currentData().toInt();
-
-    // TODO(L3)：服务端实现后，将本地筛选替换为 2304 请求：
-    // {page, size, status, dateFrom, dateTo}。当前不得发送真实网络请求。
-    // 本轮 Mock 日期范围按 reserveTime（预约时间）判断。
     m_table->setRowCount(0);
-    for (const OrderMock &order : m_orders) {
-        if (!matchesFilters(order, status, dateFrom, dateTo)) continue;
-
+    for (const OrderData &order : m_orders) {
         const int row = m_table->rowCount();
         m_table->insertRow(row);
         m_table->setItem(row, 0, centeredItem(QString::number(order.orderId)));
@@ -172,7 +203,7 @@ void OrderPage::refreshTable()
         m_table->setItem(row, 3, centeredItem(QString::number(order.stationId)));
         m_table->setItem(row, 4, centeredItem(QString::number(order.pileId)));
         m_table->setItem(row, 5, centeredItem(statusText(order.status)));
-        m_table->setItem(row, 6, centeredItem(kwhText(order.kwhX100)));
+        m_table->setItem(row, 6, centeredItem(kwhText(order.kwh)));
         m_table->setItem(row, 7, centeredItem(ecp::fenToYuan(order.amountFen)));
         m_table->setItem(row, 8, centeredItem(timeText(order.reserveTime)));
         m_table->setItem(row, 9, centeredItem(timeText(order.startTime)));
@@ -184,22 +215,10 @@ void OrderPage::refreshTable()
 void OrderPage::resetFilters()
 {
     m_statusFilter->setCurrentIndex(0);
-    if (m_orders.isEmpty()) {
-        m_dateFrom->setDate(QDate::currentDate());
-        m_dateTo->setDate(QDate::currentDate());
-    } else {
-        m_dateFrom->setDate(ecp::fromStr(m_orders.first().reserveTime).date());
-        m_dateTo->setDate(ecp::fromStr(m_orders.last().reserveTime).date());
-    }
-    refreshTable();
-}
-
-bool OrderPage::matchesFilters(const OrderMock &order, int status,
-                               const QDate &dateFrom, const QDate &dateTo) const
-{
-    if (status >= 0 && order.status != status) return false;
-    const QDate reserveDate = ecp::fromStr(order.reserveTime).date();
-    return reserveDate >= dateFrom && reserveDate <= dateTo;
+    m_dateFilterEnabled->setChecked(false);
+    m_dateFrom->setDate(QDate::currentDate().addMonths(-1));
+    m_dateTo->setDate(QDate::currentDate());
+    requestOrderList();
 }
 
 QString OrderPage::statusText(int status)
@@ -214,11 +233,9 @@ QString OrderPage::statusText(int status)
     }
 }
 
-QString OrderPage::kwhText(int kwhX100)
+QString OrderPage::kwhText(qreal kwh)
 {
-    return QStringLiteral("%1.%2 kWh")
-        .arg(kwhX100 / 100)
-        .arg(qAbs(kwhX100 % 100), 2, 10, QLatin1Char('0'));
+    return QStringLiteral("%1 kWh").arg(QString::number(kwh, 'f', 2));
 }
 
 QString OrderPage::timeText(const QString &time)
