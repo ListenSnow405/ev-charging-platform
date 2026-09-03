@@ -27,7 +27,8 @@ SOURCES += \
     biz/wallet_service.cpp \
     biz/user_management_service.cpp \
     biz/station_service.cpp \
-    biz/pile_service.cpp
+    biz/pile_service.cpp \
+    biz/reservation_service.cpp
 
 HEADERS += \
     net/thread_pool.h \
