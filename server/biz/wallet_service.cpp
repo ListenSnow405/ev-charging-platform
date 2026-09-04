@@ -34,6 +34,8 @@ static void rollback(QSqlDatabase &db)
 
 static int handleRecharge(const Request &req, QJsonObject &out)
 {
+    if (req.session.role != ROLE_USER) return ERR_NO_PERMISSION;
+
     const QJsonValue amountValue = req.data.value("amount");
     if (amountValue.isUndefined() || !amountValue.isDouble()) return ERR_PARAM;
 
@@ -66,9 +68,28 @@ static int handleRecharge(const Request &req, QJsonObject &out)
     }
     if (amount > rechargeMax) return ERR_AMOUNT_INVALID;
 
-    if (!db.transaction()) {
-        LOG_E(QStringLiteral("开启钱包充值事务失败: %1").arg(db.lastError().text()));
+    QSqlQuery begin(db);
+    begin.prepare(QStringLiteral("BEGIN IMMEDIATE"));
+    if (!begin.exec()) {
+        LOG_E(QStringLiteral("开启钱包充值立即事务失败: %1").arg(begin.lastError().text()));
         return ERR_INTERNAL;
+    }
+
+    QSqlQuery user(db);
+    user.prepare(QStringLiteral("SELECT status FROM t_user WHERE user_id = ?"));
+    user.addBindValue(req.session.id);
+    if (!user.exec()) {
+        LOG_E(QStringLiteral("钱包充值查询用户失败: %1").arg(user.lastError().text()));
+        rollback(db);
+        return ERR_INTERNAL;
+    }
+    if (!user.next()) {
+        rollback(db);
+        return ERR_USER_NOT_FOUND;
+    }
+    if (user.value("status").toInt() == USER_FROZEN) {
+        rollback(db);
+        return ERR_USER_FROZEN;
     }
 
     const QString now = nowStr();
@@ -132,6 +153,8 @@ static int handleRecharge(const Request &req, QJsonObject &out)
 
 static int handleWalletTxList(const Request &req, QJsonObject &out)
 {
+    if (req.session.role != ROLE_USER) return ERR_NO_PERMISSION;
+
     qint64 page = 0;
     qint64 size = 0;
     if (!positiveInteger(req.data.value("page"), page)
