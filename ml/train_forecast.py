@@ -46,6 +46,8 @@ MODEL_DIR = Path("ml/data/models")
 REPORT_OUT = Path("ml/reports/forecast_eval.md")
 
 TARGETS = {"y_load_kw": "负荷 kW", "y_sessions": "并发会话数"}
+# is_peak 的分位数。0.75 = 把各站负荷最高的四分之一时段标为高峰。
+PEAK_QUANTILE = 0.75
 # 零方差列（六站种子数据相同 / 窗口内无法定节假日），以及 id、时间戳、目标列，都不进模型。
 DROP = {"station_name", "profile", "weather", "origin_ts", "target_ts", "horizon",
         "pile_total", "pile_fast", "pile_slow", "is_holiday",
@@ -99,15 +101,19 @@ def make_model(params, cat_mask, seed):
 
 
 def select_params(train, feat_cols, target, cat_mask, valid_days, seed):
-    """在训练段末尾切验证集选超参。绝不用测试段选——那是拿答案调参。"""
+    """在训练段末尾切验证集选超参。绝不用测试段选——那是拿答案调参。
+
+    顺带返回最优配置在验证段上的**样本外预测**，用于校准 is_peak 阈值（见 peak_thresholds）。
+    """
     inner_tr, valid, _ = time_split(train, valid_days)
-    best, best_mae = None, float("inf")
+    best, best_mae, best_pred = None, float("inf"), None
     for params in GRID:
         m = make_model(params, cat_mask, seed).fit(inner_tr[feat_cols], inner_tr[target])
-        v = mean_absolute_error(valid[target], np.clip(m.predict(valid[feat_cols]), 0, None))
+        pv = np.clip(m.predict(valid[feat_cols]), 0, None)
+        v = mean_absolute_error(valid[target], pv)
         if v < best_mae:
-            best, best_mae = params, v
-    return best, best_mae
+            best, best_mae, best_pred = params, v, pv
+    return best, best_mae, valid.assign(_pred=best_pred)
 
 
 def evaluate(y_true, y_pred):
@@ -127,14 +133,14 @@ def main() -> int:
     model_version = "hgb-" + datetime.now().strftime("%Y%m%d-%H%M%S")
     MODEL_DIR.mkdir(parents=True, exist_ok=True)
 
-    results, importances, per_station = [], {}, {}
+    results, importances, per_station, peak_thresholds = [], {}, {}, {}
     for target, label in TARGETS.items():
         for h in sorted(df["horizon"].unique()):
             sub = df[df["horizon"] == h]
             train, test, cut = time_split(sub, args.test_days)
 
-            params, valid_mae = select_params(train, feat_cols, target, cat_mask,
-                                              args.valid_days, args.seed)
+            params, valid_mae, valid_pred = select_params(train, feat_cols, target, cat_mask,
+                                                          args.valid_days, args.seed)
             model = make_model(params, cat_mask, args.seed)
             model.fit(train[feat_cols], train[target])
             pred = model.predict(test[feat_cols])
@@ -165,6 +171,15 @@ def main() -> int:
                         MODEL_DIR / f"{target}_h{h}.joblib")
 
             if target == "y_load_kw":
+                # is_peak 的阈值：取模型**自身预测分布**的分位数，逐站逐 horizon 各一个。
+                # 不能拿真实负荷的分位数当阈值——模型预测是平滑的（回归向均值），
+                # 用真值分位数去卡平滑后的预测，触发率实测只有 7.8%~12.8%，
+                # 而校准目标是 25%，且 horizon 越大压得越低（预测越平滑）。
+                # 对负荷预警来说这是错误方向：该报的不报。
+                # 在**验证段**上算而不是训练段：验证段是样本外的，预测的平滑程度
+                # 才和上线后一致；训练段的拟合值更"尖"，会把阈值抬高，又回到欠触发。
+                peak_thresholds[h] = (valid_pred.groupby("station_id")["_pred"]
+                                      .quantile(PEAK_QUANTILE).round(3).to_dict())
                 st = test[["station_name"]].copy()
                 st["err_model"] = np.abs(test[target].to_numpy() - pred)
                 st["err_base"] = np.abs(test[target].to_numpy() - base_b)
@@ -181,6 +196,10 @@ def main() -> int:
         "model_version": model_version,
         "trained_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "features": str(fp), "test_days": args.test_days,
+        # is_peak 阈值随模型一起交付：它是模型输出分布的函数，换模型必须跟着换
+        "peak_quantile": PEAK_QUANTILE,
+        "peak_thresholds": {str(h): {str(k): v for k, v in d.items()}
+                            for h, d in peak_thresholds.items()},
         "metrics": res.drop(columns=["cut"]).to_dict(orient="records"),
     }, ensure_ascii=False, indent=2), encoding="utf-8")
 
@@ -201,6 +220,10 @@ def main() -> int:
                   f"iter={p['max_iter']} lr={p['learning_rate']} leaf={p['max_leaf_nodes']}")
         print()
 
+    print("【is_peak 阈值（各站 × horizon，取验证段预测分布的 P"
+          f"{int(PEAK_QUANTILE * 100)}，单位 kW）】")
+    print("  " + pd.DataFrame(peak_thresholds).round(1).to_string().replace("\n", "\n  "))
+    print()
     print("【负荷模型 permutation importance（测试段，MAE 口径，前 8）】")
     for h, imp in importances.items():
         top = "　".join(f"{k} {v:.2f}" for k, v in imp.head(8).items())

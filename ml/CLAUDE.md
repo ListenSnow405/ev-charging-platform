@@ -45,6 +45,7 @@
 | `build_features.py` | 站-小时特征面板 → `data/features.csv`，按 horizon 分层，内置滞后穿越自检 |
 | `train_forecast.py` | 6 个模型（2 目标 × 3 horizon）+ 时序切分评估 → `reports/forecast_eval.md` |
 | `reports/forecast_eval.md` | 精度评估报告，答辩材料，随训练自动重生成 |
+| `predict.py` | 推理并回写 `t_load_forecast`；authorizer 锁死只可写这一张表 |
 | `data/dev.db` | 私有开发副本（gitignored），全部建模工作在它上面做，不碰 `charging.db` |
 | `data/seed_manifest.json` | 播种批次记录，`--reset` 据此精确删除 |
 | `requirements.txt` | pandas / numpy / scikit-learn |
@@ -69,8 +70,11 @@
       相对「分工作日/周末的同小时均值」基线：负荷 +10.0% / +4.1% / +2.6%（1h/6h/24h），
       并发数 +33.5% / +2.6% / −0.2%。h≥6 的增量小是数据决定的，
       去季节 t−24h 自相关仅 0.078，详见 `reports/forecast_eval.md`
-- [ ] 预测结果回写 `t_load_forecast`
-- [ ] 拥堵度计算，供用户端站点推荐排序
+- [x] **预测结果回写 `t_load_forecast`**——`predict.py`，6 站 × 3 horizon = 18 行/批，
+      整批共用一个 `create_time`（协议 2305 要求「同一 model_version 下 create_time 最大的一批」，
+      逐行取当前时刻会让 L2 只捞到最后几行）
+- [x] **拥堵度计算**——`congestion` 用**取整前**的空闲数算。
+      取整后再算的话 4 根桩只有 5 个取值，六站排序大量并列，1101 的 sortBy=1 失去区分度
 - [ ] 精度评估与分析结论成文（答辩材料）
 
 ### 阻塞状态：已全部解除
