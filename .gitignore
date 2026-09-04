@@ -51,3 +51,6 @@ dataviz/data/*.json
 
 # ---- 历史数据生成器产物（由 ml/gen_history.py 生成）----
 ml/data/*.csv
+# 播种记录与各人的开发库绑定，且每次重播全量重写（约 60KB），不入库。
+# 它的作用是让 --reset 能精确删除本脚本播种的行，见 ml/CLAUDE.md。
+ml/data/seed_manifest.json

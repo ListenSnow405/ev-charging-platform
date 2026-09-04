@@ -5,11 +5,14 @@ ml/gen_history.py  —  历史数据生成器　归属 L5
 大屏与时序模型共同的燃料：当前 charging.db 的 t_order / t_pile_log 为空，
 大屏营收趋势与站点排行两张图全零，模型没有任何训练数据。
 
-⚠ 权限边界（docs/conventions.md CR-002）：
-    落库（--commit）需 L2（t_order/t_pile_log/t_pile 属主）批准。
-    批准前只应使用默认 dry-run 预览，或对 charging.db 的副本验证 --commit 路径。
+⚠ 权限边界（docs/conventions.md CR-002，L2 已于 2026-09-04 批复）：
     只写：t_order（INSERT）/ t_pile_log（INSERT）/ t_pile.charge_count,charge_duration（UPDATE 聚合重算）
     不碰：t_user / t_station / t_admin / t_wallet_tx / t_sys_config；不改任何表结构
+    金额一律整数分，与 1204 结算规则一致（批复第 1 条）
+    --reset 只允许对可丢弃副本执行，脚本硬性拒绝 charging.db（批复第 2 条）；
+        且只删 ml/data/seed_manifest.json 记录过的批次，绝不按时间区间盲删
+    播种批次由 ML 侧的 seed_manifest.json 维护，不写 t_sys_config（批复第 3 条）
+    对 charging.db 落库前：停服务 → 备份 → 先 dry-run，执行人限 L5/SCML
 
 天气/节假日特征在 t_order 表中没有对应列（db-schema.sql 冻结，不能加列），
 因此按天写入独立的 ml/data/day_features.csv，供后续特征工程按日期 join。
@@ -17,11 +20,12 @@ ml/gen_history.py  —  历史数据生成器　归属 L5
 用法：
     python3 ml/gen_history.py                          # dry-run，只打印统计，不写 db
     python3 ml/gen_history.py --commit                  # 落库（追加）
-    python3 ml/gen_history.py --commit --reset          # 先清空历史区间再落库（仅限开发库）
+    python3 ml/gen_history.py ml/data/dev.db --commit --reset   # 按播种记录清除后重播（仅限副本）
     python3 ml/gen_history.py charging.db --days 90 --commit
 """
 import argparse
 import csv
+import json
 import math
 import random
 import sqlite3
@@ -31,6 +35,11 @@ from pathlib import Path
 
 DB_DEFAULT = Path("charging.db")
 DAY_FEATURES_OUT = Path("ml/data/day_features.csv")
+SEED_MANIFEST = Path("ml/data/seed_manifest.json")
+
+# CR-002 批复第 2 条：--reset 只允许在可丢弃的演示副本上执行，
+# 不得对共享开发库 / 正式库 / 含成员测试数据的 charging.db 执行。
+RESET_PROTECTED = {"charging.db"}
 
 # 简化节假日日历（演示用，非官方）：周末 + 几个示例法定节假日
 SAMPLE_HOLIDAYS = {"01-01", "05-01", "10-01", "10-02", "10-03"}
@@ -172,7 +181,11 @@ def build_dataset(days: int, seed: int, stations, piles_by_station, users):
                         end_dt = start_dt + timedelta(minutes=minutes)
                     settle_dt = min(end_dt + timedelta(minutes=rng.uniform(0, 5)),
                                      today_mid - timedelta(seconds=1))
-                    amount = round(price * kwh_x100 / 100)
+                    # 金额一律整数分（CR-002 批复第 1 条：与 1204 结算的整数分规则一致）。
+                    # price×kwh_x100 的单位是「分×100」，+50 再整除 100 即四舍五入到分。
+                    # 不能写 round(x/100)——Python 的 round 是四舍六入五成双，且中间转浮点，
+                    # 与服务端整数运算对不上，对账时会差几分钱。
+                    amount = (price * kwh_x100 + 50) // 100
                     orders.append((order_no, user_id, pile_id, station_id, 3, price, kwh_x100, amount,
                                     reserve_dt, start_dt, end_dt, settle_dt))
                 else:
@@ -202,15 +215,55 @@ def self_check(con: sqlite3.Connection, window_end: datetime) -> int:
     return row[0]
 
 
-def apply_reset(con: sqlite3.Connection, window_end: datetime):
-    end_str = window_end.strftime("%Y-%m-%d %H:%M:%S")
-    con.execute(
-        "DELETE FROM t_order WHERE "
-        "(settle_time IS NOT NULL AND settle_time < ?) OR "
-        "(settle_time IS NULL AND reserve_time < ?)",
-        (end_str, end_str),
-    )
-    con.execute("DELETE FROM t_pile_log WHERE create_time < ?", (end_str,))
+def load_manifest() -> dict:
+    if SEED_MANIFEST.exists():
+        return json.loads(SEED_MANIFEST.read_text(encoding="utf-8"))
+    return {"batches": []}
+
+
+def record_batch(db_path: Path, order_nos, log_id_from: int, log_id_to: int):
+    # CR-002 批复第 3 条：L2 不同意在 t_sys_config 加 data_seed_version（单一版本号
+    # 既分不清哪些订单是脚本生成的，也保证不了 reset 安全），改由 ML 侧维护播种记录。
+    m = load_manifest()
+    m["batches"].append({
+        "db": db_path.name,
+        "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "order_count": len(order_nos),
+        "pile_log_id_from": log_id_from,
+        "pile_log_id_to": log_id_to,
+        "order_no": sorted(order_nos),
+    })
+    SEED_MANIFEST.parent.mkdir(parents=True, exist_ok=True)
+    SEED_MANIFEST.write_text(json.dumps(m, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def apply_reset(con: sqlite3.Connection, db_path: Path) -> int:
+    """只删本脚本播种过的行——按播种记录精确定位，绝不按时间区间盲删。
+
+    CR-002 批复第 2 条要求 --reset 只在可丢弃的副本上跑。但「副本」是人的承诺，
+    脚本挡不住手滑，所以这里再加一道：即便真在有成员测试数据的库上执行，
+    没记进播种清单的行也一条都不会被碰。
+    """
+    m = load_manifest()
+    mine = [b for b in m["batches"] if b["db"] == db_path.name]
+    if not mine:
+        print(f"播种记录里没有 {db_path.name} 的批次，--reset 无可删除内容"
+              f"（不会退化成按时间区间盲删）")
+        return 0
+
+    nos = [(n,) for b in mine for n in b["order_no"]]
+    con.executemany("DELETE FROM t_order WHERE order_no = ?", nos)
+    deleted = con.total_changes
+    for b in mine:
+        # 必须用闭区间：只记起点、删 ">= 起点" 会连带删掉本批次之后别人插入的日志。
+        # 本批次是单事务连续插入，区间内不会夹杂他人的行。
+        con.execute("DELETE FROM t_pile_log WHERE log_id BETWEEN ? AND ?",
+                    (b["pile_log_id_from"], b.get("pile_log_id_to", b["pile_log_id_from"])))
+
+    m["batches"] = [b for b in m["batches"] if b["db"] != db_path.name]
+    SEED_MANIFEST.write_text(json.dumps(m, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(f"已按播种记录清除 {len(nos)} 条订单及对应设备日志")
+    return deleted
 
 
 def write_db(con: sqlite3.Connection, orders, pile_logs):
@@ -271,6 +324,13 @@ def main() -> int:
         print(f"数据库不存在：{db_path}\n请先执行：sqlite3 {db_path} < docs/db-schema.sql", file=sys.stderr)
         return 1
 
+    if args.reset and db_path.name in RESET_PROTECTED:
+        print(f"拒绝对 {db_path.name} 执行 --reset。", file=sys.stderr)
+        print("CR-002 批复第 2 条：--reset 只允许在可丢弃的演示副本上执行，"
+              "不得对共享开发库 / 正式库 / 含成员测试数据的库执行。\n"
+              "如需重播，请先 cp 一份副本（例如 ml/data/dev.db）再对副本操作。", file=sys.stderr)
+        return 4
+
     # dry-run 强制只读连接：即便代码有 bug 也不可能写库，这是结构性保证而非靠自觉。
     if args.commit:
         con = sqlite3.connect(str(db_path))
@@ -295,18 +355,22 @@ def main() -> int:
     summarize(orders, pile_logs, args.days)
 
     if not args.commit:
-        print("\ndry-run：未写入数据库。加 --commit 才会落库（需 CR-002 批准，见 docs/conventions.md）。")
+        print(f"\ndry-run：未写入数据库。加 --commit 才会落库。"
+              f"\n对 {DB_DEFAULT.name} 落库前请按 CR-002 批复：停服务 → 备份 → 先 dry-run。")
         write_day_features(day_features)
         print(f"已写出 {DAY_FEATURES_OUT}（不涉及 charging.db，无需审批）")
         con.close()
         return 0
 
     if args.reset:
-        apply_reset(con, window_end)
+        apply_reset(con, db_path)
     try:
+        log_id_from = (con.execute("SELECT IFNULL(MAX(log_id), 0) FROM t_pile_log").fetchone()[0]) + 1
         write_db(con, orders, pile_logs)
         recompute_pile_aggregates(con)
+        log_id_to = con.execute("SELECT IFNULL(MAX(log_id), 0) FROM t_pile_log").fetchone()[0]
         con.commit()
+        record_batch(db_path, [o[0] for o in orders], log_id_from, log_id_to)
     except sqlite3.IntegrityError as e:
         con.rollback()
         # 最常见诱因：不带 --reset 重跑，同一个 --seed 生成了同一批 order_no。

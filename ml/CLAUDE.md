@@ -20,41 +20,53 @@
 
 ### 离线种子脚本约束（`gen_history.py`）
 
-⚠ **待 CR-002 批准后方可执行落库**——见 [docs/conventions.md 第 3.2 节](../docs/conventions.md)。`t_order` / `t_pile_log` / `t_pile` 属主是 L2，未获授权前只能写代码、跑 dry-run，**不得 `--commit`**。
+✅ **CR-002 已于 2026-09-04 获 L2 批复**，以下为批复后的最终约束（见 [docs/conventions.md 第 3.2 节](../docs/conventions.md)）：
 
 - 与服务端进程无关，不随服务端启动，不进任何自动流程，只在开发/演示准备阶段手动跑
 - 可写：`t_order`（INSERT）、`t_pile_log`（INSERT）、`t_pile.charge_count` / `charge_duration`（UPDATE 聚合回填）
 - 禁止：`t_user` / `t_station` / `t_admin` / `t_wallet_tx` / `t_sys_config`，以及任何表结构变更
-- **默认 dry-run**，只打印将生成多少条；必须显式 `--commit` 才落库
-- `--reset` 先清空 `t_order` / `t_pile_log` 再生成，仅限开发库
-- **红线自检**：若 `t_order` 存在 `settle_time` 晚于生成区间上界的记录，视为库里已有真实联调数据，拒绝执行
+- **金额一律整数分**，用 `(price*kwh_x100+50)//100`，与 1204 结算规则一致（批复第 1 条）。
+  不能用 `round(x/100)`——Python 的 round 是四舍六入五成双且中间转浮点，对账会差分
+- **默认 dry-run**，必须显式 `--commit` 才落库
+- **`--reset` 脚本硬性拒绝 `charging.db`**（批复第 2 条），只能对可丢弃副本执行；
+  且只删 `ml/data/seed_manifest.json` 记录过的批次，**绝不按时间区间盲删**——
+  成员留在历史区间里的测试数据不会被误伤
+- **播种批次由 ML 侧的 `seed_manifest.json` 维护**，不写 `t_sys_config`（批复第 3 条）
+- 对 `charging.db` 落库前的流程：停服务 → 备份 → 先 dry-run，执行人限 L5/SCML
+- **红线自检**：若 `t_order` 存在落在今日或之后的记录，视为库里已有真实联调数据，拒绝执行
 
 ## 现有文件
 
 | 文件 | 用途 |
 | --- | --- |
 | `export_snapshot.py` | 大屏数据快照导出，已可运行 |
-| `gen_history.py` | 历史订单/设备日志生成器，已实现并测试；落库需 CR-002 批准 |
+| `gen_history.py` | 历史订单/设备日志生成器，已实现并测试，CR-002 已批复 |
+| `data/dev.db` | 私有开发副本（gitignored），全部建模工作在它上面做，不碰 `charging.db` |
+| `data/seed_manifest.json` | 播种批次记录，`--reset` 据此精确删除 |
 | `requirements.txt` | pandas / numpy / scikit-learn |
 
 ## TODO
 
-- [x] **`gen_history.py` 历史数据生成器**——含时段、时长、电量、天气、节假日特征。dry-run 已验证（60 天约 2000 单，见脚本输出）；天气/节假日无对应表列，写入独立的 `ml/data/day_features.csv`。**落库（`--commit`）待 CR-002 批准**
+- [x] **`gen_history.py` 历史数据生成器**——60 天约 2000 单，CR-002 已批复，落库路径已验证
+- [ ] **生成器补时序结构**——实测 t−24h/t−168h 自相关仅 0.05，六个站共用一条小时曲线，
+      「各站点」预测无从谈起（说明书 1.4 硬要求）。需站点画像分化 + AR(1) 需求水平 + 天气持续性
 - [ ] 特征工程与时序建模，输出 1h / 6h / 24h 预测
 - [ ] 预测结果回写 `t_load_forecast`
 - [ ] 拥堵度计算，供用户端站点推荐排序
 - [ ] 精度评估与分析结论成文（答辩材料）
 
-### 阻塞中
+### 阻塞状态：已全部解除
 
-| 事项 | 卡在哪 | 属主 |
-| --- | --- | --- |
-| 生成器落库 | CR-002 未批 —— 业务表写入授权 | L2 |
-| 预测结果送到两端 | CR-001 未批 —— 协议无字段承载 `congestion` / `idle_pile`，1101 与 2300 段都没有通道 | L1 |
+| 事项 | 状态 |
+| --- | --- |
+| 生成器落库（CR-002） | ✅ L2 已批复 2026-09-04 |
+| 预测结果送到两端（CR-001） | ✅ 已并入冻结协议 v1.1，`common/protocol.h` 也已有 `CMD_STAT_LOAD_FORECAST = 2305` |
 
-两条 CR 全文见 [docs/conventions.md 第 3.2 节](../docs/conventions.md)。**属主改完协议之前不要先按新字段写代码。**
+**下游仍未就绪**（不阻塞 L5 自己的工作）：2305 的服务端 handler 尚未实现，L2 合入后 L3 会立即接管理端预测/预警页。
+L5 侧的职责是**先把 `t_load_forecast` 填满**，让 L2 的 handler 落地时只剩一个 query。
 
-> 大屏不受 CR-001 影响：它直读 SQLite 的 `t_load_forecast`，不经过服务端协议。只有用户端推荐排序和管理端负荷预警要等。
+> 统计口径约束：`export_snapshot.py` 的营收/趋势/状态口径必须与 `server/biz/statistics_service.cpp`
+> 的 2301/2302/2303 保持一致（含「补零」行为），否则大屏与管理端并排会显示成两个形状。
 
 ## 环境
 
