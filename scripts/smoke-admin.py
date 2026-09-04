@@ -5,6 +5,7 @@ No business mutation command is sent. The required 2001 login may update the
 server-managed t_admin.last_login audit timestamp.
 """
 
+import argparse
 import configparser
 import json
 import os
@@ -194,7 +195,7 @@ def expect_ok(response, cmd):
     return response["data"]
 
 
-def load_target():
+def load_target(host_override=None, port_override=None):
     root = Path(__file__).resolve().parents[1]
     config_path = root / "config" / "app.ini"
     parser = configparser.ConfigParser()
@@ -205,14 +206,42 @@ def load_target():
         except (OSError, configparser.Error) as exc:
             raise SmokeFailure(f"cannot read {config_path}: {exc}") from exc
 
-    host = parser.get("server", "host", fallback=DEFAULT_HOST).strip() or DEFAULT_HOST
-    try:
-        port = parser.getint("server", "port", fallback=DEFAULT_PORT)
-    except ValueError as exc:
-        raise SmokeFailure(f"invalid server port in {config_path}: {exc}") from exc
+    config_host = parser.get(
+        "server", "host", fallback=DEFAULT_HOST
+    ).strip() or DEFAULT_HOST
+    host = host_override.strip() if host_override is not None else config_host
+    if not host:
+        raise SmokeFailure("--host must not be empty")
+
+    if port_override is not None:
+        try:
+            port = int(port_override)
+        except ValueError as exc:
+            raise SmokeFailure(f"invalid --port value: {port_override!r}") from exc
+    else:
+        try:
+            port = parser.getint("server", "port", fallback=DEFAULT_PORT)
+        except ValueError as exc:
+            raise SmokeFailure(f"invalid server port in {config_path}: {exc}") from exc
     if not 1 <= port <= 65535:
-        raise SmokeFailure(f"invalid server port in {config_path}: {port}")
+        source = "--port" if port_override is not None else str(config_path)
+        raise SmokeFailure(f"invalid server port from {source}: {port}")
     return host, port
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Run the read-only ECP admin protocol smoke test."
+    )
+    parser.add_argument(
+        "--host",
+        help="server host override (takes precedence over config/app.ini)",
+    )
+    parser.add_argument(
+        "--port",
+        help="server port override (takes precedence over config/app.ini)",
+    )
+    return parser.parse_args()
 
 
 def validate_station_list(client, token):
@@ -393,7 +422,8 @@ def run_smoke(host, port, account, password):
 def main():
     print("ECP admin smoke test")
     try:
-        host, port = load_target()
+        args = parse_args()
+        host, port = load_target(args.host, args.port)
         print(f"target: {host}:{port}\n")
         account = os.environ.get("ECP_ADMIN_ACCOUNT", "admin")
         password = os.environ.get("ECP_ADMIN_PASSWORD", "123456")

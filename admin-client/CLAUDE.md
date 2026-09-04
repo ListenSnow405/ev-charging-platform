@@ -26,4 +26,6 @@
 
 **集成与构建主责**：维护 `scripts/build-all.sh`，W3 起担任端到端联调主责。
 
-管理端协议级回归：`python3 scripts/smoke-admin.py`
+管理端协议 smoke：`python3 scripts/smoke-admin.py`
+
+隔离式一键集成：`bash scripts/test-admin-integration.sh`

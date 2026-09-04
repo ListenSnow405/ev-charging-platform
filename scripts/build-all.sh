@@ -24,19 +24,21 @@ echo
 echo "构建完成，产物在 build/bin/："
 ls -1 "$ROOT/build/bin/" 2>/dev/null | sed 's/^/  /'
 
-# 数据库
+# 本地运行数据。隔离式集成测试只构建产物，不接触真实 DB/config。
 cd "$ROOT"
-if [ ! -f charging.db ]; then
-    echo
-    echo "数据库尚未生成，正在建库…"
-    if command -v sqlite3 >/dev/null; then
-        sqlite3 charging.db < docs/db-schema.sql
-    else
-        python3 -c "import sqlite3,pathlib;c=sqlite3.connect('charging.db');c.executescript(pathlib.Path('docs/db-schema.sql').read_text(encoding='utf-8'));c.commit()"
+if [ "${ECP_BUILD_ONLY:-0}" != "1" ]; then
+    if [ ! -f charging.db ]; then
+        echo
+        echo "数据库尚未生成，正在建库…"
+        if command -v sqlite3 >/dev/null; then
+            sqlite3 charging.db < docs/db-schema.sql
+        else
+            python3 -c "import sqlite3,pathlib;c=sqlite3.connect('charging.db');c.executescript(pathlib.Path('docs/db-schema.sql').read_text(encoding='utf-8'));c.commit()"
+        fi
+        echo "  已生成 charging.db"
     fi
-    echo "  已生成 charging.db"
+    [ -f config/app.ini ] || { cp config/app.ini.example config/app.ini; echo "  已生成 config/app.ini"; }
 fi
-[ -f config/app.ini ] || { cp config/app.ini.example config/app.ini; echo "  已生成 config/app.ini"; }
 
 cat <<'TIP'
 
@@ -49,4 +51,7 @@ cat <<'TIP'
 
 管理端协议 smoke（先启动服务端）：
   python3 scripts/smoke-admin.py
+
+一键管理端集成测试：
+  bash scripts/test-admin-integration.sh
 TIP
