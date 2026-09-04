@@ -46,4 +46,7 @@ cat <<'TIP'
   ./build/bin/ecp-user                   # 充电用户端
   ./build/bin/ecp-pile-sim SZ001-01      # 电桩模拟器
   python3 ml/export_snapshot.py && python3 -m http.server 8080 -d dataviz   # 大屏
+
+管理端协议 smoke（先启动服务端）：
+  python3 scripts/smoke-admin.py
 TIP
