@@ -29,7 +29,8 @@ SOURCES += \
     biz/station_service.cpp \
     biz/pile_service.cpp \
     biz/reservation_service.cpp \
-    biz/order_service.cpp
+    biz/order_service.cpp \
+    biz/statistics_service.cpp
 
 HEADERS += \
     net/thread_pool.h \
