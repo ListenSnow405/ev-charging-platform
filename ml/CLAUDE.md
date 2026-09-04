@@ -43,6 +43,8 @@
 | `gen_history.py` | 历史订单/设备日志生成器，已实现并测试，CR-002 已批复 |
 | `check_signal.py` | 时序信号体检，生成器改造的验收闸（自相关 / 分站可分性 / 峰谷比 / 物理合理性）|
 | `build_features.py` | 站-小时特征面板 → `data/features.csv`，按 horizon 分层，内置滞后穿越自检 |
+| `train_forecast.py` | 6 个模型（2 目标 × 3 horizon）+ 时序切分评估 → `reports/forecast_eval.md` |
+| `reports/forecast_eval.md` | 精度评估报告，答辩材料，随训练自动重生成 |
 | `data/dev.db` | 私有开发副本（gitignored），全部建模工作在它上面做，不碰 `charging.db` |
 | `data/seed_manifest.json` | 播种批次记录，`--reset` 据此精确删除 |
 | `requirements.txt` | pandas / numpy / scikit-learn |
@@ -61,7 +63,12 @@
       按 horizon 分层：日历/天气取 **target 时刻**（起报时已知），滞后只回看到
       `origin_ts = target_ts − horizon`。计划里的 `t−1h` 推广成 `lag_h`——
       t−1h 只在 h=1 成立，h=6 时它还没发生，直接喂就是穿越
-- [ ] 时序建模与评估，输出 1h / 6h / 24h 预测
+- [x] **时序建模与评估**——`HistGradientBoostingRegressor`，全局单模型 + station 特征，
+      2 目标 × 3 horizon = 6 个模型，直接多步。按时间切（末 12 天测试），
+      超参在训练段末尾切 8 天验证集选，绝不用测试段调参。
+      相对「分工作日/周末的同小时均值」基线：负荷 +10.0% / +4.1% / +2.6%（1h/6h/24h），
+      并发数 +33.5% / +2.6% / −0.2%。h≥6 的增量小是数据决定的，
+      去季节 t−24h 自相关仅 0.078，详见 `reports/forecast_eval.md`
 - [ ] 预测结果回写 `t_load_forecast`
 - [ ] 拥堵度计算，供用户端站点推荐排序
 - [ ] 精度评估与分析结论成文（答辩材料）

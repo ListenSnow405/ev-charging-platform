@@ -27,8 +27,16 @@ h=24 时 `lag_24` 与 `lag_h` 取值相同（同一个时刻），列冗余但�
 
 ## 不放进特征的东西
 
-**「历史同小时均值」不在这里算**。它是阶段 3 的对比基线，必须只用训练段拟合；
+**「历史同小时均值」不在这里算**——指的是**全量口径**的那个。它是阶段 3 的对比基线，
 在全量数据上算好再喂进特征，等于把测试段的均值透给模型，评估会虚高。
+
+但**扩展窗口口径**的同小时均值（`*_seas_mean`）是另一回事，它只用**严格早于当前样本**的
+同（站点 × 小时 × 工作日/周末）观测求均值，构造上不可能看到未来，是合法特征。
+加它的原因见阶段 3 的诊断：h≥6 时滞后特征基本是噪声，模型会去学噪声，
+测试 MAE 反而输给「同小时均值」基线；把这条基线本身作为特征给进去，
+模型至少能持平基线，再在它之上决定要不要用滞后。
+⚠ 该特征的无穿越性依赖 **horizon ≤ 24**（同键的上一条观测在 target−24，≤ origin），
+脚本会断言这一点。
 
 **天气用类别码而非 `weather_factor`**。后者就是生成器里的需求乘数本身。
 天气本身是可预报的外生变量，用它不算穿越；但要留意合成数据上这个特征
@@ -130,6 +138,23 @@ def build_panel(con, stations):
     return pd.concat(frames, ignore_index=True)
 
 
+def add_seasonal_mean(panel):
+    """扩展窗口的同小时均值：只用严格早于当前行的同键观测，构造上无穿越。
+
+    键 =（站点 × 小时 × 是否周末）。同键相邻两条观测相差 24 小时（或跨周末边界更多），
+    因此「严格早于 target」的最近一条落在 target−24；只要 horizon ≤ 24，
+    它就不晚于 origin_ts，起报时确实可见。horizon > 24 时该保证失效——脚本会断言。
+    """
+    out = panel.sort_values(["station_id", "ts"]).reset_index(drop=True)
+    out["_hour"] = out["ts"].dt.hour
+    out["_wknd"] = (out["ts"].dt.weekday >= 5).astype(int)
+    key = ["station_id", "_hour", "_wknd"]
+    for col, prefix in (("load_kw", "load"), ("active_sessions", "sess")):
+        out[f"{prefix}_seas_mean"] = out.groupby(key, sort=False)[col].transform(
+            lambda s: s.expanding().mean().shift(1))
+    return out.drop(columns=["_hour", "_wknd"])
+
+
 def add_lags(panel, horizon):
     """按 horizon 生成滞后与滚动特征。全部相对 target 且回看 ≥ horizon 步。"""
     # shift 数的是行不是小时，面板必须按站-时严格有序，否则滞后会静默错位。
@@ -190,6 +215,22 @@ def verify_no_leak(feat, panel, horizon, n=200):
         print(f"滞后特征自检失败：{bad}/{len(sample)} 行的 lag_h 与 origin 观测对不上",
               file=sys.stderr)
         sys.exit(2)
+
+    # seas_mean 独立重算核对：拿原始面板按「同站 × 同小时 × 同工作日属性 × 严格早于 target」
+    # 重新求一遍均值。不复用 expanding() 的结果——自检要独立于被检对象才有意义。
+    base = panel.copy()
+    base["_hour"] = base["ts"].dt.hour
+    base["_wknd"] = (base["ts"].dt.weekday >= 5).astype(int)
+    bad = 0
+    for _, r in sample.head(40).iterrows():
+        t = r["target_ts"]
+        m = base[(base["station_id"] == r["station_id"]) & (base["_hour"] == t.hour)
+                 & (base["_wknd"] == int(t.weekday() >= 5)) & (base["ts"] < t)]["load_kw"]
+        if len(m) == 0 or abs(m.mean() - r["load_seas_mean"]) > 1e-9:
+            bad += 1
+    if bad:
+        print(f"seas_mean 自检失败：{bad}/40 行与独立重算不一致（可能穿越）", file=sys.stderr)
+        sys.exit(2)
     return len(sample)
 
 
@@ -214,6 +255,12 @@ def main() -> int:
     profiles = sorted(meta["profile"].unique())
     meta["profile_code"] = meta["profile"].map({p: i for i, p in enumerate(profiles)})
 
+    if max(horizons) > 24:
+        print(f"horizon {max(horizons)} > 24：*_seas_mean 的无穿越性不再成立，"
+              f"该特征依赖同键上一条观测落在 target−24", file=sys.stderr)
+        return 1
+
+    panel = add_seasonal_mean(panel)
     parts, checked = [], 0
     for h in horizons:
         f = add_lags(panel, h)
@@ -226,7 +273,8 @@ def main() -> int:
         f = f.merge(meta, on="station_id", how="left")
         f["y_idle_pile"] = (f["pile_total"] - f["y_sessions"]).clip(lower=0)
         # 前 168+h 小时没有完整回看窗口，直接丢——补零会凭空造出「上周同时为 0」的假样本。
-        f = f.dropna(subset=[c for c in f.columns if "_lag_" in c or "_roll_" in c])
+        f = f.dropna(subset=[c for c in f.columns
+                             if "_lag_" in c or "_roll_" in c or "_seas_" in c])
         checked += verify_no_leak(f, panel, h)
         parts.append(f)
 
@@ -236,7 +284,8 @@ def main() -> int:
              "horizon", "origin_ts", "target_ts",
              "hour", "weekday", "is_weekend", "is_holiday",
              "hour_sin", "hour_cos", "dow_sin", "dow_cos", "weather", "weather_code"]
-            + [c for c in feat.columns if "_lag_" in c or "_roll_" in c]
+            + [c for c in feat.columns
+               if "_lag_" in c or "_roll_" in c or "_seas_" in c]
             + ["y_load_kw", "y_sessions", "y_idle_pile"])
     feat = feat[cols].sort_values(["horizon", "target_ts", "station_id"])
 
@@ -251,7 +300,8 @@ def main() -> int:
         sub = feat[feat["horizon"] == h]
         print(f"  h={h:<3}{len(sub):6d} 行　目标区间 {sub['target_ts'].min():%m-%d %H} "
               f"~ {sub['target_ts'].max():%m-%d %H}")
-    print(f"滞后自检：抽样 {checked} 行核对 lag_h 与 origin 观测，全部一致")
+    print(f"穿越自检：抽样 {checked} 行核对 lag_h 与 origin 观测、"
+          f"{len(horizons) * 40} 行独立重算 seas_mean，全部一致")
     zero_var = [c for c in feat.columns
                 if feat[c].dtype.kind in "if" and feat[c].nunique() <= 1]
     if zero_var:

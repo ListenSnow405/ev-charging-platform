@@ -53,6 +53,9 @@ L5-PLAN.md
 # ---- 大屏运行期快照（由 ml/export_snapshot.py 生成）----
 dataviz/data/*.json
 
+# ---- 模型产物（由 ml/train_forecast.py 训练，含 meta.json，随训练重生成）----
+ml/data/models/
+
 # ---- 历史数据生成器产物（由 ml/gen_history.py 生成）----
 ml/data/*.csv
 # 播种记录与各人的开发库绑定，且每次重播全量重写（约 60KB），不入库。
