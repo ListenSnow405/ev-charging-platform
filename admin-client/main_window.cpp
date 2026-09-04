@@ -4,6 +4,7 @@
 #include "pile_page.h"
 #include "station_page.h"
 #include "user_page.h"
+#include "error_code.h"
 #include <QHBoxLayout>
 
 MainWindow::MainWindow(NetClient *net, QWidget *parent) : QWidget(parent), m_net(net)
@@ -28,8 +29,28 @@ MainWindow::MainWindow(NetClient *net, QWidget *parent) : QWidget(parent), m_net
     connect(m_nav, &QListWidget::currentRowChanged, m_pages, &QStackedWidget::setCurrentIndex);
     m_nav->setCurrentRow(0);
 
+    connect(m_net, &NetClient::response, this,
+            [this](int cmd, int, int code, const QString &msg, const QJsonObject &) {
+        if (cmd < 2000 || cmd > 2399) return;
+        if (code != ecp::ERR_NOT_LOGIN && code != ecp::ERR_TOKEN_INVALID) return;
+        requestRelogin(msg.trimmed().isEmpty()
+            ? QStringLiteral("登录已过期，请重新登录")
+            : msg);
+    });
+    connect(m_net, &NetClient::disconnected, this, [this] {
+        requestRelogin(QStringLiteral("与服务器的连接已断开，请重新登录"));
+    });
+
     auto *lay = new QHBoxLayout(this);
     lay->setContentsMargins(0, 0, 0, 0);
     lay->addWidget(m_nav);
     lay->addWidget(m_pages, 1);
+}
+
+void MainWindow::requestRelogin(const QString &reason)
+{
+    if (m_reloginPending) return;
+    m_reloginPending = true;
+    emit reloginRequested(reason);
+    close();
 }

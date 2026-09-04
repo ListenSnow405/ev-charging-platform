@@ -6,6 +6,7 @@
 #include <QWidget>
 #include <QListWidget>
 #include <QStackedWidget>
+#include <QString>
 #include "net_client.h"
 
 class MainWindow : public QWidget
@@ -14,8 +15,14 @@ class MainWindow : public QWidget
 public:
     explicit MainWindow(NetClient *net, QWidget *parent = nullptr);
 
+signals:
+    void reloginRequested(const QString &reason);
+
 private:
+    void requestRelogin(const QString &reason);
+
     NetClient      *m_net = nullptr;
     QListWidget    *m_nav = nullptr;
     QStackedWidget *m_pages = nullptr;
+    bool            m_reloginPending = false;
 };
