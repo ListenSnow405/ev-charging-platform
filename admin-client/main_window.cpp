@@ -5,8 +5,6 @@
 #include "station_page.h"
 #include "user_page.h"
 #include <QHBoxLayout>
-#include <QVBoxLayout>
-#include <QFont>
 
 MainWindow::MainWindow(NetClient *net, QWidget *parent) : QWidget(parent), m_net(net)
 {
@@ -34,16 +32,4 @@ MainWindow::MainWindow(NetClient *net, QWidget *parent) : QWidget(parent), m_net
     lay->setContentsMargins(0, 0, 0, 0);
     lay->addWidget(m_nav);
     lay->addWidget(m_pages, 1);
-}
-
-QWidget *MainWindow::makePlaceholder(const QString &title, const QString &todo)
-{
-    auto *w = new QWidget;
-    auto *lay = new QVBoxLayout(w);
-    auto *t = new QLabel(title, w);
-    QFont f = t->font(); f.setPointSize(18); f.setBold(true); t->setFont(f);
-    auto *d = new QLabel(todo, w);
-    d->setStyleSheet(QStringLiteral("color:#888"));
-    lay->addWidget(t); lay->addWidget(d); lay->addStretch();
-    return w;
 }

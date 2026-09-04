@@ -58,12 +58,17 @@ void OverviewPage::setupUi()
     pageLayout->setContentsMargins(24, 20, 24, 20);
     pageLayout->setSpacing(12);
 
+    auto *titleLayout = new QHBoxLayout;
     auto *title = new QLabel(QStringLiteral("数据总览"), this);
     QFont titleFont = title->font();
     titleFont.setPointSize(18);
     titleFont.setBold(true);
     title->setFont(titleFont);
-    pageLayout->addWidget(title);
+    titleLayout->addWidget(title);
+    titleLayout->addStretch();
+    auto *refreshButton = new QPushButton(QStringLiteral("刷新"), this);
+    titleLayout->addWidget(refreshButton);
+    pageLayout->addLayout(titleLayout);
 
     m_statusLabel = new QLabel(QStringLiteral("准备加载数据总览"), this);
     m_statusLabel->setStyleSheet(QStringLiteral("color:#667085"));
@@ -121,9 +126,11 @@ void OverviewPage::setupUi()
     trendLayout->addWidget(chartView, 1);
 
     connect(sevenDaysButton, &QPushButton::clicked, this, [this] {
+        m_currentTrendDays = 7;
         requestRevenueTrend(7);
     });
     connect(thirtyDaysButton, &QPushButton::clicked, this, [this] {
+        m_currentTrendDays = 30;
         requestRevenueTrend(30);
     });
 #else
@@ -159,6 +166,17 @@ void OverviewPage::setupUi()
     contentLayout->addWidget(trendGroup, 3);
     contentLayout->addWidget(statusGroup, 1);
     pageLayout->addLayout(contentLayout, 1);
+
+    connect(refreshButton, &QPushButton::clicked, this, &OverviewPage::refreshOverview);
+}
+
+void OverviewPage::refreshOverview()
+{
+    requestRevenue();
+    requestPileStatus();
+#ifdef HAVE_CHARTS
+    requestRevenueTrend(m_currentTrendDays);
+#endif
 }
 
 void OverviewPage::requestRevenue()
@@ -188,14 +206,12 @@ void OverviewPage::requestRevenueTrend(int days)
     });
     if (seq < 0) {
         m_revenueTrendSeq = -1;
-        m_pendingTrendDays = days;
         m_revenueTrendState = LoadState::Failed;
         m_revenueTrendError = QStringLiteral("请求发送失败，请检查网络连接");
         updateStatusLabel();
         return;
     }
     m_revenueTrendSeq = seq;
-    m_pendingTrendDays = days;
 #else
     Q_UNUSED(days);
 #endif
@@ -399,7 +415,7 @@ void OverviewPage::handleRevenueTrendResponse(int code, const QString &msg,
         return left.date < right.date;
     });
 
-    renderRevenueTrend(points, m_pendingTrendDays);
+    renderRevenueTrend(points, m_currentTrendDays);
     if (points.isEmpty()) {
         m_revenueTrendState = LoadState::Failed;
         m_revenueTrendError = QStringLiteral("响应中没有有效日期数据");

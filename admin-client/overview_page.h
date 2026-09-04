@@ -37,6 +37,7 @@ private:
 #endif
 
     void setupUi();
+    void refreshOverview();
     void requestRevenue();
     void requestRevenueTrend(int days);
     void requestPileStatus();
@@ -80,5 +81,7 @@ private:
     int m_revenueSeq = -1;
     int m_revenueTrendSeq = -1;
     int m_pileStatusSeq = -1;
-    int m_pendingTrendDays = 7;
+#ifdef HAVE_CHARTS
+    int m_currentTrendDays = 7;
+#endif
 };
