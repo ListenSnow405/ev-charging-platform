@@ -1,66 +1,62 @@
 #include "overview_page.h"
+#include "net_client.h"
+#include "protocol.h"
 #include "time_util.h"
-#include <QDate>
+#include <QAbstractItemView>
 #include <QDateTime>
+#include <QFont>
 #include <QFrame>
 #include <QGroupBox>
 #include <QHeaderView>
 #include <QHBoxLayout>
-#include <QVBoxLayout>
+#include <QJsonArray>
+#include <QJsonObject>
 #include <QLabel>
-#include <QFont>
 #include <QPushButton>
+#include <QStringList>
 #include <QTableWidget>
 #include <QTableWidgetItem>
-#include <QVector>
+#include <QTime>
+#include <QVBoxLayout>
+#include <algorithm>
 
 #ifdef HAVE_CHARTS
 #include <QChart>
 #include <QChartView>
 #include <QDateTimeAxis>
 #include <QLineSeries>
-#include <QValueAxis>
 #include <QPainter>
+#include <QValueAxis>
 #endif
 
 namespace {
 
-#ifdef HAVE_CHARTS
-// Mock 数据集中于此，待 2302 接入后替换为服务端响应。
-QVector<qint64> mockRevenueTrend(int days)
-{
-    static const QVector<qint64> sevenDays = {
-        13820, 12650, 13180, 15540, 18260, 16930, 19480
-    };
-    static const QVector<qint64> thirtyDays = {
-        11240, 12680, 11950, 13820, 14560, 13240, 15180, 14720, 15960, 16840,
-        15430, 17120, 18350, 17680, 19240, 18860, 20120, 19650, 21480, 20830,
-        22160, 21740, 23420, 22680, 24150, 23820, 25240, 24760, 26380, 27120
-    };
-    return days == 30 ? thirtyDays : sevenDays;
-}
-#endif
-
-QString percentageText(int count, int total)
+QString percentageText(qint64 count, qint64 total)
 {
     if (total <= 0) return QStringLiteral("0.0%");
-    const int tenths = (count * 1000 + total / 2) / total;
+    const qint64 tenths = (count * 1000 + total / 2) / total;
     return QStringLiteral("%1.%2%").arg(tenths / 10).arg(tenths % 10);
 }
 
 } // namespace
 
-OverviewPage::OverviewPage(QWidget *parent) : QWidget(parent)
+OverviewPage::OverviewPage(NetClient *net, QWidget *parent)
+    : QWidget(parent), m_net(net)
 {
     setupUi();
-    loadMockData();
+    connect(m_net, &NetClient::response, this, &OverviewPage::handleResponse);
+    requestRevenue();
+    requestPileStatus();
+#ifdef HAVE_CHARTS
+    requestRevenueTrend(7);
+#endif
 }
 
 void OverviewPage::setupUi()
 {
     auto *pageLayout = new QVBoxLayout(this);
     pageLayout->setContentsMargins(24, 20, 24, 20);
-    pageLayout->setSpacing(16);
+    pageLayout->setSpacing(12);
 
     auto *title = new QLabel(QStringLiteral("数据总览"), this);
     QFont titleFont = title->font();
@@ -68,6 +64,11 @@ void OverviewPage::setupUi()
     titleFont.setBold(true);
     title->setFont(titleFont);
     pageLayout->addWidget(title);
+
+    m_statusLabel = new QLabel(QStringLiteral("准备加载数据总览"), this);
+    m_statusLabel->setStyleSheet(QStringLiteral("color:#667085"));
+    m_statusLabel->setWordWrap(true);
+    pageLayout->addWidget(m_statusLabel);
 
     auto *metricsLayout = new QHBoxLayout;
     metricsLayout->setSpacing(16);
@@ -108,7 +109,7 @@ void OverviewPage::setupUi()
     m_revenueAxisY = new QValueAxis;
     m_revenueAxisY->setLabelFormat(QStringLiteral("%.2f"));
     m_revenueAxisY->setTitleText(QStringLiteral("营收（元）"));
-    m_revenueAxisY->setMin(0);
+    m_revenueAxisY->setRange(0, 1);
     m_revenueChart->addAxis(m_revenueAxisX, Qt::AlignBottom);
     m_revenueChart->addAxis(m_revenueAxisY, Qt::AlignLeft);
     m_revenueSeries->attachAxis(m_revenueAxisX);
@@ -120,10 +121,10 @@ void OverviewPage::setupUi()
     trendLayout->addWidget(chartView, 1);
 
     connect(sevenDaysButton, &QPushButton::clicked, this, [this] {
-        updateRevenueTrend(7);
+        requestRevenueTrend(7);
     });
     connect(thirtyDaysButton, &QPushButton::clicked, this, [this] {
-        updateRevenueTrend(30);
+        requestRevenueTrend(30);
     });
 #else
     auto *warn = new QLabel(QStringLiteral(
@@ -140,7 +141,7 @@ void OverviewPage::setupUi()
 
     auto *statusGroup = new QGroupBox(QStringLiteral("电桩状态"), this);
     auto *statusLayout = new QVBoxLayout(statusGroup);
-    m_pileTotal = new QLabel(statusGroup);
+    m_pileTotal = new QLabel(QStringLiteral("电桩总数：—"), statusGroup);
     m_pileTotal->setStyleSheet(QStringLiteral("color:#666"));
     statusLayout->addWidget(m_pileTotal);
 
@@ -160,6 +161,172 @@ void OverviewPage::setupUi()
     pageLayout->addLayout(contentLayout, 1);
 }
 
+void OverviewPage::requestRevenue()
+{
+    m_revenueState = LoadState::Loading;
+    m_revenueError.clear();
+    updateStatusLabel();
+    const int seq = m_net->send(ecp::CMD_STAT_REVENUE);
+    if (seq < 0) {
+        m_revenueSeq = -1;
+        m_revenueState = LoadState::Failed;
+        m_revenueError = QStringLiteral("请求发送失败，请检查网络连接");
+        updateStatusLabel();
+        return;
+    }
+    m_revenueSeq = seq;
+}
+
+void OverviewPage::requestRevenueTrend(int days)
+{
+#ifdef HAVE_CHARTS
+    m_revenueTrendState = LoadState::Loading;
+    m_revenueTrendError.clear();
+    updateStatusLabel();
+    const int seq = m_net->send(ecp::CMD_STAT_REVENUE_TREND, QJsonObject{
+        { QStringLiteral("days"), days }
+    });
+    if (seq < 0) {
+        m_revenueTrendSeq = -1;
+        m_pendingTrendDays = days;
+        m_revenueTrendState = LoadState::Failed;
+        m_revenueTrendError = QStringLiteral("请求发送失败，请检查网络连接");
+        updateStatusLabel();
+        return;
+    }
+    m_revenueTrendSeq = seq;
+    m_pendingTrendDays = days;
+#else
+    Q_UNUSED(days);
+#endif
+}
+
+void OverviewPage::requestPileStatus()
+{
+    m_pileStatusState = LoadState::Loading;
+    m_pileStatusError.clear();
+    updateStatusLabel();
+    const int seq = m_net->send(ecp::CMD_STAT_PILE_STATUS);
+    if (seq < 0) {
+        m_pileStatusSeq = -1;
+        m_pileStatusState = LoadState::Failed;
+        m_pileStatusError = QStringLiteral("请求发送失败，请检查网络连接");
+        updateStatusLabel();
+        return;
+    }
+    m_pileStatusSeq = seq;
+}
+
+void OverviewPage::handleResponse(int cmd, int seq, int code, const QString &msg,
+                                  const QJsonObject &data)
+{
+    if (cmd == ecp::CMD_STAT_REVENUE) {
+        if (seq != m_revenueSeq) return;
+        m_revenueSeq = -1;
+        handleRevenueResponse(code, msg, data);
+        return;
+    }
+#ifdef HAVE_CHARTS
+    if (cmd == ecp::CMD_STAT_REVENUE_TREND) {
+        if (seq != m_revenueTrendSeq) return;
+        m_revenueTrendSeq = -1;
+        handleRevenueTrendResponse(code, msg, data);
+        return;
+    }
+#endif
+    if (cmd == ecp::CMD_STAT_PILE_STATUS) {
+        if (seq != m_pileStatusSeq) return;
+        m_pileStatusSeq = -1;
+        handlePileStatusResponse(code, msg, data);
+    }
+}
+
+void OverviewPage::handleRevenueResponse(int code, const QString &msg,
+                                         const QJsonObject &data)
+{
+    if (code != ecp::ERR_OK) {
+        m_revenueState = LoadState::Failed;
+        m_revenueError = msg;
+        updateStatusLabel();
+        return;
+    }
+
+    const qint64 todayRevenueFen = data.value(QStringLiteral("today")).toInteger();
+    const qint64 monthRevenueFen = data.value(QStringLiteral("month")).toInteger();
+    const qint64 totalRevenueFen = data.value(QStringLiteral("total")).toInteger();
+    m_todayRevenue->setText(QStringLiteral("¥ %1").arg(ecp::fenToYuan(todayRevenueFen)));
+    m_monthRevenue->setText(QStringLiteral("¥ %1").arg(ecp::fenToYuan(monthRevenueFen)));
+    m_totalRevenue->setText(QStringLiteral("¥ %1").arg(ecp::fenToYuan(totalRevenueFen)));
+    m_revenueState = LoadState::Success;
+    m_revenueError.clear();
+    updateStatusLabel();
+}
+
+void OverviewPage::handlePileStatusResponse(int code, const QString &msg,
+                                            const QJsonObject &data)
+{
+    if (code != ecp::ERR_OK) {
+        m_pileStatusState = LoadState::Failed;
+        m_pileStatusError = msg;
+        updateStatusLabel();
+        return;
+    }
+
+    const qint64 inUse = data.value(QStringLiteral("inUse")).toInteger();
+    const qint64 idle = data.value(QStringLiteral("idle")).toInteger();
+    const qint64 fault = data.value(QStringLiteral("fault")).toInteger();
+    const qint64 total = data.value(QStringLiteral("total")).toInteger();
+    if (inUse < 0 || idle < 0 || fault < 0 || total < 0
+        || inUse + idle + fault != total) {
+        m_pileStatusState = LoadState::Failed;
+        m_pileStatusError = QStringLiteral("服务端返回的分类数量与总数不一致");
+        updateStatusLabel();
+        return;
+    }
+
+    updatePileStatusTable(inUse, idle, fault, total);
+    m_pileStatusState = LoadState::Success;
+    m_pileStatusError.clear();
+    updateStatusLabel();
+}
+
+void OverviewPage::updateStatusLabel()
+{
+    QStringList errors;
+    if (m_revenueState == LoadState::Failed)
+        errors.append(QStringLiteral("营收概览加载失败：%1").arg(m_revenueError));
+#ifdef HAVE_CHARTS
+    if (m_revenueTrendState == LoadState::Failed)
+        errors.append(QStringLiteral("营收趋势加载失败：%1").arg(m_revenueTrendError));
+#endif
+    if (m_pileStatusState == LoadState::Failed)
+        errors.append(QStringLiteral("电桩状态加载失败：%1").arg(m_pileStatusError));
+
+    const bool loading = m_revenueState == LoadState::Loading
+        || m_pileStatusState == LoadState::Loading
+#ifdef HAVE_CHARTS
+        || m_revenueTrendState == LoadState::Loading
+#endif
+        ;
+    if (loading) errors.prepend(QStringLiteral("正在加载数据总览…"));
+
+    if (!errors.isEmpty()) {
+        m_statusLabel->setText(errors.join(QStringLiteral("　")));
+        return;
+    }
+
+    const bool revenueReady = m_revenueState == LoadState::Success;
+    const bool pileStatusReady = m_pileStatusState == LoadState::Success;
+#ifdef HAVE_CHARTS
+    const bool trendReady = m_revenueTrendState == LoadState::Success;
+#else
+    const bool trendReady = true;
+#endif
+    m_statusLabel->setText(revenueReady && pileStatusReady && trendReady
+        ? QStringLiteral("数据总览已更新")
+        : QStringLiteral("准备加载数据总览"));
+}
+
 QWidget *OverviewPage::createMetricCard(const QString &title, QLabel *&valueLabel)
 {
     auto *card = new QFrame(this);
@@ -172,7 +339,7 @@ QWidget *OverviewPage::createMetricCard(const QString &title, QLabel *&valueLabe
 
     auto *titleLabel = new QLabel(title, card);
     titleLabel->setStyleSheet(QStringLiteral("color:#667085"));
-    valueLabel = new QLabel(card);
+    valueLabel = new QLabel(QStringLiteral("—"), card);
     QFont valueFont = valueLabel->font();
     valueFont.setPointSize(18);
     valueFont.setBold(true);
@@ -183,32 +350,15 @@ QWidget *OverviewPage::createMetricCard(const QString &title, QLabel *&valueLabe
     return card;
 }
 
-void OverviewPage::loadMockData()
+void OverviewPage::updatePileStatusTable(qint64 inUse, qint64 idle, qint64 fault,
+                                         qint64 total)
 {
-    // Mock 数据集中于此，待 2301/2303 接入后替换为服务端响应。
-    const qint64 todayRevenueFen = 19480;
-    const qint64 monthRevenueFen = 486320;
-    const qint64 totalRevenueFen = 5287460;
-    m_todayRevenue->setText(QStringLiteral("¥ %1").arg(ecp::fenToYuan(todayRevenueFen)));
-    m_monthRevenue->setText(QStringLiteral("¥ %1").arg(ecp::fenToYuan(monthRevenueFen)));
-    m_totalRevenue->setText(QStringLiteral("¥ %1").arg(ecp::fenToYuan(totalRevenueFen)));
-
-    updatePileStatusTable(12, 31, 5);
-
-#ifdef HAVE_CHARTS
-    updateRevenueTrend(7);
-#endif
-}
-
-void OverviewPage::updatePileStatusTable(int inUse, int idle, int fault)
-{
-    const int total = inUse + idle + fault;
     m_pileTotal->setText(QStringLiteral("电桩总数：%1 台").arg(total));
 
     const QStringList statuses = {
         QStringLiteral("在用"), QStringLiteral("闲置"), QStringLiteral("故障")
     };
-    const int counts[] = { inUse, idle, fault };
+    const qint64 counts[] = { inUse, idle, fault };
     for (int row = 0; row < 3; ++row) {
         auto *statusItem = new QTableWidgetItem(statuses.at(row));
         auto *countItem = new QTableWidgetItem(QString::number(counts[row]));
@@ -223,29 +373,67 @@ void OverviewPage::updatePileStatusTable(int inUse, int idle, int fault)
 }
 
 #ifdef HAVE_CHARTS
-void OverviewPage::updateRevenueTrend(int days)
+void OverviewPage::handleRevenueTrendResponse(int code, const QString &msg,
+                                              const QJsonObject &data)
 {
-    const QVector<qint64> revenueFen = mockRevenueTrend(days);
-    const QDate firstDate = QDate::currentDate().addDays(1 - revenueFen.size());
-    qint64 maxRevenueFen = 0;
-
-    m_revenueSeries->clear();
-    for (qsizetype i = 0; i < revenueFen.size(); ++i) {
-        const qint64 amountFen = revenueFen.at(i);
-        const QDateTime pointTime(firstDate.addDays(i), QTime(0, 0));
-        // QLineSeries 需要数值坐标；金额仍以分保存，仅在展示层经统一函数转换为元。
-        m_revenueSeries->append(pointTime.toMSecsSinceEpoch(),
-                                ecp::fenToYuan(amountFen).toDouble());
-        if (amountFen > maxRevenueFen) maxRevenueFen = amountFen;
+    if (code != ecp::ERR_OK) {
+        m_revenueTrendState = LoadState::Failed;
+        m_revenueTrendError = msg;
+        updateStatusLabel();
+        return;
     }
 
-    const QDateTime firstTime(firstDate, QTime(0, 0));
-    const QDateTime lastTime(QDate::currentDate(), QTime(23, 59, 59));
-    m_revenueAxisX->setRange(firstTime, lastTime);
-    m_revenueAxisX->setTickCount(days == 7 ? 7 : 6);
-    m_revenueAxisY->setMax(ecp::fenToYuan(maxRevenueFen + maxRevenueFen / 10).toDouble());
+    QVector<RevenueTrendPoint> points;
+    const QJsonArray list = data.value(QStringLiteral("list")).toArray();
+    points.reserve(list.size());
+    for (const QJsonValue &value : list) {
+        if (!value.isObject()) continue;
+        const QJsonObject item = value.toObject();
+        const QDate date = QDate::fromString(
+            item.value(QStringLiteral("date")).toString(), QStringLiteral("yyyy-MM-dd"));
+        if (!date.isValid()) continue;
+        points.append({date, item.value(QStringLiteral("amount")).toInteger()});
+    }
+    std::sort(points.begin(), points.end(), [](const RevenueTrendPoint &left,
+                                               const RevenueTrendPoint &right) {
+        return left.date < right.date;
+    });
+
+    renderRevenueTrend(points, m_pendingTrendDays);
+    if (points.isEmpty()) {
+        m_revenueTrendState = LoadState::Failed;
+        m_revenueTrendError = QStringLiteral("响应中没有有效日期数据");
+    } else {
+        m_revenueTrendState = LoadState::Success;
+        m_revenueTrendError.clear();
+    }
+    updateStatusLabel();
+}
+
+void OverviewPage::renderRevenueTrend(const QVector<RevenueTrendPoint> &points, int days)
+{
+    m_revenueSeries->clear();
     m_revenueChart->setTitle(days == 30
         ? QStringLiteral("近 30 日营收趋势")
         : QStringLiteral("近 7 日营收趋势"));
+    if (points.isEmpty()) return;
+
+    qint64 maxRevenueFen = 0;
+    for (const RevenueTrendPoint &point : points) {
+        const QDateTime pointTime(point.date, QTime(0, 0));
+        // QLineSeries 只在展示层使用元坐标，业务缓存始终保留 qint64 分。
+        m_revenueSeries->append(pointTime.toMSecsSinceEpoch(),
+                                ecp::fenToYuan(point.amountFen).toDouble());
+        if (point.amountFen > maxRevenueFen) maxRevenueFen = point.amountFen;
+    }
+
+    const QDateTime firstTime(points.first().date, QTime(0, 0));
+    const QDateTime lastTime(points.last().date, QTime(23, 59, 59));
+    m_revenueAxisX->setRange(firstTime, lastTime);
+    m_revenueAxisX->setTickCount(days == 7 ? 7 : 6);
+
+    const double maxRevenueYuan = ecp::fenToYuan(maxRevenueFen).toDouble();
+    const double yMax = maxRevenueFen > 0 ? maxRevenueYuan * 1.1 : 1.0;
+    m_revenueAxisY->setRange(0, yMax);
 }
 #endif

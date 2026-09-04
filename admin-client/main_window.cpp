@@ -21,7 +21,7 @@ MainWindow::MainWindow(NetClient *net, QWidget *parent) : QWidget(parent), m_net
                       QStringLiteral("用户管理") });
 
     m_pages = new QStackedWidget(this);
-    m_pages->addWidget(new OverviewPage(m_pages));
+    m_pages->addWidget(new OverviewPage(m_net, m_pages));
     m_pages->addWidget(new StationPage(m_net, m_pages));
     m_pages->addWidget(new PilePage(m_net, m_pages));
     m_pages->addWidget(new OrderPage(m_net, m_pages));
