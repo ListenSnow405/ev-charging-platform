@@ -52,6 +52,7 @@ enum Cmd {
     CMD_STAT_REVENUE_TREND  = 2302,   // [说明书] 近 7 / 30 日趋势
     CMD_STAT_PILE_STATUS    = 2303,   // [说明书] 在用 / 闲置 / 故障分布
     CMD_ADMIN_ORDER_LIST    = 2304,
+    CMD_STAT_LOAD_FORECAST  = 2305,   // [说明书] 站点负荷预测 / 负荷预警
 
     // 设备侧 · 电桩模拟器 9000–9099
     CMD_DEV_REGISTER        = 9001,
