@@ -46,13 +46,15 @@
 | `train_forecast.py` | 6 个模型（2 目标 × 3 horizon）+ 时序切分评估 → `reports/forecast_eval.md` |
 | `reports/forecast_eval.md` | 精度评估报告，答辩材料，随训练自动重生成 |
 | `predict.py` | 推理并回写 `t_load_forecast`；authorizer 锁死只可写这一张表 |
+| `selftest.py` | 全链路自动化自检，41 项断言；**全程在临时目录里跑，不碰真实库** |
+| `TESTING.md` | 人工测试流程：视觉、交互、跨模块联调、答辩前检查清单 |
 | `data/dev.db` | 私有开发副本（gitignored），全部建模工作在它上面做，不碰 `charging.db` |
 | `data/seed_manifest.json` | 播种批次记录，`--reset` 据此精确删除 |
 | `requirements.txt` | pandas / numpy / scikit-learn |
 
 ## TODO
 
-- [x] **`gen_history.py` 历史数据生成器**——60 天约 2000 单，CR-002 已批复，落库路径已验证
+- [x] **`gen_history.py` 历史数据生成器**——60 天 8292 单，CR-002 已批复，落库路径已验证
 - [x] **生成器补时序结构**——站点画像分化（办公/住宅/休闲/混合）+ AR(1) 潜在需求水平
       + 天气马尔可夫持续性 + 增长趋势 + 电桩占用约束。
       验收由 `check_signal.py` 把关，四项全过：
@@ -60,16 +62,18 @@
       日内峰谷比 7.3x（≥5），站点峰值负荷 ≤ 装机 85%。
       订单密度同步提到 10 单/快充桩/天、2.5 单/慢充桩/天——原先 1.6 的统一速率下
       快充桩利用率只有 4%，每站每小时期望不到 0.25 单，泊松噪声压过全部结构信号
-- [x] **特征工程**——`build_features.py` → `data/features.csv`，22728 行 × 33 列。
+- [x] **特征工程**——`build_features.py` → `data/features.csv`，22728 行 × 35 列。
       按 horizon 分层：日历/天气取 **target 时刻**（起报时已知），滞后只回看到
       `origin_ts = target_ts − horizon`。计划里的 `t−1h` 推广成 `lag_h`——
       t−1h 只在 h=1 成立，h=6 时它还没发生，直接喂就是穿越
 - [x] **时序建模与评估**——`HistGradientBoostingRegressor`，全局单模型 + station 特征，
       2 目标 × 3 horizon = 6 个模型，直接多步。按时间切（末 12 天测试），
       超参在训练段末尾切 8 天验证集选，绝不用测试段调参。
-      相对「分工作日/周末的同小时均值」基线：负荷 +10.0% / +4.1% / +2.6%（1h/6h/24h），
-      并发数 +33.5% / +2.6% / −0.2%。h≥6 的增量小是数据决定的，
-      去季节 t−24h 自相关仅 0.078，详见 `reports/forecast_eval.md`
+      相对「分工作日/周末的同小时均值」基线：负荷 +9.2% / +5.3% / +2.5%（1h/6h/24h），
+      并发数 +31.1% / +0.1% / −1.0%。h≥6 的增量小是数据决定的，
+      去季节 t−24h 自相关仅 0.078，详见 `reports/forecast_eval.md`。
+      **数字口径以 [../docs/conventions.md](../docs/conventions.md) 第 8.1 节为准**——
+      同一个指标不要在仓库里两处各写一个数
 - [x] **预测结果回写 `t_load_forecast`**——`predict.py`，6 站 × 3 horizon = 18 行/批，
       整批共用一个 `create_time`（协议 2305 要求「同一 model_version 下 create_time 最大的一批」，
       逐行取当前时刻会让 L2 只捞到最后几行）
@@ -94,6 +98,21 @@ L5 侧的职责是**先把 `t_load_forecast` 填满**，让 L2 的 handler 落�
 
 > 统计口径约束：`export_snapshot.py` 的营收/趋势/状态口径必须与 `server/biz/statistics_service.cpp`
 > 的 2301/2302/2303 保持一致（含「补零」行为），否则大屏与管理端并排会显示成两个形状。
+
+## 测试
+
+```bash
+.venv/bin/python ml/selftest.py          # 约 1 分钟，复用现有模型产物
+.venv/bin/python ml/selftest.py --full   # 约 4 分钟，在隔离环境里连训练一起跑
+```
+
+验的是**契约与不变量**，不是「跑起来不报错」：CR-002 的每条护栏（dry-run 只读、
+`--reset` 拒绝 `charging.db`、只删播种批次、红线自检、金额整数分）、占用约束、
+滞后不穿越、时序切分不重叠、authorizer 权限边界、快照与服务端 2301/2302/2303 口径对拍、
+大屏七张图渲染。机器验不了的（布局、交互、联调、演示动线）见 [TESTING.md](TESTING.md)。
+
+⚠ 自检用 `docs/db-schema.sql` 现建测试库，并以临时目录为 cwd 调用各脚本，
+因此它们内部的相对路径产物全部落在临时目录 —— **不会覆盖 `ml/data/` 下的真实产物**。
 
 ## 环境
 

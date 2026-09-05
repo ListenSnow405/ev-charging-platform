@@ -86,13 +86,55 @@ if [ "$LINE" = "ALL" ] || [ "$LINE" = "L4" ]; then
 int main(){ return 0; }'
 fi
 
+head_ "6. L5 机器学习与大屏（Python 侧）"
+PIP_NEED=0
+if [ "$LINE" = "ALL" ] || [ "$LINE" = "L5" ]; then
+  # gen_history.py / check_signal.py / export_snapshot.py 只用标准库，任何 python3 都能跑；
+  # build_features.py / train_forecast.py / predict.py / selftest.py 需要 venv 里的三个包。
+  PYV=$(python3 -c 'import sys;print("%d.%d"%sys.version_info[:2])' 2>/dev/null || echo "?")
+  if python3 -c 'import sys;sys.exit(0 if sys.version_info>=(3,10) else 1)' 2>/dev/null; then
+    c_ok "python3 $PYV  —— 标准库脚本（生成器/信号体检/快照导出）可直接跑"
+  else
+    c_bad "python3 $PYV 过低，需要 ≥ 3.10"; NEED+=("python3")
+  fi
+
+  VENV_PY="$(git rev-parse --show-toplevel 2>/dev/null || pwd)/.venv/bin/python"
+  if [ -x "$VENV_PY" ]; then
+    c_ok ".venv 存在  ($VENV_PY)"
+    MISS=""
+    for m in pandas numpy sklearn joblib; do
+      "$VENV_PY" -c "import $m" >/dev/null 2>&1 || MISS="$MISS $m"
+    done
+    if [ -z "$MISS" ]; then
+      c_ok "建模依赖齐全  —— pandas / numpy / scikit-learn / joblib"
+    else
+      c_bad "建模依赖缺失：$MISS  —— 特征工程/训练/推理无法运行"; PIP_NEED=1
+    fi
+  else
+    c_bad ".venv 不存在  —— 特征工程/训练/推理无法运行"; PIP_NEED=1
+  fi
+
+  # 大屏自检用 gjs 在无浏览器环境下执行页面脚本；缺了只是少一项自动检查，不影响演示
+  if command -v gjs >/dev/null 2>&1; then
+    c_ok "gjs  —— ml/selftest.py 可自动验证大屏渲染"
+  else
+    c_warn "gjs 未装（可选）：装了 ml/selftest.py 才能自动验证大屏页面，否则该项跳过。
+      安装：sudo apt install gjs"
+  fi
+fi
+
 head_ "结论"
 if [ "$FAIL" -eq 0 ]; then
   printf "  \033[32m环境检查全部通过\033[0m（检查范围：%s）\n" "$LINE"
 else
   printf "  \033[31m有 %d 项未通过\033[0m（检查范围：%s）\n" "$FAIL" "$LINE"
-  UNIQ=$(printf '%s\n' "${NEED[@]}" | tr ' ' '\n' | sort -u | tr '\n' ' ')
-  printf "\n  安装命令：\n    sudo apt update && sudo apt install %s\n" "$UNIQ"
+  if [ "${#NEED[@]}" -gt 0 ]; then
+    UNIQ=$(printf '%s\n' "${NEED[@]}" | tr ' ' '\n' | sort -u | tr '\n' ' ')
+    printf "\n  系统包：\n    sudo apt update && sudo apt install %s\n" "$UNIQ"
+  fi
+  if [ "$PIP_NEED" -eq 1 ]; then
+    printf "\n  Python 依赖（L5）：\n    python3 -m venv .venv && .venv/bin/pip install -r ml/requirements.txt\n"
+  fi
   printf "\n  装完重新运行本脚本确认。\n"
 fi
 echo
