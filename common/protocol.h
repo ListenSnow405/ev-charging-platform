@@ -19,46 +19,46 @@ namespace ecp {
 enum Cmd {
     // 用户端 · 用户与鉴权 1000–1099
     CMD_USER_LOGIN          = 1001,   // [说明书] 手机号免密登录 / 首次自动注册
-    CMD_USER_INFO           = 1002,
-    CMD_USER_SET_NICKNAME   = 1003,
-    CMD_USER_SET_AVATAR     = 1004,
+    CMD_USER_INFO           = 1002,   // 获取用户信息
+    CMD_USER_SET_NICKNAME   = 1003,   // 修改昵称
+    CMD_USER_SET_AVATAR     = 1004,   // 修改头像
     CMD_USER_RECHARGE       = 1005,   // [说明书] 钱包充值（模拟支付）
-    CMD_WALLET_TX_LIST      = 1006,
+    CMD_WALLET_TX_LIST      = 1006,   // 查询钱包流水
 
     // 用户端 · 充电站与电桩 1100–1199
-    CMD_STATION_NEARBY      = 1101,   // [说明书] 附近充电站，按距离升序
-    CMD_STATION_PILES       = 1102,   // [说明书] 站内电桩详情
+    CMD_STATION_NEARBY      = 1101,   // [说明书] 附近充电站列表
+    CMD_STATION_PILES       = 1102,   // [说明书] 充电站内电桩详情
 
     // 用户端 · 充电与订单 1200–1299
-    CMD_ORDER_UNFINISHED    = 1201,   // [说明书] 进入充电页必调
-    CMD_ORDER_RESERVE       = 1202,
-    CMD_ORDER_START         = 1203,
-    CMD_ORDER_STOP          = 1204,
-    CMD_ORDER_SETTLE        = 1205,
-    CMD_ORDER_CANCEL        = 1206,
-    CMD_ORDER_LIST          = 1207,
-    CMD_ORDER_PUSH          = 1208,   // 服务端推送：充电中实时数据
+    CMD_ORDER_UNFINISHED    = 1201,   // [说明书] 查询未完成订单
+    CMD_ORDER_RESERVE       = 1202,   // 预约电桩
+    CMD_ORDER_START         = 1203,   // 开始充电
+    CMD_ORDER_STOP          = 1204,   // 结束充电（计费）
+    CMD_ORDER_SETTLE        = 1205,   // 订单结算（扣钱包余额）
+    CMD_ORDER_CANCEL        = 1206,   // 取消预约
+    CMD_ORDER_LIST          = 1207,   // 我的订单列表
+    CMD_ORDER_PUSH          = 1208,   // 充电中实时数据推送（服务端推送）
 
     // 管理端 2000–2399
-    CMD_ADMIN_LOGIN         = 2001,   // [说明书] 默认 admin / 123456
-    CMD_STATION_LIST        = 2101,
-    CMD_STATION_ADD         = 2102,
-    CMD_STATION_DETAIL      = 2103,
-    CMD_PILE_LIST           = 2111,
-    CMD_PILE_REBOOT         = 2112,   // [说明书] 远程重启
-    CMD_ADMIN_USER_LIST     = 2201,   // [说明书] 含手机号模糊搜索
-    CMD_ADMIN_USER_STATUS   = 2202,   // [说明书] 冻结 / 解冻
-    CMD_STAT_REVENUE        = 2301,   // [说明书] 今日 / 本月 / 总营收
-    CMD_STAT_REVENUE_TREND  = 2302,   // [说明书] 近 7 / 30 日趋势
-    CMD_STAT_PILE_STATUS    = 2303,   // [说明书] 在用 / 闲置 / 故障分布
-    CMD_ADMIN_ORDER_LIST    = 2304,
+    CMD_ADMIN_LOGIN         = 2001,   // [说明书] 管理员登录
+    CMD_STATION_LIST        = 2101,   // [说明书] 充电站列表
+    CMD_STATION_ADD         = 2102,   // [说明书] 新增充电站
+    CMD_STATION_DETAIL      = 2103,   // [说明书] 站内电桩明细
+    CMD_PILE_LIST           = 2111,   // [说明书] 电桩列表
+    CMD_PILE_REBOOT         = 2112,   // [说明书] 远程重启电桩
+    CMD_ADMIN_USER_LIST     = 2201,   // [说明书] 用户列表 + 手机号模糊搜索
+    CMD_ADMIN_USER_STATUS   = 2202,   // [说明书] 冻结 / 解冻用户
+    CMD_STAT_REVENUE        = 2301,   // [说明书] 营收概览
+    CMD_STAT_REVENUE_TREND  = 2302,   // [说明书] 营收趋势
+    CMD_STAT_PILE_STATUS    = 2303,   // [说明书] 电桩状态分布
+    CMD_ADMIN_ORDER_LIST    = 2304,   // 订单列表
     CMD_STAT_LOAD_FORECAST  = 2305,   // [说明书] 站点负荷预测 / 负荷预警
 
     // 设备侧 · 电桩模拟器 9000–9099
-    CMD_DEV_REGISTER        = 9001,
-    CMD_DEV_REPORT          = 9002,
+    CMD_DEV_REGISTER        = 9001,   // 电桩注册上线
+    CMD_DEV_REPORT          = 9002,   // 状态与电量上报
     CMD_DEV_REBOOT          = 9003,   // [说明书] 重启指令下发
-    CMD_DEV_HEARTBEAT       = 9004
+    CMD_DEV_HEARTBEAT       = 9004,   // 心跳
 };
 
 // ---- 业务枚举（与 docs/db-schema.sql 一致）--------------------------------------
@@ -100,15 +100,31 @@ inline QByteArray buildPush(int cmd, const QJsonObject &data = QJsonObject())
     return buildResponse(cmd, 0, ERR_OK, data);
 }
 
-// 解析报文。失败返回 false，上层应回 ERR_FRAME。
-inline bool parseEnvelope(const QByteArray &payload, QJsonObject &out)
+// 报文方向：请求带 token、响应带 code+msg
+enum class EnvelopeType { Request, Response };
+
+// 解析并校验报文信封。expectType 为调用方声明的方向：
+// 失败返回 false，上层应回 ERR_FRAME。
+inline bool parseEnvelope(const QByteArray &payload, QJsonObject &out,
+                          EnvelopeType expectType)
 {
     QJsonParseError err{};
     const QJsonDocument doc = QJsonDocument::fromJson(payload, &err);
     if (err.error != QJsonParseError::NoError || !doc.isObject())
         return false;
     out = doc.object();
-    return out.contains("cmd");
+
+    // 公共必填字段及类型
+    if (!out.value("cmd").isDouble() ||
+        !out.value("seq").isDouble() ||
+        !out.value("data").isObject())
+        return false;
+
+    // 方向独有字段
+    if (expectType == EnvelopeType::Request)
+        return out.value("token").isString();   // 请求包必须有 token 字符串
+    return out.value("code").isDouble() &&      // 响应包必须有 code + msg
+           out.value("msg").isString();
 }
 
 } // namespace ecp
