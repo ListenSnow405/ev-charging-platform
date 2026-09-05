@@ -70,21 +70,21 @@
 
 ### 4.1 用户端 · 用户与鉴权（1000–1099）
 
-| 命令字 | 名称 | 请求 `data` | 响应 `data` |
-| --- | --- | --- | --- |
-| 1001 | 手机号免密登录 / 首次自动注册 `[说明书]` 1.4 | `{phone}` | `{token, userId, phone, nickname, avatar, balance, status}` |
-| 1002 | 获取用户信息 | `{}` | 同上（不含 token） |
-| 1003 | 修改昵称 | `{nickname}` | `{}` |
-| 1004 | 修改头像 | `{avatarPath}` | `{}` |
-| 1005 | 钱包充值（模拟支付）`[说明书]` 1.4 | `{amount}` 单位**分** | `{balance}` |
-| 1006 | 查询钱包流水 | `{page, size}` | `{total, list[]}` |
+| 命令字 | 常量名 | 说明 | 请求 `data` | 响应 `data` |
+| --- | --- | --- | --- | --- |
+| 1001 | `CMD_USER_LOGIN` | 手机号免密登录 / 首次自动注册 `[说明书]` 1.4 | `{phone}` | `{token, userId, phone, nickname, avatar, balance, status}` |
+| 1002 | `CMD_USER_INFO` | 获取用户信息 | `{}` | 同上（不含 token） |
+| 1003 | `CMD_USER_SET_NICKNAME` | 修改昵称 | `{nickname}` | `{}` |
+| 1004 | `CMD_USER_SET_AVATAR` | 修改头像 | `{avatarPath}` | `{}` |
+| 1005 | `CMD_USER_RECHARGE` | 钱包充值（模拟支付）`[说明书]` 1.4 | `{amount}` 单位**分** | `{balance}` |
+| 1006 | `CMD_WALLET_TX_LIST` | 查询钱包流水 | `{page, size}` | `{total, list[]}` |
 
 ### 4.2 用户端 · 充电站与电桩（1100–1199）
 
-| 命令字 | 名称 | 请求 `data` | 响应 `data` |
-| --- | --- | --- | --- |
-| 1101 | 附近充电站列表 `[说明书]` 1.4 | `{lng, lat, keyword, sortBy}` | `{list:[{stationId, name, address, price, pileTotal, pileIdle, distance, congestion, idleForecast}]}` |
-| 1102 | 充电站内电桩详情 `[说明书]` 1.4 | `{stationId}` | `{list:[{pileId, code, type, status, power}]}` |
+| 命令字 | 常量名 | 说明 | 请求 `data` | 响应 `data` |
+| --- | --- | --- | --- | --- |
+| 1101 | `CMD_STATION_NEARBY` | 附近充电站列表 `[说明书]` 1.4 | `{lng, lat, keyword, sortBy}` | `{list:[{stationId, name, address, price, pileTotal, pileIdle, distance, congestion, idleForecast}]}` |
+| 1102 | `CMD_STATION_PILES` | 充电站内电桩详情 `[说明书]` 1.4 | `{stationId}` | `{list:[{pileId, code, type, status, power}]}` |
 
 `price` 单位为**分/度**；`distance` 单位为**米**（显示层换算为公里）。
 
@@ -96,45 +96,45 @@
 
 ### 4.3 用户端 · 充电与订单（1200–1299）
 
-| 命令字 | 名称 | 请求 `data` | 响应 `data` |
-| --- | --- | --- | --- |
-| 1201 | **查询未完成订单** `[说明书]` 1.4 进入充电页必调 | `{}` | `{hasUnfinished, order}` |
-| 1202 | 预约电桩 | `{pileId}` | `{orderId}` |
-| 1203 | 开始充电 | `{orderId}` | `{startTime}` |
-| 1204 | 结束充电（计费） | `{orderId}` | `{endTime, kwh, amount}` |
-| 1205 | 订单结算（扣钱包余额） | `{orderId}` | `{amount, balance}` |
-| 1206 | 取消预约 | `{orderId}` | `{}` |
-| 1207 | 我的订单列表 | `{page, size, status}` | `{total, list[]}` |
-| 1208 | 充电中实时数据推送 → | 服务端推送 | `{orderId, kwh, amount, duration}` |
+| 命令字 | 常量名 | 说明 | 请求 `data` | 响应 `data` |
+| --- | --- | --- | --- | --- |
+| 1201 | `CMD_ORDER_UNFINISHED` | **查询未完成订单** `[说明书]` 1.4 进入充电页必调 | `{}` | `{hasUnfinished, order}` |
+| 1202 | `CMD_ORDER_RESERVE` | 预约电桩 | `{pileId}` | `{orderId}` |
+| 1203 | `CMD_ORDER_START` | 开始充电 | `{orderId}` | `{startTime}` |
+| 1204 | `CMD_ORDER_STOP` | 结束充电（计费） | `{orderId}` | `{endTime, kwh, amount}` |
+| 1205 | `CMD_ORDER_SETTLE` | 订单结算（扣钱包余额） | `{orderId}` | `{amount, balance}` |
+| 1206 | `CMD_ORDER_CANCEL` | 取消预约 | `{orderId}` | `{}` |
+| 1207 | `CMD_ORDER_LIST` | 我的订单列表 | `{page, size, status}` | `{total, list[]}` |
+| 1208 | `CMD_ORDER_PUSH` | 充电中实时数据推送 → | 服务端推送 | `{orderId, kwh, amount, duration}` |
 
 ### 4.4 管理端（2000–2399）
 
-| 命令字 | 名称 | 请求 `data` | 响应 `data` |
-| --- | --- | --- | --- |
-| 2001 | 管理员登录 `[说明书]` 1.4 默认 admin/123456 | `{account, password}` | `{token, adminId, account}` |
-| 2101 | 充电站列表 `[说明书]` 1.4 | `{page, size}` | `{total, list:[{stationId, name, address, lng, lat, pileTotal, onlineRate}]}` |
-| 2102 | 新增充电站 `[说明书]` 1.4 | `{name, address, lng, lat, price, pileCount}` | `{stationId}` |
-| 2103 | 站内电桩明细 `[说明书]` 1.4 | `{stationId}` | `{list[]}` |
-| 2111 | 电桩列表 `[说明书]` 1.4 | `{page, size, stationId, status}` | `{total, list:[{pileId, code, stationName, type, power, status, chargeCount, chargeDuration}]}` |
-| 2112 | **远程重启电桩** `[说明书]` 1.4 | `{pileId}` | `{}` |
-| 2201 | 用户列表 + 手机号模糊搜索 `[说明书]` 1.4 | `{page, size, phoneLike}` | `{total, list:[{userId, phone, nickname, balance, createTime, status}]}` |
-| 2202 | **冻结 / 解冻用户** `[说明书]` 1.4 | `{userId, status}` | `{}` |
-| 2301 | 营收概览 `[说明书]` 1.4 今日/本月/总营收 | `{}` | `{today, month, total}` 单位**分** |
-| 2302 | 营收趋势 `[说明书]` 1.4 近 7 / 30 日 | `{days}` 取 7 或 30 | `{list:[{date, amount}]}` |
-| 2303 | 电桩状态分布 `[说明书]` 1.4 在用/闲置/故障 | `{}` | `{inUse, idle, fault, total}` |
-| 2304 | 订单列表 | `{page, size, status, dateFrom, dateTo}` | `{total, list[]}` |
-| 2305 | 站点负荷预测 / 负荷预警 `[说明书]` 1.4（v1.1） | `{stationId, horizon}` | `{list:[{stationId, stationName, horizon, predictTime, loadKw, idlePile, isPeak, congestion, modelVersion}]}` |
+| 命令字 | 常量名 | 说明 | 请求 `data` | 响应 `data` |
+| --- | --- | --- | --- | --- |
+| 2001 | `CMD_ADMIN_LOGIN` | 管理员登录 `[说明书]` 1.4 默认 admin/123456 | `{account, password}` | `{token, adminId, account}` |
+| 2101 | `CMD_STATION_LIST` | 充电站列表 `[说明书]` 1.4 | `{page, size}` | `{total, list:[{stationId, name, address, lng, lat, pileTotal, onlineRate}]}` |
+| 2102 | `CMD_STATION_ADD` | 新增充电站 `[说明书]` 1.4 | `{name, address, lng, lat, price, pileCount}` | `{stationId}` |
+| 2103 | `CMD_STATION_DETAIL` | 站内电桩明细 `[说明书]` 1.4 | `{stationId}` | `{list[]}` |
+| 2111 | `CMD_PILE_LIST` | 电桩列表 `[说明书]` 1.4 | `{page, size, stationId, status}` | `{total, list:[{pileId, code, stationName, type, power, status, chargeCount, chargeDuration}]}` |
+| 2112 | `CMD_PILE_REBOOT` | **远程重启电桩** `[说明书]` 1.4 | `{pileId}` | `{}` |
+| 2201 | `CMD_ADMIN_USER_LIST` | 用户列表 + 手机号模糊搜索 `[说明书]` 1.4 | `{page, size, phoneLike}` | `{total, list:[{userId, phone, nickname, balance, createTime, status}]}` |
+| 2202 | `CMD_ADMIN_USER_STATUS` | **冻结 / 解冻用户** `[说明书]` 1.4 | `{userId, status}` | `{}` |
+| 2301 | `CMD_STAT_REVENUE` | 营收概览 `[说明书]` 1.4 今日/本月/总营收 | `{}` | `{today, month, total}` 单位**分** |
+| 2302 | `CMD_STAT_REVENUE_TREND` | 营收趋势 `[说明书]` 1.4 近 7 / 30 日 | `{days}` 取 7 或 30 | `{list:[{date, amount}]}` |
+| 2303 | `CMD_STAT_PILE_STATUS` | 电桩状态分布 `[说明书]` 1.4 在用/闲置/故障 | `{}` | `{inUse, idle, fault, total}` |
+| 2304 | `CMD_ADMIN_ORDER_LIST` | 订单列表 | `{page, size, status, dateFrom, dateTo}` | `{total, list[]}` |
+| 2305 | `CMD_STAT_LOAD_FORECAST` | 站点负荷预测 / 负荷预警 `[说明书]` 1.4（v1.1） | `{stationId, horizon}` | `{list:[{stationId, stationName, horizon, predictTime, loadKw, idlePile, isPeak, congestion, modelVersion}]}` |
 
 `2305`：`stationId=0` 表示全部站点；`horizon` 取 `1`/`6`/`24`，非法值返回 `ERR_PARAM`。取 `t_load_forecast` 中同一 `model_version` 下 `create_time` 最大的一批。**无预测数据返回 `code=0` + 空 `list`**，不新增错误码——预测缺失是正常状态，不是错误。管理端按 `congestion ≥ 0.8` 本地判定预警，阈值不进协议。`loadKw` 单位 kW，是物理量不是金额，不受「金额整数分」规则约束。
 
 ### 4.5 设备侧 · 电桩模拟器（9000–9099）
 
-| 命令字 | 名称 | 方向 | `data` |
-| --- | --- | --- | --- |
-| 9001 | 电桩注册上线 | 设备 → 服务端 | `{pileCode}` |
-| 9002 | 状态与电量上报 | 设备 → 服务端 | `{pileCode, status, kwh, power}` |
-| 9003 | 重启指令下发 `[说明书]` 1.4 | 服务端 → 设备 | `{pileCode}` |
-| 9004 | 心跳 | 设备 → 服务端 | `{pileCode}` |
+| 命令字 | 常量名 | 说明 | 方向 | `data` |
+| --- | --- | --- | --- | --- |
+| 9001 | `CMD_DEV_REGISTER` | 电桩注册上线 | 设备 → 服务端 | `{pileCode}` |
+| 9002 | `CMD_DEV_REPORT` | 状态与电量上报 | 设备 → 服务端 | `{pileCode, status, kwh, power}` |
+| 9003 | `CMD_DEV_REBOOT` | 重启指令下发 `[说明书]` 1.4 | 服务端 → 设备 | `{pileCode}` |
+| 9004 | `CMD_DEV_HEARTBEAT` | 心跳 | 设备 → 服务端 | `{pileCode}` |
 
 ## 5. 错误码 `[本组自定]`
 
@@ -186,19 +186,10 @@
 
 > 本项目为实训环境，**不做 TLS 加密**，属于已知取舍，需在设计文档中写明。
 
-## 7. 线程模型 `[本组自定]`
-
-对应 `[说明书]` 1.6「程序的主框架应该是一个多线程结构」「多线程 pthread 编程」：
-
-- 主线程：`accept` 循环，接受连接后把 fd 投入任务队列
-- **pthread 线程池**：固定 `N = 8` 个工作线程，从任务队列取连接处理读写与业务分发
-- 任务队列：`pthread_mutex_t` + `pthread_cond_t` 保护，**不使用 QThread 替代**（说明书点名 pthread，是考核点）
-- 会话表跨线程共享，读写均加 `pthread_rwlock_t`
-- **每个工作线程持有自己的 QSqlDatabase 连接**，连接名由线程 id 生成；禁止跨线程共享连接（硬性规则第 2 条）
-
-## 8. 变更记录
+## 7. 变更记录
 
 | 日期 | 版本 | 变更 | 提出人 | 评审 |
 | --- | --- | --- | --- | --- |
 | — | v1.0 | 初版冻结 | L1 | 待全组评审 |
-| 2026-09-03 | v1.1 | CR-001：1101 增加 congestion/idleForecast/sortBy；新增 2305 站点负荷预测。CR-003：第 6 节增加冻结用户会话失效说明 | L5（代 L1 落地，L1/L2 暂时无法操作，详见 docs/conventions.md 第 3.2 节） | 待 L1 归队复核 |
+| 2026-09-03 | v1.1 | CR-001：1101 增加 congestion/idleForecast/sortBy；新增 2305 站点负荷预测。CR-003：第 6 节增加冻结用户会话失效说明 | L5（代 L1 落地，L1/L2 暂时无法操作，详见 docs/conventions.md 第 3.2 节） | L1：已复核通过 |
+| 2026-09-05 | v1.2 | 文档整理：命令字表增加「常量名」列；§7 线程模型迁至 server/net/README.md | L1 | 待评审 |
