@@ -406,10 +406,48 @@ cp config/app.ini.example config/app.ini   # 首次克隆后执行，填入自�
 | 设计 | 数据库设计 | L2 | ✅ [db-schema.sql](db-schema.sql) |
 | 设计 | 技术选型说明（含推论项理由） | 全组 | ✅ CLAUDE.md 第 2 节 |
 | 开发 | 各模块源码与模块级 CLAUDE.md | 各线 | ⬜ 进行中 |
+| 开发 | 负荷预测建模与精度评估 | L5 | ✅ [../ml/reports/forecast_eval.md](../ml/reports/forecast_eval.md)，结论见 8.1 |
 | 测试 | 测试用例集与回归清单 | L4 | ⬜ 待建 |
 | 测试 | 交叉试读评审记录 | L2 | ⬜ 每周一次，记入第 4 节 |
 | 发布 | 部署与运行说明 | L3 | ⬜ 随一键启动脚本提交 |
-| 发布 | 答辩演示动线 | 全组 | ⬜ W4 |
+| 发布 | 答辩演示动线（大屏部分） | L5 | ✅ [../dataviz/DEMO.md](../dataviz/DEMO.md) |
+| 发布 | 答辩演示动线（整体） | 全组 | ⬜ W4 |
+
+### 8.1 负荷预测精度评估结论　`[说明书]` 1.4
+
+完整报告 [../ml/reports/forecast_eval.md](../ml/reports/forecast_eval.md)（随每次训练自动重生成，
+下表为定稿时的数值，量级稳定，小数点后会随重训微动）。
+
+**做法**：`HistGradientBoostingRegressor`，全局单模型 + station 特征（6 站各自建模样本太少），
+2 个目标 × 3 个 horizon = 6 个模型，直接多步不用递归（避免误差累积）。
+**按时间切分**，末 12 天作测试段；超参在训练段末尾再切 8 天验证段上选，**绝不用测试段调参**。
+
+**结果**（相对基线「分工作日/周末的同小时均值」的 MAE 降幅）：
+
+| 目标 | 1h | 6h | 24h |
+| --- | --- | --- | --- |
+| 充电负荷 kW | +9.2% | +5.3% | +2.5% |
+| 并发会话数 | +31.1% | +0.1% | −1.0% |
+
+**三条必须一并说明的限制，答辩时主动讲，别等被问：**
+
+1. **基线是模型的一个输入。** 特征里含扩展窗口口径的同小时均值（只用严格早于当前样本的
+   同键观测，构造上无穿越）。所以上表不应读作「模型比基线聪明多少」，而是
+   **「在季节均值之上还能再榨出多少」**。这样安排是有依据的：不给这个特征时，
+   h=6 的模型测试 MAE 反而输给基线（30.05 vs 29.77）——滞后特征在该 horizon 基本是噪声，
+   模型会去学噪声。
+2. **h≥6 的增量小是数据决定的，不是模型缺陷。** 训练数据的跨日持续性来自 AR(1) 过程，
+   去季节后的 t−24h 自相关只有 0.078，理论上可榨取的增量本就接近零。
+   佐证：只用日历特征（完全不给滞后）训练，h=24 的测试 MAE 与基线几乎相同。
+   继续调参把并发数 h=24 做成正数，只会是在测试集上过拟合。
+3. **绝对精度不宜外推到真实部署。** 训练数据由 `ml/gen_history.py` 合成；
+   天气虽是可预报的外生变量（真实场景也会用天气预报），但合成数据上这个特征比现实更干净。
+
+**数据侧的前置工作**（同样是评估结论的一部分）：原始生成器六个站共用一条小时曲线、
+日与日相互独立，实测 t−24h 自相关仅 0.052，「各站点预测」在数据层面是空的。
+经站点画像分化 + AR(1) 需求水平 + 天气马尔可夫持续性 + 电桩占用约束改造后，
+t−24h 自相关 0.345、分站曲线两两 L1 距离 0.475（噪声底实测 0.149）、
+站点峰值负荷 ≤ 装机 85%。验收由 `ml/check_signal.py` 把关，四项全过才允许进入建模。
 
 ## 9. 待办
 
@@ -422,7 +460,24 @@ cp config/app.ini.example config/app.ini   # 首次克隆后执行，填入自�
 - [ ] **⚠ L1、L2 归队后必读**：`docs/protocol.md`(v1.1)、`server/net/session.h/.cpp`、`server/biz/user_management_service.cpp` 在二人不在时被 L5 代为直接改动（CR-001 + CR-003，第 3.2 节有完整越权记录），已编译通过但**不代表内容一定对**，必须逐条复核
 - [x] CR-001 已并入冻结协议 v1.1，`common/protocol.h` 已补 2305 常量
 - [x] CR-002 已获 L2 批复，三条意见已全部落地到 `ml/gen_history.py`
-- [ ] **2305 服务端 handler 尚无人实现**——L2 合入后 L3 会立即接管理端预测/预警页。
-      L5 侧先把 `t_load_forecast` 填满，让这个 handler 落地时只剩一个 query
+- [ ] **⚠ L2：2305 服务端 handler 仍无人实现，但数据侧已就绪，现在落地只剩一个 query。**
+      `common/protocol.h` 的 `CMD_STAT_LOAD_FORECAST = 2305` 常量已在，`registerHandler` 列表里还没有。
+      `t_load_forecast` 已由 `ml/predict.py` 填充，每批 6 站 × 3 个 horizon = 18 行，
+      **整批共用一个 `create_time`**，可直接按协议第 126 行的口径取：
+      ```sql
+      SELECT f.station_id, s.name, f.horizon, f.predict_time, f.load_kw,
+             f.idle_pile, f.is_peak, f.congestion, f.model_version
+        FROM t_load_forecast f JOIN t_station s ON s.station_id = f.station_id
+       WHERE f.create_time = (SELECT MAX(create_time) FROM t_load_forecast
+                               WHERE model_version = f.model_version)
+         AND (? = 0 OR f.station_id = ?) AND f.horizon = ?
+       ORDER BY f.station_id
+      ```
+      这段 SQL 已在 `ml/export_snapshot.py` 上实跑验证过。注意：`stationId=0` 表示全部站点；
+      `horizon` 非 1/6/24 返回 `ERR_PARAM`；**无数据返回 `code=0` + 空 `list`，不新增错误码**。
+      L3 的管理端预警页按 `congestion ≥ 0.8` 本地判定，阈值不进协议
+- [ ] **⚠ L2：1101 取 `congestion` / `idleForecast` 的逻辑也还没接**（`station_service.cpp`）。
+      取 `horizon=1` 的最新一条；**无预测数据时两字段均填 −1 而不是 0**——
+      0 在拥堵度语义里是「最不拥堵」，会把没数据的站排到推荐最前面（协议第 95 行）
 - [ ] 1005 充值的冻结校验 L2 已补（46008a9），1006 也加了角色校验
 - [ ] CR-003 待 L1/L2 复核——冻结后会话立即失效，已代为应用；实测冻结后旧 token 立即返回 `ERR_TOKEN_INVALID`，测试后已解冻恢复数据库原状（`t_admin_oplog` 留了一对 FREEZE/UNFREEZE 记录，这是功能本身该留的审计痕迹，未清理）
