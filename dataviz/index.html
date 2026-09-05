@@ -2,52 +2,322 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
 <title>充电桩运营数据大屏</title>
 <!-- [说明书] 1.4 大数据可视化大屏：Web 页面形式，采用 ECharts 图表库构建 -->
+<!-- 数据源：ml/export_snapshot.py 只读 SQLite 导出的静态 JSON，本页轮询。
+     不走服务端 HTTP —— 浏览器连不上自定义 TCP，此方案让服务端保持纯 Socket
+     （[说明书] 1.6 考核点），L2 也不必额外写一套 HTTP 服务。见 CLAUDE.md 第 2 节。 -->
 <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
 <style>
-  body{margin:0;background:#0b1a2b;color:#cfe6ff;font-family:sans-serif}
-  h1{font-size:20px;padding:14px 20px;margin:0;border-bottom:1px solid #1d3busa}
-  h1{border-bottom:1px solid #1d3b5c}
-  .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;padding:14px}
-  .card{background:#11253c;border:1px solid #1d3b5c;border-radius:6px;padding:12px}
-  .card h2{font-size:13px;margin:0 0 8px;color:#7fb4e8;font-weight:normal}
-  .chart{height:240px}
-  .tip{padding:10px 20px;color:#6f90b0;font-size:12px}
+  :root{
+    --bg:#0b1a2b; --card:#11253c; --line:#1d3b5c; --axis:#2b5077;
+    --fg:#cfe6ff; --dim:#6f90b0; --head:#7fb4e8;
+    --ok:#3fb98f; --warn:#e8a33d; --bad:#e0576b;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);
+       font-family:"Noto Sans CJK SC","Source Han Sans SC",sans-serif}
+  header{display:flex;align-items:baseline;gap:16px;flex-wrap:wrap;
+         padding:12px 20px;border-bottom:1px solid var(--line)}
+  header h1{font-size:20px;margin:0}
+  header .meta{font-size:12px;color:var(--dim);margin-left:auto;text-align:right;line-height:1.6}
+  /* KPI 与图表都用 auto-fit：1920 宽三列、笔记本两列、投影仪竖屏一列，
+     不必为每种分辨率写断点。答辩现场接什么屏都不会错位。 */
+  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));
+        gap:14px;padding:14px 14px 0}
+  .kpi{background:var(--card);border:1px solid var(--line);border-radius:6px;padding:14px 16px}
+  .kpi .label{font-size:12px;color:var(--head)}
+  .kpi .value{font-size:30px;font-weight:600;margin-top:4px;
+              font-variant-numeric:tabular-nums}
+  .kpi .unit{font-size:13px;color:var(--dim);margin-left:4px;font-weight:400}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(380px,1fr));
+        gap:14px;padding:14px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:6px;padding:12px}
+  .card.wide{grid-column:1/-1}
+  .card header{padding:0 0 8px;border:0;display:flex;align-items:center;gap:10px}
+  .card h2{font-size:13px;margin:0;color:var(--head);font-weight:400}
+  .chart{height:260px}
+  .card.wide .chart{height:300px}
+  .switch{margin-left:auto;display:flex;gap:6px}
+  .switch button{background:transparent;border:1px solid var(--axis);color:var(--dim);
+                 font-size:11px;padding:2px 10px;border-radius:3px;cursor:pointer}
+  .switch button.on{background:var(--axis);color:#fff}
+  .stale{color:var(--warn)}
+  .err{padding:14px 20px;color:var(--bad);font-size:13px}
+  .tip{padding:0 20px 18px;color:var(--dim);font-size:12px;line-height:1.7}
 </style>
 </head>
 <body>
-<h1>充电桩运营数据大屏 <span style="font-size:12px;color:#6f90b0">（骨架 · 占位数据）</span></h1>
-<div class="grid">
-  <div class="card"><h2>营收趋势</h2><div id="c1" class="chart"></div></div>
-  <div class="card"><h2>电桩状态分布</h2><div id="c2" class="chart"></div></div>
-  <div class="card"><h2>各站点营收排行</h2><div id="c3" class="chart"></div></div>
+<header>
+  <h1>充电桩运营数据大屏</h1>
+  <div class="meta">
+    <div>快照 <span id="genAt">—</span>　数据截止 <span id="asOf">—</span></div>
+    <div>预测模型 <span id="modelVer">—</span>　下次刷新 <span id="countdown">—</span></div>
+  </div>
+</header>
+
+<div class="kpis">
+  <div class="kpi"><div class="label">今日营收</div>
+    <div class="value"><span id="kpiToday">—</span><span class="unit">元</span></div></div>
+  <div class="kpi"><div class="label">本月营收</div>
+    <div class="value"><span id="kpiMonth">—</span><span class="unit">元</span></div></div>
+  <div class="kpi"><div class="label">累计营收</div>
+    <div class="value"><span id="kpiTotal">—</span><span class="unit">元</span></div></div>
 </div>
+
+<div id="err" class="err" hidden></div>
+
+<div class="grid">
+  <div class="card wide">
+    <header><h2>全网充电负荷　实时 + 预测双层</h2></header>
+    <div id="cLoad" class="chart"></div>
+  </div>
+  <div class="card">
+    <header><h2>营收趋势</h2>
+      <div class="switch" id="swTrend">
+        <button data-k="trend" class="on">近 7 日</button>
+        <button data-k="trend30">近 30 日</button>
+      </div>
+    </header>
+    <div id="cTrend" class="chart"></div>
+  </div>
+  <div class="card">
+    <header><h2>电桩状态分布</h2></header>
+    <div id="cStatus" class="chart"></div>
+  </div>
+  <div class="card">
+    <header><h2>各站点营收排行</h2></header>
+    <div id="cRank" class="chart"></div>
+  </div>
+  <div class="card">
+    <header><h2>站点拥堵度预测</h2>
+      <div class="switch" id="swHorizon">
+        <button data-h="1" class="on">1 小时</button>
+        <button data-h="6">6 小时</button>
+        <button data-h="24">24 小时</button>
+      </div>
+    </header>
+    <div id="cCongestion" class="chart"></div>
+  </div>
+  <div class="card">
+    <header><h2>用户下单时段分布</h2></header>
+    <div id="cHourly" class="chart"></div>
+  </div>
+  <div class="card">
+    <header><h2>快慢充与订单终态</h2></header>
+    <div id="cBehavior" class="chart"></div>
+  </div>
+</div>
+
 <p class="tip">
-  TODO(L5)：数据源为 <code>dataviz/data/snapshot.json</code>，由 <code>ml/export_snapshot.py</code>
-  只读 SQLite 定时导出，本页轮询刷新（技术基线见 CLAUDE.md 第 2 节「大屏取数」）。
+  数据源 <code>dataviz/data/snapshot.json</code>，由 <code>ml/export_snapshot.py</code> 只读 SQLite 导出；
+  预测来自 <code>t_load_forecast</code>（<code>ml/predict.py</code> 写入），口径与协议 2305 一致。
+  金额单位为分，本页除以 100 显示。
 </p>
+
 <script>
-// TODO(L5)：改为 fetch('data/snapshot.json') 并按 snapshot_interval 轮询
-const demo = {
-  trend:  { dates:['08-27','08-28','08-29','08-30','08-31','09-01','09-02'], amount:[138,126,131,155,182,96,0] },
-  status: [ {name:'闲置',value:12}, {name:'在用',value:8}, {name:'故障',value:4} ],
-  rank:   { names:['福田CBD','南山科技园','市民中心','深圳湾','宝安中心','龙岗大运'], amount:[777,720,350,205,110,60] }
+"use strict";
+// ---- 主题与工具 ----------------------------------------------------------
+const CSS = getComputedStyle(document.documentElement);
+const C = k => CSS.getPropertyValue(k).trim();
+const BASE = {
+  textStyle:{color:C('--fg'),fontFamily:'inherit'},
+  grid:{left:48,right:20,top:28,bottom:34},
+  tooltip:{backgroundColor:'#0d2135',borderColor:C('--line'),textStyle:{color:C('--fg')}}
 };
-const dark = {textStyle:{color:'#cfe6ff'}};
-echarts.init(document.getElementById('c1')).setOption({...dark,
-  tooltip:{trigger:'axis'},
-  xAxis:{type:'category',data:demo.trend.dates,axisLine:{lineStyle:{color:'#2b5077'}}},
-  yAxis:{type:'value',splitLine:{lineStyle:{color:'#1d3b5c'}}},
-  series:[{type:'line',smooth:true,data:demo.trend.amount,areaStyle:{opacity:.15}}]});
-echarts.init(document.getElementById('c2')).setOption({...dark,
-  tooltip:{trigger:'item'},
-  series:[{type:'pie',radius:['45%','70%'],data:demo.status,label:{color:'#cfe6ff'}}]});
-echarts.init(document.getElementById('c3')).setOption({...dark,
-  tooltip:{trigger:'axis'},
-  xAxis:{type:'category',data:demo.rank.names,axisLabel:{interval:0,rotate:30},axisLine:{lineStyle:{color:'#2b5077'}}},
-  yAxis:{type:'value',splitLine:{lineStyle:{color:'#1d3b5c'}}},
-  series:[{type:'bar',data:demo.rank.amount}]});
+const axisX = extra => Object.assign({type:'category',
+  axisLine:{lineStyle:{color:C('--axis')}},axisLabel:{color:C('--dim')}}, extra);
+const axisY = extra => Object.assign({type:'value',
+  splitLine:{lineStyle:{color:C('--line')}},axisLabel:{color:C('--dim')}}, extra);
+// 金额一律以「分」传输，只在显示层除以 100（根 CLAUDE.md 硬性规则 3）
+const yuan = fen => (fen/100).toLocaleString('zh-CN',{maximumFractionDigits:0});
+const hhmm = ts => ts ? ts.slice(5,16) : '—';
+// 必须按本地时区拼「今天」。用 toISOString().slice(0,10) 取的是 UTC 日期，
+// 东八区在 0~8 点之间 UTC 还停在前一天，凌晨看大屏会把过期数据判成新鲜的。
+// 库里的 settle_time 是本地时间（datetime('now','localtime')），两边时区必须一致。
+const today = () => { const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; };
+
+const charts = {};
+const init = id => (charts[id] ||= echarts.init(document.getElementById(id)));
+addEventListener('resize', () => Object.values(charts).forEach(c => c.resize()));
+
+// ---- 各图表渲染 ----------------------------------------------------------
+// 实时负荷曲线 + 预测点。两者必须同口径（kWh 按重叠时长摊进小时桶，数值即平均 kW），
+// 否则画在同一张图上就是两个量纲。导出器与 ml/build_features.py 用的是同一套算法。
+function drawLoad(s){
+  const hours = s.loadCurve.hours, actual = s.loadCurve.kw;
+  // 预测是「每站每 horizon 一个点」，全网曲线按 horizon 把各站相加
+  const byTime = {};
+  for (const f of s.forecast.list) byTime[f.predictTime] = (byTime[f.predictTime]||0) + f.loadKw;
+  const fTimes = Object.keys(byTime).sort();
+  const axis = hours.concat(fTimes.filter(t => !hours.includes(t)));
+  const actualSeries = axis.map((t,i) => i < hours.length ? actual[i] : null);
+  // 预测序列在最后一个实测点上补一个同值点，虚线才能和实线接上，不然中间断开
+  const lastIdx = hours.length - 1;
+  const forecastSeries = axis.map((t,i) =>
+    i === lastIdx ? actual[lastIdx] : (byTime[t] !== undefined ? +byTime[t].toFixed(1) : null));
+  init('cLoad').setOption({...BASE,
+    legend:{data:['实测负荷','预测负荷'],textStyle:{color:C('--dim')},right:10,top:0},
+    tooltip:{...BASE.tooltip,trigger:'axis',
+      formatter:p => p[0].axisValue.slice(5,16)+'<br>'+
+        p.filter(x=>x.value!=null).map(x=>`${x.marker}${x.seriesName} ${x.value} kW`).join('<br>')},
+    xAxis:axisX({data:axis,axisLabel:{color:C('--dim'),
+      formatter:v => v.slice(11,13)+'时',interval:Math.floor(axis.length/12)}}),
+    yAxis:axisY({name:'kW',nameTextStyle:{color:C('--dim')}}),
+    series:[
+      {name:'实测负荷',type:'line',smooth:true,showSymbol:false,data:actualSeries,
+       itemStyle:{color:C('--head')},areaStyle:{opacity:.18}},
+      {name:'预测负荷',type:'line',data:forecastSeries,connectNulls:true,
+       symbolSize:8,itemStyle:{color:C('--warn')},lineStyle:{type:'dashed'}},
+    ]});
+}
+
+function drawTrend(s, key){
+  const rows = s[key] || [];
+  init('cTrend').setOption({...BASE,
+    tooltip:{...BASE.tooltip,trigger:'axis',
+      formatter:p => `${p[0].axisValue}<br>${p[0].marker}营收 ${yuan(p[0].value)} 元`},
+    xAxis:axisX({data:rows.map(r => r.date.slice(5)),
+      axisLabel:{color:C('--dim'),interval:rows.length > 10 ? 3 : 0}}),
+    yAxis:axisY({axisLabel:{color:C('--dim'),formatter:v => yuan(v)},
+      name:'元',nameTextStyle:{color:C('--dim')}}),
+    series:[{type:'line',smooth:true,data:rows.map(r => r.amount),
+      itemStyle:{color:C('--ok')},areaStyle:{opacity:.15}}]}, true);
+}
+
+function drawStatus(s){
+  const color = {'在用':C('--ok'),'闲置':C('--head'),'故障':C('--bad')};
+  init('cStatus').setOption({...BASE,grid:null,
+    tooltip:{...BASE.tooltip,trigger:'item',formatter:'{b} {c} 台（{d}%）'},
+    legend:{bottom:0,textStyle:{color:C('--dim')}},
+    series:[{type:'pie',radius:['45%','68%'],center:['50%','45%'],
+      data:s.status.map(x => ({...x,itemStyle:{color:color[x.name]}})),
+      label:{color:C('--fg'),formatter:'{b}\n{c} 台'}}]});
+}
+
+function drawRank(s){
+  init('cRank').setOption({...BASE,grid:{left:90,right:24,top:16,bottom:24},
+    tooltip:{...BASE.tooltip,trigger:'axis',axisPointer:{type:'shadow'},
+      formatter:p => `${p[0].name}<br>${p[0].marker}营收 ${yuan(p[0].value)} 元`},
+    // 横向条形图：站名是中文长串，竖着放要么旋转 30° 要么被截断，横着放一眼可读
+    xAxis:axisY({axisLabel:{color:C('--dim'),formatter:v => yuan(v)}}),
+    yAxis:axisX({data:s.rank.map(r => r.name).reverse(),
+      axisLabel:{color:C('--dim'),fontSize:11}}),
+    series:[{type:'bar',data:s.rank.map(r => r.amount).reverse(),barMaxWidth:18,
+      itemStyle:{color:C('--head'),borderRadius:[0,3,3,0]}}]});
+}
+
+// 拥堵度预测。0.8 是协议 2305 注明的管理端预警阈值（阈值不进协议，由管理端本地判定），
+// 大屏画一条参考线保持同一套语言；is_peak 的站单独染色。
+function drawCongestion(s, horizon){
+  const rows = s.forecast.list.filter(f => f.horizon === horizon);
+  if (!rows.length){ init('cCongestion').clear(); return; }
+  init('cCongestion').setOption({...BASE,grid:{left:90,right:40,top:16,bottom:24},
+    tooltip:{...BASE.tooltip,trigger:'axis',axisPointer:{type:'shadow'},
+      formatter:p => { const r = rows.slice().reverse()[p[0].dataIndex];
+        return `${r.name}<br>拥堵度 ${r.congestion.toFixed(3)}<br>`+
+               `预测负荷 ${r.loadKw} kW<br>空闲桩 ${r.idlePile} 台<br>`+
+               `${r.isPeak ? '高峰时段' : '非高峰'}　${r.predictTime.slice(5,16)}`; }},
+    xAxis:axisY({max:1,axisLabel:{color:C('--dim')}}),
+    yAxis:axisX({data:rows.map(r => r.name).reverse(),
+      axisLabel:{color:C('--dim'),fontSize:11}}),
+    series:[{type:'bar',barMaxWidth:18,
+      data:rows.slice().reverse().map(r => ({value:r.congestion,
+        itemStyle:{color:r.isPeak ? C('--warn') : C('--head'),borderRadius:[0,3,3,0]}})),
+      markLine:{silent:true,symbol:'none',
+        lineStyle:{color:C('--bad'),type:'dashed'},
+        label:{color:C('--bad'),fontSize:10,formatter:'预警 0.8'},
+        data:[{xAxis:0.8}]}}]}, true);
+}
+
+function drawHourly(s){
+  init('cHourly').setOption({...BASE,
+    tooltip:{...BASE.tooltip,trigger:'axis',axisPointer:{type:'shadow'},
+      formatter:p => `${p[0].axisValue}　${p[0].value} 单`},
+    xAxis:axisX({data:[...Array(24).keys()].map(h => String(h).padStart(2,'0')),
+      axisLabel:{color:C('--dim'),interval:2}}),
+    yAxis:axisY({name:'单',nameTextStyle:{color:C('--dim')}}),
+    series:[{type:'bar',data:s.behavior.hourlyOrders,barMaxWidth:16,
+      itemStyle:{color:C('--head'),borderRadius:[3,3,0,0]}}]});
+}
+
+function drawBehavior(s){
+  const b = s.behavior;
+  init('cBehavior').setOption({...BASE,grid:null,
+    tooltip:{...BASE.tooltip,trigger:'item',formatter:'{a}<br>{b} {c} 单（{d}%）'},
+    legend:{bottom:0,textStyle:{color:C('--dim')}},
+    series:[
+      {name:'充电类型',type:'pie',radius:['30%','48%'],center:['28%','45%'],
+       data:b.byPileType.map((x,i) => ({...x,
+         itemStyle:{color:[C('--head'),C('--ok')][i]}})),
+       label:{color:C('--fg'),fontSize:11,formatter:'{b}\n{d}%'}},
+      {name:'订单终态',type:'pie',radius:['30%','48%'],center:['72%','45%'],
+       data:b.orderStatus.map((x,i) => ({...x,
+         itemStyle:{color:[C('--ok'),C('--dim')][i]}})),
+       label:{color:C('--fg'),fontSize:11,formatter:'{b}\n{d}%'}},
+    ]});
+}
+
+// ---- 轮询 ----------------------------------------------------------------
+let snap = null, trendKey = 'trend', horizon = 1, timer = null, left = 0;
+
+function renderAll(s){
+  document.getElementById('genAt').textContent = hhmm(s.generatedAt);
+  document.getElementById('modelVer').textContent = s.forecast.modelVersion || '未生成';
+  document.getElementById('kpiToday').textContent = yuan(s.revenue.today);
+  document.getElementById('kpiMonth').textContent = yuan(s.revenue.month);
+  document.getElementById('kpiTotal').textContent = yuan(s.revenue.total);
+  // 数据截止若不是今天就标黄。演示数据由 gen_history.py 生成，它刻意不写当天订单
+  // （红线自检靠「今日无订单」分辨真实联调数据），所以纯演示时「今日营收」必为 0——
+  // 不标出来会被误读成系统没在跑。
+  const asOf = document.getElementById('asOf');
+  asOf.textContent = hhmm(s.dataAsOf);
+  asOf.className = (s.dataAsOf || '').slice(0,10) === today() ? '' : 'stale';
+  drawLoad(s); drawTrend(s, trendKey); drawStatus(s); drawRank(s);
+  drawCongestion(s, horizon); drawHourly(s); drawBehavior(s);
+}
+
+async function poll(){
+  try{
+    // 加时间戳绕开浏览器缓存——静态文件默认会被缓存，不加的话轮询拿到的一直是旧快照
+    const r = await fetch(`data/snapshot.json?t=${Date.now()}`, {cache:'no-store'});
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    snap = await r.json();
+    document.getElementById('err').hidden = true;
+    renderAll(snap);
+    left = snap.pollIntervalSec || 30;
+  }catch(e){
+    const el = document.getElementById('err');
+    el.hidden = false;
+    el.textContent = `读取快照失败：${e.message}　`
+      + `请先执行 python3 ml/export_snapshot.py ml/data/dev.db dataviz/data/snapshot.json`
+      + `，并通过 http 服务访问（直接双击打开 file:// 会被浏览器同源策略拦下）`;
+    left = 10;
+  }
+}
+
+// 倒计时只是给演示者看的：现场能一眼确认页面在活着，而不是卡住了
+setInterval(() => {
+  document.getElementById('countdown').textContent = left > 0 ? `${left--} 秒` : '刷新中…';
+  if (left <= 0) poll();
+}, 1000);
+
+document.getElementById('swTrend').onclick = e => {
+  if (!e.target.dataset.k) return;
+  [...e.currentTarget.children].forEach(b => b.classList.toggle('on', b === e.target));
+  trendKey = e.target.dataset.k;
+  if (snap) drawTrend(snap, trendKey);
+};
+document.getElementById('swHorizon').onclick = e => {
+  if (!e.target.dataset.h) return;
+  [...e.currentTarget.children].forEach(b => b.classList.toggle('on', b === e.target));
+  horizon = +e.target.dataset.h;
+  if (snap) drawCongestion(snap, horizon);
+};
+
+poll();
 </script>
 </body>
 </html>
