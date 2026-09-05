@@ -38,7 +38,7 @@ int main(int argc, char *argv[])
         QByteArray payload;
         while (parser->next(payload)) {
             QJsonObject env;
-            if (!parseEnvelope(payload, env)) continue;
+            if (!parseEnvelope(payload, env, EnvelopeType::Response)) continue;
             const int cmd = env.value("cmd").toInt();
             if (cmd == CMD_DEV_REBOOT) {
                 // [说明书] 1.4 收到重启指令：模拟重启动作
