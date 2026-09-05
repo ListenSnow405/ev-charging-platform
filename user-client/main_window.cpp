@@ -1,8 +1,11 @@
 #include "main_window.h"
 
+#include "app_path.h"
 #include "protocol.h"
+#include "time_util.h"
 
 #include <QFrame>
+#include <QButtonGroup>
 #include <QGridLayout>
 #include <QHBoxLayout>
 #include <QFileDialog>
@@ -10,19 +13,83 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QMessageBox>
+#include <QSettings>
 #include <QPushButton>
 #include <QSizePolicy>
 #include <QFont>
+#include <QUrl>
+#include <QUrlQuery>
 #include <QVBoxLayout>
 
 #ifdef HAVE_WEBENGINE
 #include <QWebEngineView>
+#include <QWebEngineSettings>
 #endif
 
 namespace {
 static QString textOrEmpty(const QJsonObject &obj, const char *key)
 {
     return obj.value(QLatin1String(key)).toString();
+}
+
+static QString buildNavPreviewHtml(const QString &key, double lat, double lng)
+{
+    const QString safeKey = key.toHtmlEscaped();
+    return QStringLiteral(R"HTML(
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    html, body, #map { width: 100%%; height: 100%%; margin: 0; overflow: hidden; }
+    body { background: #f5f7fb; font-family: sans-serif; }
+    #tip {
+      position: fixed; left: 16px; top: 16px; z-index: 2;
+      max-width: calc(100%% - 32px);
+      background: rgba(17, 24, 39, 0.88); color: #fff;
+      border-radius: 12px; padding: 10px 12px; line-height: 1.5;
+      box-shadow: 0 10px 24px rgba(15, 23, 42, 0.18);
+      font-size: 13px;
+    }
+    #tip b { display: block; font-size: 14px; margin-bottom: 2px; }
+  </style>
+  <script src="https://map.qq.com/api/gljs?v=1.exp&key=%1"></script>
+</head>
+<body>
+  <div id="tip">
+    <b>一键导航</b>
+    这里是腾讯地图预览页。输入终点后点击“开始导航”，会跳转到路线规划。
+  </div>
+  <div id="map"></div>
+  <script>
+    function initMap() {
+      const center = new TMap.LatLng(%2, %3);
+      new TMap.Map(document.getElementById('map'), {
+        center: center,
+        zoom: 13,
+        pitch: 0,
+        rotation: 0
+      });
+    }
+    window.onload = initMap;
+  </script>
+</body>
+</html>
+)HTML").arg(safeKey).arg(lat, 0, 'f', 6).arg(lng, 0, 'f', 6);
+}
+
+static QUrl buildRoutePlanUrl(const QString &mode, double lat, double lng, const QString &destName)
+{
+    QUrl url(QStringLiteral("https://apis.map.qq.com/uri/v1/routeplan"));
+    QUrlQuery query;
+    query.addQueryItem(QStringLiteral("type"), mode);
+    query.addQueryItem(QStringLiteral("from"), QStringLiteral("当前位置"));
+    query.addQueryItem(QStringLiteral("fromcoord"), QStringLiteral("%1,%2").arg(lat, 0, 'f', 6).arg(lng, 0, 'f', 6));
+    query.addQueryItem(QStringLiteral("to"), destName.trimmed());
+    query.addQueryItem(QStringLiteral("referer"), QStringLiteral("ecp-user"));
+    url.setQuery(query);
+    return url;
 }
 }
 
@@ -101,16 +168,118 @@ QWidget *MainWindow::makeNavPage()
     auto *w = new QWidget;
     auto *lay = new QVBoxLayout(w);
     lay->setContentsMargins(18, 18, 18, 18);
+    lay->setSpacing(12);
+
+    auto *panel = new QFrame(w);
+    panel->setObjectName(QStringLiteral("Card"));
+    auto *panelLay = new QVBoxLayout(panel);
+    panelLay->setContentsMargins(16, 16, 16, 16);
+    panelLay->setSpacing(10);
+
+    auto *title = new QLabel(QStringLiteral("一键导航"), panel);
+    QFont titleFont = title->font();
+    titleFont.setPointSize(16);
+    titleFont.setBold(true);
+    title->setFont(titleFont);
+
+    auto *subtitle = new QLabel(QStringLiteral("读取本地 config/app.ini 中的腾讯地图 Key，加载路线规划页。"), panel);
+    subtitle->setObjectName(QStringLiteral("Muted"));
+    subtitle->setWordWrap(true);
+
+    auto *destEdit = new QLineEdit(panel);
+    destEdit->setPlaceholderText(QStringLiteral("输入目的地，例如：深圳市民中心"));
+    destEdit->setText(QStringLiteral("深圳市民中心"));
+
+    auto *modeRow = new QHBoxLayout;
+    auto *driveBtn = new QPushButton(QStringLiteral("驾车"), panel);
+    auto *walkBtn = new QPushButton(QStringLiteral("步行"), panel);
+    driveBtn->setCheckable(true);
+    walkBtn->setCheckable(true);
+    driveBtn->setChecked(true);
+    auto *modeGroup = new QButtonGroup(panel);
+    modeGroup->setExclusive(true);
+    modeGroup->addButton(driveBtn);
+    modeGroup->addButton(walkBtn);
+    modeRow->addWidget(driveBtn);
+    modeRow->addWidget(walkBtn);
+    modeRow->addStretch();
+
+    auto *actionRow = new QHBoxLayout;
+    auto *previewBtn = new QPushButton(QStringLiteral("地图预览"), panel);
+    auto *routeBtn = new QPushButton(QStringLiteral("开始导航"), panel);
+    auto *resetBtn = new QPushButton(QStringLiteral("回到预览"), panel);
+    actionRow->addWidget(previewBtn);
+    actionRow->addWidget(routeBtn);
+    actionRow->addWidget(resetBtn);
+    actionRow->addStretch();
+
+    auto *status = new QLabel(panel);
+    status->setObjectName(QStringLiteral("Muted"));
+    status->setWordWrap(true);
+
+    panelLay->addWidget(title);
+    panelLay->addWidget(subtitle);
+    panelLay->addWidget(destEdit);
+    panelLay->addLayout(modeRow);
+    panelLay->addLayout(actionRow);
+    panelLay->addWidget(status);
+
 #ifdef HAVE_WEBENGINE
     auto *view = new QWebEngineView(w);
-    view->setHtml(QStringLiteral(
-        "<html><body style='font-family:sans-serif;padding:20px;color:#111827'>"
-        "<h3>导航页</h3>"
-        "<p>后续这里会加载腾讯地图路线规划页。</p>"
-        "<p style='color:#6b7280'>地图 Key 从 config/app.ini 读取。</p>"
-        "</body></html>"));
+    view->settings()->setAttribute(QWebEngineSettings::JavascriptEnabled, true);
+    view->settings()->setAttribute(QWebEngineSettings::LocalContentCanAccessRemoteUrls, true);
+    view->settings()->setAttribute(QWebEngineSettings::LocalContentCanAccessFileUrls, false);
+
+    const QString cfgPath = ecp::resPath(QStringLiteral("config/app.ini"));
+    QSettings cfg(cfgPath, QSettings::IniFormat);
+    const QString key = cfg.value(QStringLiteral("map/key")).toString().trimmed();
+    const double defaultLat = cfg.value(QStringLiteral("map/default_lat"), 22.5470).toDouble();
+    const double defaultLng = cfg.value(QStringLiteral("map/default_lng"), 114.0650).toDouble();
+
+    auto loadPreview = [view, status, key, defaultLat, defaultLng]() {
+        if (key.isEmpty()) {
+            view->setHtml(QStringLiteral(
+                "<html><body style='font-family:sans-serif;padding:20px;color:#111827'>"
+                "<h3>地图未配置</h3>"
+                "<p>请先在 config/app.ini 填写 <code>[map] key</code>。</p>"
+                "<p style='color:#6b7280'>导航页会在这里加载腾讯地图。</p>"
+                "</body></html>"));
+            status->setText(QStringLiteral("未检测到地图 Key，请先配置 config/app.ini 的 [map] key。"));
+            return;
+        }
+        view->setHtml(buildNavPreviewHtml(key, defaultLat, defaultLng),
+                      QUrl(QStringLiteral("https://map.qq.com/")));
+        status->setText(QStringLiteral("地图预览已加载。"));
+    };
+
+    auto loadRoute = [view, status, key, defaultLat, defaultLng, driveBtn, destEdit]() {
+        const QString destination = destEdit->text().trimmed();
+        if (destination.isEmpty()) {
+            status->setText(QStringLiteral("请先输入目的地。"));
+            return;
+        }
+        const QString mode = driveBtn->isChecked() ? QStringLiteral("drive")
+                                                    : QStringLiteral("walk");
+        if (key.isEmpty()) {
+            status->setText(QStringLiteral("未检测到地图 Key，请先配置 config/app.ini 的 [map] key。"));
+            return;
+        }
+        view->load(buildRoutePlanUrl(mode, defaultLat, defaultLng, destination));
+        status->setText(QStringLiteral("已打开路线规划。"));
+    };
+
+    connect(previewBtn, &QPushButton::clicked, this, loadPreview);
+    connect(routeBtn, &QPushButton::clicked, this, loadRoute);
+    connect(resetBtn, &QPushButton::clicked, this, loadPreview);
+    connect(driveBtn, &QPushButton::clicked, this, [status] { status->setText(QStringLiteral("当前模式：驾车")); });
+    connect(walkBtn, &QPushButton::clicked, this, [status] { status->setText(QStringLiteral("当前模式：步行")); });
+
+    lay->addWidget(panel, 0);
     lay->addWidget(view, 1);
+    loadPreview();
 #else
+    panelLay->addWidget(new QLabel(QStringLiteral("QtWebEngineWidgets 未安装，导航页仅显示占位说明。"), panel));
+    lay->addWidget(panel, 0);
     lay->addWidget(makePlaceholder(QStringLiteral("一键导航"),
                                    QStringLiteral("QtWebEngineWidgets 未安装时显示占位页。后续接入腾讯地图路线规划。")), 1);
 #endif
