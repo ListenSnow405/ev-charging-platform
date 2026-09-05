@@ -22,13 +22,32 @@
 
 | # | 操作 | 预期 |
 | --- | --- | --- |
+| 1.0 | `bash scripts/check-env.sh L5` | 「环境检查全部通过」。**这一条覆盖了下面 1.1～1.3**，不通过时它会直接给出安装命令 |
 | 1.1 | `python3 --version` | ≥ 3.10 |
 | 1.2 | `.venv/bin/python -c "import pandas,sklearn,joblib;print('ok')"` | 输出 `ok`。没有 venv 就 `python3 -m venv .venv && .venv/bin/pip install -r ml/requirements.txt` |
 | 1.3 | `ls ml/data/models/meta.json` | 存在。不存在则 `.venv/bin/python ml/train_forecast.py` |
-| 1.4 | `python3 -c "import sqlite3;print(sqlite3.connect('file:charging.db?mode=ro',uri=True).execute('SELECT COUNT(*) FROM t_order').fetchone())"` | 8292 左右（2026-09-05 落库） |
+| 1.4 | `sqlite3 charging.db "SELECT COUNT(*) FROM t_order;"` | 8292 左右（2026-09-05 落库） |
 
 > `gen_history.py` / `export_snapshot.py` / `check_signal.py` 只用标准库，不需要 venv；
 > `build_features.py` / `train_forecast.py` / `predict.py` / `selftest.py` 需要。
+
+### 怎么执行本文里的 SQL
+
+**SQL 语句不能直接粘进 bash**——`(` `)` 是 shell 的语法记号，会报
+`未预期的记号 "(" 附近有语法错误`。必须交给 sqlite3，整条用引号包起来：
+
+```bash
+sqlite3 charging.db "SELECT COUNT(DISTINCT create_time) FROM t_load_forecast;"
+```
+
+没装 sqlite3 命令行的话（`check-env.sh` 里它是可选项，缺了只提示不算失败），
+用 python3 等价写法，顺带是只读连接：
+
+```bash
+python3 -c "import sqlite3;print(sqlite3.connect('file:charging.db?mode=ro',uri=True).execute('SELECT COUNT(DISTINCT create_time) FROM t_load_forecast').fetchone()[0])"
+```
+
+下文表格里凡是「查 …」的行，都按这个形式套。
 
 ---
 
@@ -47,6 +66,13 @@
 > 2.1.3 是预期行为：历史数据已落库，同一 `--seed` 会生成同一批 `order_no`，撞唯一约束。
 > **不要为了让它「成功」而去加 `--reset`——那对 `charging.db` 本来就是拒绝的。**
 
+> ⚠ **dry-run 不写数据库，但会写 `ml/data/day_features.csv`**（它不属于数据库，不受
+> `--commit` 约束）。用默认参数跑是幂等的（md5 不变），但**换了 `--days` 或 `--seed`
+> 就会把天气序列整个换掉**，而库里的订单还是老的，两者从此对不上——
+> `predict.py` 会 join 这个文件取目标时刻的天气。
+> 脚本现在会在窗口长度变化时明确警告；测试时**不要随手加 `--days`**，
+> 真要试就按同一组参数重走 `build_features → train_forecast → predict`。
+
 ### 2.2 推理与回写
 
 | # | 操作 | 预期 |
@@ -54,7 +80,19 @@
 | 2.2.1 | `.venv/bin/python ml/predict.py charging.db` | dry-run，打印 3 个 horizon × 6 站的表格，末尾「未写入数据库」 |
 | 2.2.2 | 看输出里的 `origin` | 等于「最后一个有观测的小时」。服务端跑过就是今天，没跑过是昨天 23:00 |
 | 2.2.3 | `.venv/bin/python ml/predict.py charging.db --commit --prune` | 写入 18 行，并清除旧批次 |
-| 2.2.4 | 查 `SELECT COUNT(DISTINCT create_time) FROM t_load_forecast` | **必须是 1**。多于 1 说明批次语义坏了，L2 的 2305 只能捞到部分行 |
+| 2.2.4 | `sqlite3 charging.db "SELECT COUNT(DISTINCT create_time) FROM t_load_forecast;"` | **必须是 1**。多于 1 说明批次语义坏了，L2 的 2305 只能捞到部分行 |
+| 2.2.5 | `sqlite3 charging.db "SELECT COUNT(*) FROM t_load_forecast;"` | **必须是 18**（6 站 × 3 个 horizon）。少了说明有站点缺预测，1101 会退化成填 −1 |
+| 2.2.6 | `sqlite3 -header -column charging.db "SELECT station_id,horizon,load_kw,idle_pile,is_peak,congestion FROM t_load_forecast WHERE horizon=1 ORDER BY congestion;"` | 6 行；`congestion` 在 0~1 之间且**互不相同**（并列会让 1101 的 sortBy=1 排不出序）；`idle_pile` 在 0~4 之间 |
+
+> **看到「负荷 0.0 kW 但拥堵度 0.14」不要当成 bug。** `load_kw` 与 `y_sessions` 是两个
+> 分别建模的目标（`congestion` / `idle_pile` 由后者派生），低谷时段并发数模型小幅高估
+> （预测 0.56 个并发、实际接近 0）就会出现这种组合。
+> **实测过：这些行的真实负荷是 1.8 kW（h=1），近零的负荷预测才是对的**——
+> 曾试过按「每并发会话平均功率」给负荷加物理下限强行自洽，结果这些行的 MAE
+> 从 1.99 涨到 16.10，全量 MAE 也从 28.19 涨到 28.21。**别修**，
+> 真要动先按 `ml/reports/forecast_eval.md` 第 6 节的口径重测一遍。
+> 判定标准是：出现 `load_kw = 0` 同时 `congestion > 0.5`（既零负荷又高度拥堵）才是真矛盾，
+> `selftest.py` 有一条断言守着。
 
 ### 2.3 快照导出
 
@@ -132,13 +170,16 @@ L5 只负责把数据备好，**下面这些是别人的活，但要一起验**�
 
 ## 5. 异常与边界（10 分钟）
 
-| # | 场景 | 预期 |
-| --- | --- | --- |
-| 5.1 | 删掉 `dataviz/data/snapshot.json` 后刷新页面 | 红色错误提示，写明怎么生成快照；不白屏 |
-| 5.2 | 把 `snapshot.json` 改成非法 JSON | 同上，错误提示可读 |
-| 5.3 | 清空 `t_load_forecast` 后导出快照 | 导出器打印「⚠ t_load_forecast 为空」；大屏其余六张图正常，拥堵度图为空 |
-| 5.4 | `.venv/bin/python ml/predict.py charging.db --origin '2020-01-01 00:00:00'` | 明确报错「超出面板范围」，不产生垃圾数据 |
-| 5.5 | `.venv/bin/python ml/build_features.py charging.db --horizons 1,48` | 拒绝执行并说明 `seas_mean` 的无穿越性依赖 horizon ≤ 24 |
+⚠ **5.3 会删数据，只在副本上做**。其余几条都不改库。
+
+| # | 场景 | 命令 | 预期 |
+| --- | --- | --- | --- |
+| 5.1 | 快照文件缺失 | `mv dataviz/data/snapshot.json /tmp/` 后刷新页面 | 红色错误提示，写明怎么生成快照；不白屏。验完 `mv /tmp/snapshot.json dataviz/data/` 放回 |
+| 5.2 | 快照内容损坏 | `echo '{bad json' > dataviz/data/snapshot.json` 后刷新 | 同上，错误可读。验完 `python3 ml/export_snapshot.py` 重新生成 |
+| 5.3 | 预测表为空 | `cp charging.db /tmp/t.db && sqlite3 /tmp/t.db "DELETE FROM t_load_forecast;" && python3 ml/export_snapshot.py /tmp/t.db /tmp/empty.json` | 打印「⚠ t_load_forecast 为空」。把 `/tmp/empty.json` 复制成 `dataviz/data/snapshot.json` 刷新页面：其余六张图正常，拥堵度图为空。**验完务必 `python3 ml/export_snapshot.py` 还原** |
+| 5.4 | 起报时刻越界 | `.venv/bin/python ml/predict.py charging.db --origin '2020-01-01 00:00:00'` | 报「--origin 超出面板范围」，退出码 1，不产生垃圾数据 |
+| 5.5 | horizon 超界 | `.venv/bin/python ml/build_features.py charging.db --horizons 1,48` | 拒绝执行并说明 `seas_mean` 的无穿越性依赖 horizon ≤ 24 |
+| 5.6 | 模型产物缺失 | `mv ml/data/models /tmp/m && .venv/bin/python ml/predict.py charging.db` | 报「缺少 …/meta.json，先跑 ml/train_forecast.py」而不是抛栈。验完 `mv /tmp/m ml/data/models` 放回 |
 
 ---
 

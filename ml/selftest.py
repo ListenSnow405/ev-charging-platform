@@ -457,6 +457,17 @@ def _():
     assert total > 0
 
 
+@check("推理：不出现「零负荷 + 高拥堵」这种物理上不可能的组合")
+def _():
+    # load_kw 与 sessions 是两个分别建模的目标，低谷时段出现
+    # 「负荷 0.0 但拥堵度 0.14」是正常的模型误差——实测那些行真实负荷仅 1.8kW，
+    # 近零的负荷预测反而是对的，强行拉齐会让 MAE 从 1.99 涨到 16.10（见 TESTING.md 2.2.6）。
+    # 真正不可能的是「既零负荷又高度拥堵」，这一条守住即可。
+    bad = CTX.sql("SELECT COUNT(*) FROM t_load_forecast "
+                  "WHERE load_kw <= 0.01 AND congestion > 0.5")[0][0]
+    assert bad == 0, f"{bad} 行既是零负荷又高度拥堵，两个模型的输出彻底脱节"
+
+
 @check("推理：congestion 保留排序区分度（不被 idle_pile 取整量化）")
 def _():
     # 4 根桩时，若用取整后的 idle_pile 反算，congestion 只有 5 个取值，

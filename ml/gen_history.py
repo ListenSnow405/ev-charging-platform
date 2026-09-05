@@ -519,7 +519,21 @@ def recompute_pile_aggregates(con: sqlite3.Connection):
 
 
 def write_day_features(rows):
+    """写出按天的天气/节假日特征。
+
+    ⚠ 即便是 dry-run 也会写这个文件——它不属于数据库，不受 --commit 约束。
+    但天气序列必须与库里已落的订单同源：`predict.py` 会 join 它来取目标时刻的天气。
+    换了 --days / --seed 再跑一次（哪怕只是 dry-run），本文件就被换成另一条天气序列，
+    而库里的订单还是老的，两者就对不上了，且不会有任何报错。
+    所以这里在覆盖前比一次窗口长度，不一致就明确警告。
+    """
     DAY_FEATURES_OUT.parent.mkdir(parents=True, exist_ok=True)
+    if DAY_FEATURES_OUT.exists():
+        old = sum(1 for _ in DAY_FEATURES_OUT.open(encoding="utf-8")) - 1
+        if old != len(rows):
+            print(f"⚠ {DAY_FEATURES_OUT} 的窗口由 {old} 天变为 {len(rows)} 天，天气序列已被替换。"
+                  f"\n  它与库里订单的同源关系已断开——若要继续用，请按同一组 --days/--seed "
+                  f"重新走一遍：build_features → train_forecast → predict。", file=sys.stderr)
     with DAY_FEATURES_OUT.open("w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=["date", "weekday", "is_holiday", "weather", "weather_factor"])
         w.writeheader()
