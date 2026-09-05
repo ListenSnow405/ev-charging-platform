@@ -19,7 +19,7 @@ void Dispatcher::registerHandler(int cmd, Handler h, bool needAuth)
 QByteArray Dispatcher::handle(const QByteArray &payload)
 {
     QJsonObject env;
-    if (!parseEnvelope(payload, env)) {
+    if (!parseEnvelope(payload, env, EnvelopeType::Request)) {
         LOG_W(QStringLiteral("报文解析失败，长度 %1").arg(payload.size()));
         return buildResponse(0, 0, ERR_FRAME);
     }
