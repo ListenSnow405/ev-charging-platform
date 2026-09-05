@@ -26,24 +26,24 @@ enum ErrCode {
     ERR_INTERNAL            = 1099,   // 服务端内部错误
 
     // ---- 2000 段 · 用户 ----
-    ERR_PHONE_FORMAT        = 2001,   // [说明书] 手机号须 11 位
-    ERR_USER_NOT_FOUND      = 2002,
+    ERR_PHONE_FORMAT        = 2001,   // [说明书] 手机号格式错误
+    ERR_USER_NOT_FOUND      = 2002,   // 用户不存在
     ERR_USER_FROZEN         = 2003,   // [说明书] 账号已冻结
-    ERR_BALANCE_NOT_ENOUGH  = 2004,
-    ERR_AMOUNT_INVALID      = 2005,
+    ERR_BALANCE_NOT_ENOUGH  = 2004,   // 钱包余额不足
+    ERR_AMOUNT_INVALID      = 2005,   // 金额非法
 
     // ---- 3000 段 · 电站与电桩 ----
-    ERR_STATION_NOT_FOUND   = 3001,
-    ERR_PILE_NOT_FOUND      = 3002,
-    ERR_PILE_BUSY           = 3003,
+    ERR_STATION_NOT_FOUND   = 3001,   // 充电站不存在
+    ERR_PILE_NOT_FOUND      = 3002,   // 电桩不存在
+    ERR_PILE_BUSY           = 3003,   // 电桩已被占用
     ERR_PILE_FAULT          = 3004,   // [说明书] 电桩故障
-    ERR_PILE_OFFLINE        = 3005,
+    ERR_PILE_OFFLINE        = 3005,   // 电桩未上线，指令无法下发
 
     // ---- 4000 段 · 订单 ----
-    ERR_ORDER_NOT_FOUND     = 4001,
+    ERR_ORDER_NOT_FOUND     = 4001,   // 订单不存在
     ERR_ORDER_UNFINISHED    = 4002,   // [说明书] 存在未结算订单，请先结算
-    ERR_ORDER_STATUS        = 4003,
-    ERR_ORDER_SETTLED       = 4004,
+    ERR_ORDER_STATUS        = 4003,   // 订单状态不允许此操作
+    ERR_ORDER_SETTLED       = 4004,   // 订单已结算，不可重复结算
 
     // ---- 5000 段 · 管理员 ----
     ERR_ADMIN_AUTH          = 5001    // [说明书] 账号或密码错误
