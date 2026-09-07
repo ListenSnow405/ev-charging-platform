@@ -34,7 +34,7 @@ private:
 
     void setupUi();
     void requestStationOptions();
-    void requestPileList();
+    void requestPileList(int page, qint64 stationId, int status);
     void handleResponse(int cmd, int seq, int code, const QString &msg,
                         const QJsonObject &data);
     void handleStationOptionsResponse(int code, const QString &msg,
@@ -43,6 +43,7 @@ private:
                                 const QJsonObject &data);
     void refreshTable();
     void resetFilters();
+    void updatePaginationControls();
 
     static QString typeText(int type);
     static QString statusText(int status);
@@ -53,9 +54,20 @@ private:
     QComboBox    *m_statusFilter = nullptr;
     QTableWidget *m_table = nullptr;
     QPushButton  *m_rebootButton = nullptr;
+    QPushButton  *m_previousPageButton = nullptr;
+    QPushButton  *m_nextPageButton = nullptr;
     QLabel       *m_statusLabel = nullptr;
+    QLabel       *m_pageLabel = nullptr;
     QVector<PileData> m_piles;
 
+    static constexpr int PAGE_SIZE = 20;
+    int m_currentPage = 1;
+    qint64 m_total = 0;
+    int m_requestedPage = 1;
+    qint64 m_currentStationId = 0;
+    int m_currentStatus = -1;
+    qint64 m_requestedStationId = 0;
+    int m_requestedStatus = -1;
     int m_stationOptionsSeq = -1;
     int m_pileListSeq = -1;
 };
