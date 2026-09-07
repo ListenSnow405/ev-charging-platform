@@ -14,9 +14,12 @@
 #include <QPushButton>
 #include <QTableWidget>
 #include <QTableWidgetItem>
+#include <QTimer>
 #include <QVBoxLayout>
 
 namespace {
+
+constexpr int READ_RESPONSE_TIMEOUT_MS = 10000;
 
 QTableWidgetItem *centeredItem(const QString &text)
 {
@@ -31,6 +34,17 @@ UserPage::UserPage(NetClient *net, QWidget *parent)
     : QWidget(parent), m_net(net)
 {
     setupUi();
+    m_userListTimer = new QTimer(this);
+    m_userListTimer->setSingleShot(true);
+    connect(m_userListTimer, &QTimer::timeout, this, [this] {
+        if (m_userListSeq < 0) return;
+        m_userListSeq = -1;
+        m_requestedPage = m_currentPage;
+        m_requestedPhoneLike = m_currentPhoneLike;
+        m_statusLabel->setText(QStringLiteral("用户列表请求超时，请重试"));
+        updatePaginationControls();
+    });
+
     connect(m_net, &NetClient::response, this, &UserPage::handleResponse);
     requestUserList(1, QString());
 }
@@ -126,6 +140,7 @@ void UserPage::requestUserList(int page, const QString &phoneLike)
         { QStringLiteral("phoneLike"), normalizedPhoneLike }
     });
     if (seq < 0) {
+        m_userListTimer->stop();
         m_userListSeq = -1;
         m_requestedPage = m_currentPage;
         m_requestedPhoneLike = m_currentPhoneLike;
@@ -136,6 +151,7 @@ void UserPage::requestUserList(int page, const QString &phoneLike)
     m_userListSeq = seq;
     m_requestedPage = page;
     m_requestedPhoneLike = normalizedPhoneLike;
+    m_userListTimer->start(READ_RESPONSE_TIMEOUT_MS);
     updatePaginationControls();
 }
 
@@ -149,6 +165,7 @@ void UserPage::handleResponse(int cmd, int seq, int code, const QString &msg,
 {
     if (cmd == ecp::CMD_ADMIN_USER_LIST) {
         if (seq != m_userListSeq) return;
+        m_userListTimer->stop();
         m_userListSeq = -1;
         handleUserListResponse(code, msg, data);
         return;

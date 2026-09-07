@@ -13,6 +13,7 @@ class QLabel;
 class QLineEdit;
 class QPushButton;
 class QTableWidget;
+class QTimer;
 
 class UserPage : public QWidget
 {
@@ -55,6 +56,7 @@ private:
     QPushButton  *m_nextPageButton = nullptr;
     QLabel       *m_statusLabel = nullptr;
     QLabel       *m_pageLabel = nullptr;
+    QTimer       *m_userListTimer = nullptr;
     QVector<UserData> m_users;
 
     static constexpr int PAGE_SIZE = 20;
