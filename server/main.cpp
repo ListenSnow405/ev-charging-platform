@@ -12,6 +12,7 @@
 #include <QFileInfo>
 #include <QSettings>
 #include <csignal>
+#include <unistd.h>
 
 #include "logger.h"
 #include "protocol.h"
@@ -22,12 +23,21 @@
 
 using namespace ecp;
 
-static TcpServer *g_server = nullptr;
+// 信号处理函数里只能碰 volatile sig_atomic_t 和 async-signal-safe 的调用。
+// 以前这里直接调 TcpServer::stop()，它要加锁还要 pthread_join，一旦有工作线程
+// 卡在 recv 上就永远 join 不回来，主线程被锁死在信号上下文里，进程关不掉。
+// 现在只往 self-pipe 写一字节唤醒 accept 循环，真正的停止流程回到主线程做。
+static volatile sig_atomic_t g_wakeFd  = -1;
+static volatile sig_atomic_t g_lastSig = 0;
 
 static void onSignal(int sig)
 {
-    LOG_I(QStringLiteral("收到信号 %1，正在停止服务端…").arg(sig));
-    if (g_server) g_server->stop();
+    g_lastSig = sig;
+    if (g_wakeFd >= 0) {
+        const char b = 1;
+        const ssize_t ignored = ::write(g_wakeFd, &b, 1);   // write 是 async-signal-safe 的
+        (void)ignored;
+    }
 }
 
 // -----------------------------------------------------------------------------
@@ -107,11 +117,18 @@ int main(int argc, char *argv[])
 
     // ---- 启动 ----
     TcpServer server;
-    g_server = &server;
     if (!server.listenOn(port, poolSize)) {
         LOG_E(QStringLiteral("服务端启动失败"));
         return 1;
     }
-    server.run();          // 阻塞至 stop()
+    g_wakeFd = server.wakeFd();   // 必须在 listenOn 之后：self-pipe 在那里才建好
+
+    server.run();                 // 阻塞至收到停止信号
+
+    // 回到主线程再做清理：断开在用连接 → 工作线程退出 → join 返回
+    if (g_lastSig != 0)
+        LOG_I(QStringLiteral("收到信号 %1，正在停止服务端…").arg(static_cast<int>(g_lastSig)));
+    g_wakeFd = -1;
+    server.stop();
     return 0;
 }
