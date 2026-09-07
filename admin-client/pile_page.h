@@ -14,6 +14,7 @@ class QJsonObject;
 class QLabel;
 class QPushButton;
 class QTableWidget;
+class QTimer;
 
 class PilePage : public QWidget
 {
@@ -68,6 +69,8 @@ private:
     QPushButton  *m_nextPageButton = nullptr;
     QLabel       *m_statusLabel = nullptr;
     QLabel       *m_pageLabel = nullptr;
+    QTimer       *m_stationOptionsTimer = nullptr;
+    QTimer       *m_pileListTimer = nullptr;
     QVector<PileData> m_piles;
 
     static constexpr int PAGE_SIZE = 20;

@@ -13,9 +13,12 @@
 #include <QSignalBlocker>
 #include <QTableWidget>
 #include <QTableWidgetItem>
+#include <QTimer>
 #include <QVBoxLayout>
 
 namespace {
+
+constexpr int READ_RESPONSE_TIMEOUT_MS = 10000;
 
 QTableWidgetItem *centeredItem(const QString &text)
 {
@@ -30,6 +33,25 @@ PilePage::PilePage(NetClient *net, QWidget *parent)
     : QWidget(parent), m_net(net)
 {
     setupUi();
+    m_stationOptionsTimer = new QTimer(this);
+    m_stationOptionsTimer->setSingleShot(true);
+    connect(m_stationOptionsTimer, &QTimer::timeout, this, [this] {
+        if (m_stationOptionsSeq < 0) return;
+        abortStationOptionsLoad(QStringLiteral("电站筛选项请求超时，请重试"));
+    });
+
+    m_pileListTimer = new QTimer(this);
+    m_pileListTimer->setSingleShot(true);
+    connect(m_pileListTimer, &QTimer::timeout, this, [this] {
+        if (m_pileListSeq < 0) return;
+        m_pileListSeq = -1;
+        m_requestedPage = m_currentPage;
+        m_requestedStationId = m_currentStationId;
+        m_requestedStatus = m_currentStatus;
+        m_statusLabel->setText(QStringLiteral("电桩列表请求超时，请重试"));
+        updatePaginationControls();
+    });
+
     connect(m_net, &NetClient::response, this, &PilePage::handleResponse);
     requestStationOptions();
     requestPileList(1, 0, -1);
@@ -123,6 +145,7 @@ void PilePage::setupUi()
 
 void PilePage::requestStationOptions()
 {
+    m_stationOptionsTimer->stop();
     m_stationOptionsSeq = -1;
     m_stationOptionsPage = 0;
     m_stationOptionsTotal = 0;
@@ -146,10 +169,12 @@ void PilePage::requestStationOptionsPage(int page)
     }
     m_stationOptionsSeq = seq;
     m_stationOptionsPage = page;
+    m_stationOptionsTimer->start(READ_RESPONSE_TIMEOUT_MS);
 }
 
 void PilePage::abortStationOptionsLoad(const QString &message)
 {
+    m_stationOptionsTimer->stop();
     m_stationOptionsSeq = -1;
     m_stationOptionsPage = 0;
     m_stationOptionsTotal = 0;
@@ -190,6 +215,7 @@ void PilePage::requestPileList(int page, qint64 stationId, int status)
         { QStringLiteral("status"), status }
     });
     if (seq < 0) {
+        m_pileListTimer->stop();
         m_pileListSeq = -1;
         m_requestedPage = m_currentPage;
         m_requestedStationId = m_currentStationId;
@@ -202,6 +228,7 @@ void PilePage::requestPileList(int page, qint64 stationId, int status)
     m_requestedPage = page;
     m_requestedStationId = stationId;
     m_requestedStatus = status;
+    m_pileListTimer->start(READ_RESPONSE_TIMEOUT_MS);
     updatePaginationControls();
 }
 
@@ -210,12 +237,14 @@ void PilePage::handleResponse(int cmd, int seq, int code, const QString &msg,
 {
     if (cmd == ecp::CMD_STATION_LIST) {
         if (seq != m_stationOptionsSeq) return;
+        m_stationOptionsTimer->stop();
         m_stationOptionsSeq = -1;
         handleStationOptionsResponse(code, msg, data);
         return;
     }
     if (cmd == ecp::CMD_PILE_LIST) {
         if (seq != m_pileListSeq) return;
+        m_pileListTimer->stop();
         m_pileListSeq = -1;
         handlePileListResponse(code, msg, data);
     }
