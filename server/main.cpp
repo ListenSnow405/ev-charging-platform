@@ -11,6 +11,9 @@
 #include <QDir>
 #include <QFileInfo>
 #include <QSettings>
+#include <QSqlError>
+#include <QSqlQuery>
+#include <QVariant>
 #include <csignal>
 #include <unistd.h>
 
@@ -47,6 +50,40 @@ static void onSignal(int sig)
 // -----------------------------------------------------------------------------
 namespace ecp { void registerUserService(); void registerAdminService(); void registerWalletService(); void registerUserManagementService(); void registerStationService(); void registerPileService(); void registerReservationService(); void registerOrderService(); void registerStatisticsService(); }
 
+// 扩展模块（加分项）注册入口，各自独立文件，见 docs/expand/00 第 5.2 节
+namespace ecp { void registerExt08CarbonService(); }
+
+// -----------------------------------------------------------------------------
+//  B4 · 扩展模块功能开关（docs/expand/00 第 4.7 节）
+//
+//  关闭的模块干脆不注册 handler，客户端调用即得 ERR_CMD_UNKNOWN(1005)。
+//  这比返回一个新错误码更省事，也天然满足「扩展全部关掉后核心闭环无回归」。
+//
+//  ⚠ 读不到配置一律按**关闭**处理：宁可不显示功能，也不要显示一个必然报错的入口。
+//  ⚠ 必须在数据库就绪之后调用 —— registerAllServices() 在 main() 里正是这个位置。
+// -----------------------------------------------------------------------------
+static bool featureEnabled(const QString &key)
+{
+    QSqlDatabase db = threadDb();
+    if (!db.isOpen()) {
+        LOG_W(QStringLiteral("功能开关 %1 无法读取（数据库未就绪），按关闭处理").arg(key));
+        return false;
+    }
+    QSqlQuery q(db);
+    q.prepare(QStringLiteral("SELECT cfg_value FROM t_sys_config WHERE cfg_key = ?"));
+    q.addBindValue(key);
+    if (!q.exec()) {
+        LOG_W(QStringLiteral("功能开关 %1 查询失败，按关闭处理: %2").arg(key, q.lastError().text()));
+        return false;
+    }
+    if (!q.next()) {
+        LOG_W(QStringLiteral("功能开关 %1 不存在于 t_sys_config，按关闭处理。"
+                             "请确认 docs/db-schema-ext-*.sql 已执行").arg(key));
+        return false;
+    }
+    return q.value(0).toString().trimmed() == QLatin1String("1");
+}
+
 static void registerAllServices()
 {
     registerUserService();      // 1001 / 1002   [说明书] 1.4 手机号免密登录
@@ -58,6 +95,10 @@ static void registerAllServices()
     registerReservationService(); // 1202 / 1206 [说明书] 1.4 预约充电
     registerOrderService();     // 1201 / 1207 / 2304 [说明书] 1.4 订单查询
     registerStatisticsService(); // 2301–2303 [说明书] 1.4 营收与电桩状态统计
+
+    // ---- 扩展模块（加分项）· 受 t_sys_config 功能开关控制 ----
+    if (featureEnabled(QStringLiteral("feat_08_carbon"))) registerExt08CarbonService();  // 3740–3746
+    else LOG_I(QStringLiteral("扩展模块 08 碳减排：feat_08_carbon 未开启，跳过注册"));
 
     // 骨架自带的连通性探针：客户端可用它确认链路打通（不在协议表内，仅供联调）
     Dispatcher::instance().registerHandler(0, [](const Request &, QJsonObject &out) -> int {

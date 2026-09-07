@@ -38,6 +38,28 @@ if [ "${ECP_BUILD_ONLY:-0}" != "1" ]; then
         echo "  已生成 charging.db"
     fi
     [ -f config/app.ini ] || { cp config/app.ini.example config/app.ini; echo "  已生成 config/app.ini"; }
+
+    # ---- B3 · 扩展模块建表脚本（docs/expand/00 第 4.4 节）-----------------------
+    # 每次构建都执行，不只在首次建库时执行：
+    # 脚本本身要求幂等（只允许 CREATE TABLE IF NOT EXISTS / CREATE INDEX IF NOT EXISTS
+    # / INSERT OR IGNORE，禁止 DROP），所以重复跑是安全的；而只在建库时跑一次的话，
+    # 别人拉到新的 ext 脚本后不会自动建表，会以「表不存在」的形式在运行期才暴露。
+    # 按文件名排序执行，保证模块编号顺序稳定。
+    shopt -s nullglob
+    EXT_SQL=(docs/db-schema-ext-*.sql)
+    shopt -u nullglob
+    if [ ${#EXT_SQL[@]} -gt 0 ]; then
+        echo
+        echo "执行扩展模块建表脚本（${#EXT_SQL[@]} 个）…"
+        for f in "${EXT_SQL[@]}"; do
+            if command -v sqlite3 >/dev/null; then
+                sqlite3 charging.db < "$f"
+            else
+                python3 -c "import sqlite3,pathlib,sys;c=sqlite3.connect('charging.db');c.executescript(pathlib.Path(sys.argv[1]).read_text(encoding='utf-8'));c.commit()" "$f"
+            fi
+            echo "  ok  $f"
+        done
+    fi
 fi
 
 cat <<'TIP'
