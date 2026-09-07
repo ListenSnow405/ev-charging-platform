@@ -19,12 +19,14 @@
 #include <QSignalBlocker>
 #include <QTableWidget>
 #include <QTableWidgetItem>
+#include <QTimer>
 #include <QVBoxLayout>
 #include <algorithm>
 
 namespace {
 
 constexpr qreal CONGESTION_WARNING_THRESHOLD = 0.8;
+constexpr int READ_RESPONSE_TIMEOUT_MS = 10000;
 
 QTableWidgetItem *centeredItem(const QString &text)
 {
@@ -39,6 +41,21 @@ ForecastPage::ForecastPage(NetClient *net, QWidget *parent)
     : QWidget(parent), m_net(net)
 {
     setupUi();
+    m_stationListTimer = new QTimer(this);
+    m_stationListTimer->setSingleShot(true);
+    connect(m_stationListTimer, &QTimer::timeout, this, [this] {
+        if (m_stationListSeq < 0) return;
+        abortStationListLoad(QStringLiteral("站点筛选项请求超时，请重试"));
+    });
+
+    m_forecastTimer = new QTimer(this);
+    m_forecastTimer->setSingleShot(true);
+    connect(m_forecastTimer, &QTimer::timeout, this, [this] {
+        if (m_forecastSeq < 0) return;
+        m_forecastSeq = -1;
+        m_statusLabel->setText(QStringLiteral("预测请求超时，请重试"));
+    });
+
     connect(m_net, &NetClient::response, this, &ForecastPage::handleResponse);
     requestStationList();
     requestForecast();
@@ -126,6 +143,7 @@ void ForecastPage::setupUi()
 
 void ForecastPage::requestStationList()
 {
+    m_stationListTimer->stop();
     m_stationListSeq = -1;
     m_stationListPage = 0;
     m_stationListTotal = 0;
@@ -149,10 +167,12 @@ void ForecastPage::requestStationListPage(int page)
     }
     m_stationListSeq = seq;
     m_stationListPage = page;
+    m_stationListTimer->start(READ_RESPONSE_TIMEOUT_MS);
 }
 
 void ForecastPage::abortStationListLoad(const QString &message)
 {
+    m_stationListTimer->stop();
     m_stationListSeq = -1;
     m_stationListPage = 0;
     m_stationListTotal = 0;
@@ -189,11 +209,13 @@ void ForecastPage::requestForecast()
         { QStringLiteral("horizon"), m_selectedHorizon }
     });
     if (seq < 0) {
+        m_forecastTimer->stop();
         m_forecastSeq = -1;
         m_statusLabel->setText(QStringLiteral("预测请求发送失败，请检查网络连接"));
         return;
     }
     m_forecastSeq = seq;
+    m_forecastTimer->start(READ_RESPONSE_TIMEOUT_MS);
 }
 
 void ForecastPage::handleResponse(int cmd, int seq, int code, const QString &msg,
@@ -201,12 +223,14 @@ void ForecastPage::handleResponse(int cmd, int seq, int code, const QString &msg
 {
     if (cmd == ecp::CMD_STATION_LIST) {
         if (seq != m_stationListSeq) return;
+        m_stationListTimer->stop();
         m_stationListSeq = -1;
         handleStationListResponse(code, msg, data);
         return;
     }
     if (cmd == ecp::CMD_STAT_LOAD_FORECAST) {
         if (seq != m_forecastSeq) return;
+        m_forecastTimer->stop();
         m_forecastSeq = -1;
         handleForecastResponse(code, msg, data);
     }

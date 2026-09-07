@@ -13,6 +13,7 @@ class QComboBox;
 class QJsonObject;
 class QLabel;
 class QTableWidget;
+class QTimer;
 
 class ForecastPage : public QWidget
 {
@@ -67,6 +68,8 @@ private:
     QLabel       *m_peakCount = nullptr;
     QLabel       *m_maxLoad = nullptr;
     QTableWidget *m_table = nullptr;
+    QTimer       *m_stationListTimer = nullptr;
+    QTimer       *m_forecastTimer = nullptr;
     QVector<ForecastData> m_forecasts;
 
     static constexpr int STATION_OPTION_PAGE_SIZE = 100;
