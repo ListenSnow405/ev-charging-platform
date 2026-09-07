@@ -6,7 +6,13 @@
 #include <QWidget>
 #include <QTabWidget>
 #include <QLabel>
+#include <QLineEdit>
+#include <QComboBox>
+#include <QScrollArea>
+#include <QTableWidget>
+#include <QVBoxLayout>
 #include <QPushButton>
+#include <QJsonArray>
 #include <QJsonObject>
 #include "net_client.h"
 
@@ -35,6 +41,10 @@ private:
     QWidget *makeChargePage();
     QWidget *makeMinePage();
 
+    void requestNearbyStations();
+    void requestStationPiles(qint64 stationId);
+    void renderNearbyStations();
+    void renderStationPiles();
     void requestProfile();
     void applyProfile(const QJsonObject &data);
     void setStatus(const QString &text, bool isError = false);
@@ -51,10 +61,32 @@ private:
     QLabel      *m_name = nullptr;
     QLabel      *m_phone = nullptr;
     QLabel      *m_balance = nullptr;
+    QLineEdit   *m_navDestEdit = nullptr;
+    QLineEdit   *m_nearbySearch = nullptr;
+    QComboBox   *m_nearbySort = nullptr;
+    QLabel      *m_nearbySummary = nullptr;
+    QLabel      *m_nearbyStatus = nullptr;
+    QLabel      *m_nearbyDetailTitle = nullptr;
+    QLabel      *m_nearbyDetailMeta = nullptr;
+    QLabel      *m_nearbyPileStatus = nullptr;
+    QScrollArea *m_nearbyScroll = nullptr;
+    QWidget     *m_nearbyCardsHost = nullptr;
+    QVBoxLayout *m_nearbyCardsLay = nullptr;
+    QTableWidget *m_nearbyPileTable = nullptr;
+    QPushButton *m_nearbyRefreshBtn = nullptr;
     QPushButton *m_refreshBtn = nullptr;
     QPushButton *m_rechargeBtn = nullptr;
     QPushButton *m_nicknameBtn = nullptr;
     QPushButton *m_avatarBtn = nullptr;
     QPushButton *m_logoutBtn = nullptr;
     QJsonObject  m_profile;
+    QJsonArray   m_nearbyStations;
+    QJsonArray   m_nearbyPiles;
+    qint64       m_selectedNearbyStationId = -1;
+    qint64       m_pendingNearbyStationsSeq = -1;
+    qint64       m_pendingNearbyPilesSeq = -1;
+    QString      m_selectedNearbyStationName;
+    QString      m_mapKey;
+    double       m_mapDefaultLat = 22.5470;
+    double       m_mapDefaultLng = 114.0650;
 };
