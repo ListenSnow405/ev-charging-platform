@@ -57,6 +57,7 @@ private:
     QLabel       *m_statusLabel = nullptr;
     QLabel       *m_pageLabel = nullptr;
     QTimer       *m_userListTimer = nullptr;
+    QTimer       *m_userStatusTimer = nullptr;
     QVector<UserData> m_users;
 
     static constexpr int PAGE_SIZE = 20;
@@ -70,4 +71,5 @@ private:
     qint64 m_pendingStatusUserId = 0;
     QString m_pendingStatusPhone;
     int m_pendingNewStatus = 0;
+    bool m_userStatusReconcilePending = false;
 };

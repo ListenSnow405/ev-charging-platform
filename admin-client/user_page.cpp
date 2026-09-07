@@ -16,10 +16,12 @@
 #include <QTableWidgetItem>
 #include <QTimer>
 #include <QVBoxLayout>
+#include <algorithm>
 
 namespace {
 
 constexpr int READ_RESPONSE_TIMEOUT_MS = 10000;
+constexpr int WRITE_RESPONSE_TIMEOUT_MS = 10000;
 
 QTableWidgetItem *centeredItem(const QString &text)
 {
@@ -41,8 +43,20 @@ UserPage::UserPage(NetClient *net, QWidget *parent)
         m_userListSeq = -1;
         m_requestedPage = m_currentPage;
         m_requestedPhoneLike = m_currentPhoneLike;
-        m_statusLabel->setText(QStringLiteral("用户列表请求超时，请重试"));
+        m_statusLabel->setText(m_userStatusReconcilePending
+            ? QStringLiteral("用户状态更新结果仍未知；列表核对请求超时，请重试查询")
+            : QStringLiteral("用户列表请求超时，请重试"));
         updatePaginationControls();
+    });
+
+    m_userStatusTimer = new QTimer(this);
+    m_userStatusTimer->setSingleShot(true);
+    connect(m_userStatusTimer, &QTimer::timeout, this, [this] {
+        if (m_userStatusSeq < 0) return;
+        m_userStatusSeq = -1;
+        m_userStatusReconcilePending = true;
+        updateStatusButton();
+        requestUserList(m_currentPage, m_currentPhoneLike);
     });
 
     connect(m_net, &NetClient::response, this, &UserPage::handleResponse);
@@ -133,7 +147,9 @@ void UserPage::requestUserList(int page, const QString &phoneLike)
     if (page < 1) return;
 
     const QString normalizedPhoneLike = phoneLike.trimmed();
-    m_statusLabel->setText(QStringLiteral("正在加载用户列表…"));
+    m_statusLabel->setText(m_userStatusReconcilePending
+        ? QStringLiteral("用户状态更新响应超时，操作结果未知，正在刷新列表核对…")
+        : QStringLiteral("正在加载用户列表…"));
     const int seq = m_net->send(ecp::CMD_ADMIN_USER_LIST, QJsonObject{
         { QStringLiteral("page"), page },
         { QStringLiteral("size"), PAGE_SIZE },
@@ -144,7 +160,9 @@ void UserPage::requestUserList(int page, const QString &phoneLike)
         m_userListSeq = -1;
         m_requestedPage = m_currentPage;
         m_requestedPhoneLike = m_currentPhoneLike;
-        m_statusLabel->setText(QStringLiteral("用户列表请求发送失败，请检查网络连接"));
+        m_statusLabel->setText(m_userStatusReconcilePending
+            ? QStringLiteral("用户状态更新结果仍未知；列表核对失败：请求发送失败，请检查网络连接")
+            : QStringLiteral("用户列表请求发送失败，请检查网络连接"));
         updatePaginationControls();
         return;
     }
@@ -172,7 +190,9 @@ void UserPage::handleResponse(int cmd, int seq, int code, const QString &msg,
     }
     if (cmd == ecp::CMD_ADMIN_USER_STATUS) {
         if (seq != m_userStatusSeq) return;
+        m_userStatusTimer->stop();
         m_userStatusSeq = -1;
+        m_userStatusReconcilePending = false;
         handleUserStatusResponse(code, msg);
     }
 }
@@ -183,7 +203,9 @@ void UserPage::handleUserListResponse(int code, const QString &msg,
     if (code != ecp::ERR_OK) {
         m_requestedPage = m_currentPage;
         m_requestedPhoneLike = m_currentPhoneLike;
-        m_statusLabel->setText(QStringLiteral("用户列表加载失败：%1").arg(msg));
+        m_statusLabel->setText(m_userStatusReconcilePending
+            ? QStringLiteral("用户状态更新结果仍未知；列表核对失败：%1").arg(msg)
+            : QStringLiteral("用户列表加载失败：%1").arg(msg));
         updatePaginationControls();
         return;
     }
@@ -194,7 +216,9 @@ void UserPage::handleUserListResponse(int code, const QString &msg,
     if (!totalValue.isDouble() || total < 0 || !listValue.isArray()) {
         m_requestedPage = m_currentPage;
         m_requestedPhoneLike = m_currentPhoneLike;
-        m_statusLabel->setText(QStringLiteral("用户列表加载失败：服务器响应格式异常"));
+        m_statusLabel->setText(m_userStatusReconcilePending
+            ? QStringLiteral("用户状态更新结果仍未知；列表核对失败：服务器响应格式异常")
+            : QStringLiteral("用户列表加载失败：服务器响应格式异常"));
         updatePaginationControls();
         return;
     }
@@ -215,6 +239,33 @@ void UserPage::handleUserListResponse(int code, const QString &msg,
         });
     }
 
+    QString reconcileMessage;
+    if (m_userStatusReconcilePending) {
+        const auto target = std::find_if(users.cbegin(), users.cend(), [this](const UserData &user) {
+            return user.userId == m_pendingStatusUserId;
+        });
+        if (target == users.cend()) {
+            reconcileMessage = QStringLiteral(
+                "用户状态更新结果仍未知，当前列表未定位到用户 %1，请搜索该手机号继续核对")
+                                   .arg(m_pendingStatusPhone);
+        } else {
+            const QString phone = m_pendingStatusPhone;
+            const int targetStatus = m_pendingNewStatus;
+            const QString action = targetStatus == ecp::USER_FROZEN
+                ? QStringLiteral("冻结") : QStringLiteral("解冻");
+            const bool reachedTarget = target->status == targetStatus;
+            m_userStatusReconcilePending = false;
+            m_pendingStatusUserId = 0;
+            m_pendingStatusPhone.clear();
+            m_pendingNewStatus = ecp::USER_NORMAL;
+            reconcileMessage = reachedTarget
+                ? QStringLiteral("用户 %1 状态更新响应超时，但回读确认已%2")
+                      .arg(phone, action)
+                : QStringLiteral("用户 %1 状态更新未达到目标状态，请确认后重试")
+                      .arg(phone);
+        }
+    }
+
     m_users = users;
     m_currentPage = total == 0 ? 1 : m_requestedPage;
     m_total = total;
@@ -222,8 +273,10 @@ void UserPage::handleUserListResponse(int code, const QString &msg,
     m_requestedPage = m_currentPage;
     m_requestedPhoneLike = m_currentPhoneLike;
     refreshTable();
-    m_statusLabel->setText(QStringLiteral("已加载 %1 个用户，共 %2 个")
-                               .arg(m_users.size()).arg(total));
+    m_statusLabel->setText(reconcileMessage.isEmpty()
+        ? QStringLiteral("已加载 %1 个用户，共 %2 个")
+              .arg(m_users.size()).arg(total)
+        : reconcileMessage);
     updatePaginationControls();
 }
 
@@ -281,7 +334,8 @@ void UserPage::clearSearch()
 void UserPage::updateStatusButton()
 {
     const UserData *user = selectedUser();
-    const bool waitingForStatus = m_userStatusSeq >= 0;
+    const bool waitingForStatus = m_userStatusSeq >= 0
+        || m_userStatusReconcilePending;
     m_statusButton->setEnabled(user != nullptr && !waitingForStatus);
     m_statusButton->setText(user && user->status == ecp::USER_FROZEN
         ? QStringLiteral("解冻用户")
@@ -325,6 +379,9 @@ void UserPage::handleUserStatusChange()
         { QStringLiteral("status"), newStatus }
     });
     if (seq < 0) {
+        m_userStatusTimer->stop();
+        m_userStatusSeq = -1;
+        m_userStatusReconcilePending = false;
         QMessageBox::warning(this, QStringLiteral("用户状态更新失败"),
                              QStringLiteral("请求发送失败，请检查网络连接"));
         return;
@@ -334,6 +391,8 @@ void UserPage::handleUserStatusChange()
     m_pendingStatusUserId = user->userId;
     m_pendingStatusPhone = user->phone;
     m_pendingNewStatus = newStatus;
+    m_userStatusReconcilePending = false;
+    m_userStatusTimer->start(WRITE_RESPONSE_TIMEOUT_MS);
     m_statusButton->setEnabled(false);
     m_statusLabel->setText(QStringLiteral("正在%1用户 %2…").arg(action, user->phone));
 }
