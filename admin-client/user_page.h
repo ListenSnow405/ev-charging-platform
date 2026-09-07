@@ -31,7 +31,8 @@ private:
     };
 
     void setupUi();
-    void requestUserList();
+    void requestUserList(int page, const QString &phoneLike);
+    void searchUsers();
     void handleResponse(int cmd, int seq, int code, const QString &msg,
                         const QJsonObject &data);
     void handleUserListResponse(int code, const QString &msg,
@@ -40,6 +41,7 @@ private:
     void refreshTable();
     void clearSearch();
     void updateStatusButton();
+    void updatePaginationControls();
     void handleUserStatusChange();
     const UserData *selectedUser() const;
 
@@ -49,9 +51,18 @@ private:
     QLineEdit    *m_phoneSearch = nullptr;
     QTableWidget *m_table = nullptr;
     QPushButton  *m_statusButton = nullptr;
+    QPushButton  *m_previousPageButton = nullptr;
+    QPushButton  *m_nextPageButton = nullptr;
     QLabel       *m_statusLabel = nullptr;
+    QLabel       *m_pageLabel = nullptr;
     QVector<UserData> m_users;
 
+    static constexpr int PAGE_SIZE = 20;
+    int m_currentPage = 1;
+    qint64 m_total = 0;
+    int m_requestedPage = 1;
+    QString m_currentPhoneLike;
+    QString m_requestedPhoneLike;
     int m_userListSeq = -1;
     int m_userStatusSeq = -1;
     qint64 m_pendingStatusUserId = 0;

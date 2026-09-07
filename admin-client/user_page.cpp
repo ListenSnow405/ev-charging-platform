@@ -32,7 +32,7 @@ UserPage::UserPage(NetClient *net, QWidget *parent)
 {
     setupUi();
     connect(m_net, &NetClient::response, this, &UserPage::handleResponse);
-    requestUserList();
+    requestUserList(1, QString());
 }
 
 void UserPage::setupUi()
@@ -86,30 +86,62 @@ void UserPage::setupUi()
     m_table->horizontalHeader()->setSectionResizeMode(2, QHeaderView::Stretch);
     pageLayout->addWidget(m_table, 1);
 
-    connect(searchButton, &QPushButton::clicked, this, &UserPage::requestUserList);
-    connect(m_phoneSearch, &QLineEdit::returnPressed, this, &UserPage::requestUserList);
+    auto *pagination = new QHBoxLayout;
+    m_previousPageButton = new QPushButton(QStringLiteral("上一页"), this);
+    m_pageLabel = new QLabel(this);
+    m_pageLabel->setAlignment(Qt::AlignCenter);
+    m_nextPageButton = new QPushButton(QStringLiteral("下一页"), this);
+    pagination->addStretch();
+    pagination->addWidget(m_previousPageButton);
+    pagination->addWidget(m_pageLabel);
+    pagination->addWidget(m_nextPageButton);
+    pagination->addStretch();
+    pageLayout->addLayout(pagination);
+    updatePaginationControls();
+
+    connect(searchButton, &QPushButton::clicked, this, &UserPage::searchUsers);
+    connect(m_phoneSearch, &QLineEdit::returnPressed, this, &UserPage::searchUsers);
     connect(clearButton, &QPushButton::clicked, this, &UserPage::clearSearch);
+    connect(m_previousPageButton, &QPushButton::clicked, this, [this] {
+        requestUserList(m_currentPage - 1, m_currentPhoneLike);
+    });
+    connect(m_nextPageButton, &QPushButton::clicked, this, [this] {
+        requestUserList(m_currentPage + 1, m_currentPhoneLike);
+    });
     connect(m_table, &QTableWidget::itemSelectionChanged,
             this, &UserPage::updateStatusButton);
     connect(m_statusButton, &QPushButton::clicked,
             this, &UserPage::handleUserStatusChange);
 }
 
-void UserPage::requestUserList()
+void UserPage::requestUserList(int page, const QString &phoneLike)
 {
-    const QString phoneLike = m_phoneSearch->text().trimmed();
+    if (page < 1) return;
+
+    const QString normalizedPhoneLike = phoneLike.trimmed();
     m_statusLabel->setText(QStringLiteral("正在加载用户列表…"));
     const int seq = m_net->send(ecp::CMD_ADMIN_USER_LIST, QJsonObject{
-        { QStringLiteral("page"), 1 },
-        { QStringLiteral("size"), 100 },
-        { QStringLiteral("phoneLike"), phoneLike }
+        { QStringLiteral("page"), page },
+        { QStringLiteral("size"), PAGE_SIZE },
+        { QStringLiteral("phoneLike"), normalizedPhoneLike }
     });
     if (seq < 0) {
         m_userListSeq = -1;
+        m_requestedPage = m_currentPage;
+        m_requestedPhoneLike = m_currentPhoneLike;
         m_statusLabel->setText(QStringLiteral("用户列表请求发送失败，请检查网络连接"));
+        updatePaginationControls();
         return;
     }
     m_userListSeq = seq;
+    m_requestedPage = page;
+    m_requestedPhoneLike = normalizedPhoneLike;
+    updatePaginationControls();
+}
+
+void UserPage::searchUsers()
+{
+    requestUserList(1, m_phoneSearch->text());
 }
 
 void UserPage::handleResponse(int cmd, int seq, int code, const QString &msg,
@@ -132,12 +164,26 @@ void UserPage::handleUserListResponse(int code, const QString &msg,
                                       const QJsonObject &data)
 {
     if (code != ecp::ERR_OK) {
+        m_requestedPage = m_currentPage;
+        m_requestedPhoneLike = m_currentPhoneLike;
         m_statusLabel->setText(QStringLiteral("用户列表加载失败：%1").arg(msg));
+        updatePaginationControls();
+        return;
+    }
+
+    const QJsonValue totalValue = data.value(QStringLiteral("total"));
+    const QJsonValue listValue = data.value(QStringLiteral("list"));
+    const qint64 total = totalValue.toInteger(-1);
+    if (!totalValue.isDouble() || total < 0 || !listValue.isArray()) {
+        m_requestedPage = m_currentPage;
+        m_requestedPhoneLike = m_currentPhoneLike;
+        m_statusLabel->setText(QStringLiteral("用户列表加载失败：服务器响应格式异常"));
+        updatePaginationControls();
         return;
     }
 
     QVector<UserData> users;
-    const QJsonArray list = data.value(QStringLiteral("list")).toArray();
+    const QJsonArray list = listValue.toArray();
     users.reserve(list.size());
     for (const QJsonValue &value : list) {
         if (!value.isObject()) continue;
@@ -153,10 +199,15 @@ void UserPage::handleUserListResponse(int code, const QString &msg,
     }
 
     m_users = users;
+    m_currentPage = total == 0 ? 1 : m_requestedPage;
+    m_total = total;
+    m_currentPhoneLike = m_requestedPhoneLike;
+    m_requestedPage = m_currentPage;
+    m_requestedPhoneLike = m_currentPhoneLike;
     refreshTable();
-    const qint64 total = data.value(QStringLiteral("total")).toInteger(m_users.size());
     m_statusLabel->setText(QStringLiteral("已加载 %1 个用户，共 %2 个")
                                .arg(m_users.size()).arg(total));
+    updatePaginationControls();
 }
 
 void UserPage::handleUserStatusResponse(int code, const QString &msg)
@@ -180,7 +231,7 @@ void UserPage::handleUserStatusResponse(int code, const QString &msg)
         ? QStringLiteral("冻结") : QStringLiteral("解冻");
     QMessageBox::information(this, QStringLiteral("操作成功"),
                              QStringLiteral("用户 %1 已%2").arg(phone, action));
-    requestUserList();
+    requestUserList(m_currentPage, m_currentPhoneLike);
 }
 
 void UserPage::refreshTable()
@@ -206,7 +257,7 @@ void UserPage::refreshTable()
 void UserPage::clearSearch()
 {
     m_phoneSearch->clear();
-    requestUserList();
+    requestUserList(1, QString());
     m_phoneSearch->setFocus();
 }
 
@@ -218,6 +269,20 @@ void UserPage::updateStatusButton()
     m_statusButton->setText(user && user->status == ecp::USER_FROZEN
         ? QStringLiteral("解冻用户")
         : QStringLiteral("冻结用户"));
+}
+
+void UserPage::updatePaginationControls()
+{
+    const qint64 totalPages = m_total > 0
+        ? (m_total + PAGE_SIZE - 1) / PAGE_SIZE
+        : 1;
+    m_pageLabel->setText(QStringLiteral("第 %1 / %2 页，共 %3 个用户")
+                             .arg(m_currentPage).arg(totalPages).arg(m_total));
+
+    const bool requestPending = m_userListSeq >= 0;
+    m_previousPageButton->setEnabled(!requestPending && m_currentPage > 1);
+    m_nextPageButton->setEnabled(
+        !requestPending && qint64(m_currentPage) * PAGE_SIZE < m_total);
 }
 
 void UserPage::handleUserStatusChange()
