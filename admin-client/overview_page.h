@@ -12,6 +12,7 @@ class NetClient;
 class QJsonObject;
 class QLabel;
 class QTableWidget;
+class QTimer;
 
 #ifdef HAVE_CHARTS
 class QChart;
@@ -61,6 +62,7 @@ private:
     QLineSeries   *m_revenueSeries = nullptr;
     QDateTimeAxis *m_revenueAxisX = nullptr;
     QValueAxis    *m_revenueAxisY = nullptr;
+    QTimer        *m_revenueTrendTimer = nullptr;
 #endif
 
     NetClient    *m_net = nullptr;
@@ -70,6 +72,8 @@ private:
     QLabel       *m_totalRevenue = nullptr;
     QLabel       *m_pileTotal = nullptr;
     QTableWidget *m_pileStatusTable = nullptr;
+    QTimer       *m_revenueTimer = nullptr;
+    QTimer       *m_pileStatusTimer = nullptr;
 
     LoadState m_revenueState = LoadState::Idle;
     LoadState m_revenueTrendState = LoadState::Idle;
