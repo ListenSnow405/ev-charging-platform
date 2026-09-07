@@ -68,6 +68,7 @@ private:
     QLabel       *m_statusLabel = nullptr;
     QLabel       *m_pageLabel = nullptr;
     QTimer       *m_stationListTimer = nullptr;
+    QTimer       *m_stationAddTimer = nullptr;
     QTimer       *m_stationDetailTimer = nullptr;
     QVector<StationData> m_stations;
 
@@ -78,6 +79,8 @@ private:
     int m_stationListSeq = -1;
     int m_stationAddSeq = -1;
     int m_stationDetailSeq = -1;
+    bool m_stationAddOutcomeUnknown = false;
+    QString m_pendingAddStationName;
     qint64 m_pendingDetailStationId = 0;
     QString m_pendingDetailStationName;
     QString m_pendingDetailStationAddress;

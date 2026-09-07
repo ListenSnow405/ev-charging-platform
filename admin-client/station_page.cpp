@@ -20,6 +20,7 @@
 namespace {
 
 constexpr int READ_RESPONSE_TIMEOUT_MS = 10000;
+constexpr int WRITE_RESPONSE_TIMEOUT_MS = 10000;
 
 QTableWidgetItem *centeredItem(const QString &text)
 {
@@ -42,6 +43,18 @@ StationPage::StationPage(NetClient *net, QWidget *parent)
         m_requestedPage = m_currentPage;
         m_statusLabel->setText(QStringLiteral("电站列表请求超时，请重试"));
         updatePaginationControls();
+    });
+
+    m_stationAddTimer = new QTimer(this);
+    m_stationAddTimer->setSingleShot(true);
+    connect(m_stationAddTimer, &QTimer::timeout, this, [this] {
+        if (m_stationAddSeq < 0) return;
+        m_stationAddSeq = -1;
+        m_stationAddOutcomeUnknown = true;
+        m_addButton->setEnabled(true);
+        m_statusLabel->setText(
+            QStringLiteral("新增电站“%1”响应超时，操作结果未知；请先刷新并核对，避免重复新增")
+                .arg(m_pendingAddStationName));
     });
 
     m_stationDetailTimer = new QTimer(this);
@@ -185,6 +198,17 @@ void StationPage::requestStationDetail(int row)
 
 void StationPage::addStation()
 {
+    if (m_stationAddOutcomeUnknown) {
+        const auto answer = QMessageBox::warning(
+            this, QStringLiteral("上一次新增结果待确认"),
+            QStringLiteral("上一次新增电站请求响应超时，服务端可能已经完成创建。\n"
+                           "重复提交可能产生重复电站。\n\n"
+                           "请先刷新并核对电站列表或数据库。\n"
+                           "仅在已经确认仍需要再次新增时继续。"),
+            QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+        if (answer != QMessageBox::Yes) return;
+    }
+
     AddStationDialog dialog(this);
     if (dialog.exec() != QDialog::Accepted) return;
 
@@ -198,12 +222,17 @@ void StationPage::addStation()
         { QStringLiteral("pileCount"), input.pileCount }
     });
     if (seq < 0) {
+        m_stationAddTimer->stop();
+        m_stationAddSeq = -1;
         QMessageBox::warning(this, QStringLiteral("新增电站失败"),
                              QStringLiteral("请求发送失败，请检查网络连接"));
         return;
     }
 
     m_stationAddSeq = seq;
+    m_pendingAddStationName = input.name;
+    m_stationAddOutcomeUnknown = false;
+    m_stationAddTimer->start(WRITE_RESPONSE_TIMEOUT_MS);
     m_addButton->setEnabled(false);
     m_statusLabel->setText(QStringLiteral("正在新增电站…"));
 }
@@ -220,9 +249,12 @@ void StationPage::handleResponse(int cmd, int seq, int code, const QString &msg,
     }
     if (cmd == ecp::CMD_STATION_ADD) {
         if (seq != m_stationAddSeq) return;
+        m_stationAddTimer->stop();
         m_stationAddSeq = -1;
+        m_stationAddOutcomeUnknown = false;
         m_addButton->setEnabled(true);
         handleStationAddResponse(code, msg, data);
+        m_pendingAddStationName.clear();
         return;
     }
     if (cmd == ecp::CMD_STATION_DETAIL) {
