@@ -18,9 +18,12 @@
 #include <QTableWidget>
 #include <QTableWidgetItem>
 #include <QTime>
+#include <QTimer>
 #include <QVBoxLayout>
 
 namespace {
+
+constexpr int READ_RESPONSE_TIMEOUT_MS = 10000;
 
 QTableWidgetItem *centeredItem(const QString &text)
 {
@@ -35,6 +38,19 @@ OrderPage::OrderPage(NetClient *net, QWidget *parent)
     : QWidget(parent), m_net(net)
 {
     setupUi();
+    m_orderListTimer = new QTimer(this);
+    m_orderListTimer->setSingleShot(true);
+    connect(m_orderListTimer, &QTimer::timeout, this, [this] {
+        if (m_orderListSeq < 0) return;
+        m_orderListSeq = -1;
+        m_requestedPage = m_currentPage;
+        m_requestedStatus = m_currentStatus;
+        m_requestedDateFrom = m_currentDateFrom;
+        m_requestedDateTo = m_currentDateTo;
+        m_statusLabel->setText(QStringLiteral("订单列表请求超时，请重试"));
+        updatePaginationControls();
+    });
+
     connect(m_net, &NetClient::response, this, &OrderPage::handleResponse);
     requestOrderList(1, -1, QString(), QString());
 }
@@ -151,6 +167,7 @@ void OrderPage::requestOrderList(int page, int status, const QString &dateFrom,
         { QStringLiteral("dateTo"), dateTo }
     });
     if (seq < 0) {
+        m_orderListTimer->stop();
         m_orderListSeq = -1;
         m_requestedPage = m_currentPage;
         m_requestedStatus = m_currentStatus;
@@ -165,6 +182,7 @@ void OrderPage::requestOrderList(int page, int status, const QString &dateFrom,
     m_requestedStatus = status;
     m_requestedDateFrom = dateFrom;
     m_requestedDateTo = dateTo;
+    m_orderListTimer->start(READ_RESPONSE_TIMEOUT_MS);
     updatePaginationControls();
 }
 
@@ -188,6 +206,7 @@ void OrderPage::handleResponse(int cmd, int seq, int code, const QString &msg,
                                const QJsonObject &data)
 {
     if (cmd != ecp::CMD_ADMIN_ORDER_LIST || seq != m_orderListSeq) return;
+    m_orderListTimer->stop();
     m_orderListSeq = -1;
     handleOrderListResponse(code, msg, data);
 }

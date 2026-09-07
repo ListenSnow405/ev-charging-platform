@@ -15,6 +15,7 @@ class QJsonObject;
 class QLabel;
 class QPushButton;
 class QTableWidget;
+class QTimer;
 
 class OrderPage : public QWidget
 {
@@ -64,6 +65,7 @@ private:
     QPushButton  *m_nextPageButton = nullptr;
     QLabel       *m_statusLabel = nullptr;
     QLabel       *m_pageLabel = nullptr;
+    QTimer       *m_orderListTimer = nullptr;
     QVector<OrderData> m_orders;
 
     static constexpr int PAGE_SIZE = 20;
