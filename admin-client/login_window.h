@@ -33,6 +33,7 @@ private:
     QPushButton *m_btn = nullptr;
     QLabel      *m_status = nullptr;
     QTimer      *m_reconnectTimer = nullptr;
+    QTimer      *m_loginResponseTimer = nullptr;
     QString      m_host = QStringLiteral("127.0.0.1");
     QString      m_reloginReason;
     QString      m_reconnectContext;

@@ -12,6 +12,7 @@ namespace {
 
 constexpr int RECONNECT_DELAY_MS = 2000;
 constexpr int MAX_RECONNECT_ATTEMPTS = 30;
+constexpr int LOGIN_RESPONSE_TIMEOUT_MS = 10000;
 
 } // namespace
 
@@ -42,6 +43,15 @@ LoginWindow::LoginWindow(QWidget *parent) : QWidget(parent)
     m_reconnectTimer->setSingleShot(true);
     connect(m_reconnectTimer, &QTimer::timeout,
             this, &LoginWindow::attemptReconnect);
+    m_loginResponseTimer = new QTimer(this);
+    m_loginResponseTimer->setSingleShot(true);
+    connect(m_loginResponseTimer, &QTimer::timeout, this, [this] {
+        if (m_loginSeq < 0) return;
+        m_loginSeq = -1;
+        m_btn->setEnabled(true);
+        m_status->setText(
+            QStringLiteral("登录请求超时，服务器未及时响应，请重试"));
+    });
 
     const QString cfgPath = ecp::resPath(QStringLiteral("config/app.ini"));
     if (QFileInfo::exists(cfgPath)) {
@@ -66,6 +76,7 @@ LoginWindow::LoginWindow(QWidget *parent) : QWidget(parent)
         m_net->send(0);                       // 探针，确认链路
     });
     connect(m_net, &NetClient::disconnected, this, [this] {
+        m_loginResponseTimer->stop();
         m_loginSeq = -1;
         if (!isVisible()) return;
         if (m_reconnectExhausted) {
@@ -111,6 +122,7 @@ LoginWindow::LoginWindow(QWidget *parent) : QWidget(parent)
         }
         if (cmd != ecp::CMD_ADMIN_LOGIN || seq != m_loginSeq) return;
 
+        m_loginResponseTimer->stop();
         m_loginSeq = -1;
         m_btn->setEnabled(true);
         if (code != ecp::ERR_OK) {
@@ -162,10 +174,12 @@ void LoginWindow::onLogin()
         return;
     }
     m_loginSeq = seq;
+    m_loginResponseTimer->start(LOGIN_RESPONSE_TIMEOUT_MS);
 }
 
 void LoginWindow::handleReloginRequested(const QString &reason)
 {
+    m_loginResponseTimer->stop();
     m_loginSeq = -1;
     m_btn->setEnabled(true);
     m_net->setToken(QString());
@@ -187,6 +201,7 @@ void LoginWindow::handleReloginRequested(const QString &reason)
 
 void LoginWindow::beginReconnect(const QString &context)
 {
+    m_loginResponseTimer->stop();
     m_reconnectTimer->stop();
     m_reconnectContext = context;
     m_reconnectAttempts = 0;
