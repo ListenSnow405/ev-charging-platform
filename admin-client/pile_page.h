@@ -3,6 +3,7 @@
 //  admin-client/pile_page.h  —  PC 管理端充电桩管理页
 //  归属 L3。 [说明书] 1.4 电桩列表、筛选与远程重启
 // -----------------------------------------------------------------------------
+#include <QSet>
 #include <QString>
 #include <QVector>
 #include <QWidget>
@@ -20,6 +21,12 @@ public:
     explicit PilePage(NetClient *net, QWidget *parent = nullptr);
 
 private:
+    struct StationOption
+    {
+        qint64 stationId = 0;
+        QString name;
+    };
+
     struct PileData
     {
         qint64 pileId = 0;
@@ -34,6 +41,9 @@ private:
 
     void setupUi();
     void requestStationOptions();
+    void requestStationOptionsPage(int page);
+    void abortStationOptionsLoad(const QString &message);
+    void commitStationOptions();
     void requestPileList(int page, qint64 stationId, int status);
     void handleResponse(int cmd, int seq, int code, const QString &msg,
                         const QJsonObject &data);
@@ -61,6 +71,7 @@ private:
     QVector<PileData> m_piles;
 
     static constexpr int PAGE_SIZE = 20;
+    static constexpr int STATION_OPTION_PAGE_SIZE = 100;
     int m_currentPage = 1;
     qint64 m_total = 0;
     int m_requestedPage = 1;
@@ -68,6 +79,11 @@ private:
     int m_currentStatus = -1;
     qint64 m_requestedStationId = 0;
     int m_requestedStatus = -1;
+    int m_stationOptionsPage = 0;
+    qint64 m_stationOptionsTotal = 0;
+    qint64 m_stationOptionsSelectedId = 0;
+    QVector<StationOption> m_pendingStationOptions;
+    QSet<qint64> m_pendingStationOptionIds;
     int m_stationOptionsSeq = -1;
     int m_pileListSeq = -1;
 };
