@@ -14,9 +14,12 @@
 #include <QPushButton>
 #include <QTableWidget>
 #include <QTableWidgetItem>
+#include <QTimer>
 #include <QVBoxLayout>
 
 namespace {
+
+constexpr int READ_RESPONSE_TIMEOUT_MS = 10000;
 
 QTableWidgetItem *centeredItem(const QString &text)
 {
@@ -31,6 +34,27 @@ StationPage::StationPage(NetClient *net, QWidget *parent)
     : QWidget(parent), m_net(net)
 {
     setupUi();
+    m_stationListTimer = new QTimer(this);
+    m_stationListTimer->setSingleShot(true);
+    connect(m_stationListTimer, &QTimer::timeout, this, [this] {
+        if (m_stationListSeq < 0) return;
+        m_stationListSeq = -1;
+        m_requestedPage = m_currentPage;
+        m_statusLabel->setText(QStringLiteral("电站列表请求超时，请重试"));
+        updatePaginationControls();
+    });
+
+    m_stationDetailTimer = new QTimer(this);
+    m_stationDetailTimer->setSingleShot(true);
+    connect(m_stationDetailTimer, &QTimer::timeout, this, [this] {
+        if (m_stationDetailSeq < 0) return;
+        m_stationDetailSeq = -1;
+        m_pendingDetailStationId = 0;
+        m_pendingDetailStationName.clear();
+        m_pendingDetailStationAddress.clear();
+        m_statusLabel->setText(QStringLiteral("电站详情请求超时，请重试"));
+    });
+
     connect(m_net, &NetClient::response, this, &StationPage::handleResponse);
     requestStationList(1);
 }
@@ -129,6 +153,7 @@ void StationPage::requestStationList(int page)
     }
     m_stationListSeq = seq;
     m_requestedPage = page;
+    m_stationListTimer->start(READ_RESPONSE_TIMEOUT_MS);
     updatePaginationControls();
 }
 
@@ -154,6 +179,7 @@ void StationPage::requestStationDetail(int row)
     m_pendingDetailStationId = station.stationId;
     m_pendingDetailStationName = station.name;
     m_pendingDetailStationAddress = station.address;
+    m_stationDetailTimer->start(READ_RESPONSE_TIMEOUT_MS);
     m_statusLabel->setText(QStringLiteral("正在加载“%1”的电桩详情…").arg(station.name));
 }
 
@@ -187,6 +213,7 @@ void StationPage::handleResponse(int cmd, int seq, int code, const QString &msg,
 {
     if (cmd == ecp::CMD_STATION_LIST) {
         if (seq != m_stationListSeq) return;
+        m_stationListTimer->stop();
         m_stationListSeq = -1;
         handleStationListResponse(code, msg, data);
         return;
@@ -200,6 +227,7 @@ void StationPage::handleResponse(int cmd, int seq, int code, const QString &msg,
     }
     if (cmd == ecp::CMD_STATION_DETAIL) {
         if (seq != m_stationDetailSeq) return;
+        m_stationDetailTimer->stop();
         m_stationDetailSeq = -1;
         handleStationDetailResponse(code, msg, data);
     }

@@ -12,6 +12,7 @@ class QJsonObject;
 class QLabel;
 class QPushButton;
 class QTableWidget;
+class QTimer;
 
 class StationPage : public QWidget
 {
@@ -66,6 +67,8 @@ private:
     QPushButton  *m_nextPageButton = nullptr;
     QLabel       *m_statusLabel = nullptr;
     QLabel       *m_pageLabel = nullptr;
+    QTimer       *m_stationListTimer = nullptr;
+    QTimer       *m_stationDetailTimer = nullptr;
     QVector<StationData> m_stations;
 
     static constexpr int PAGE_SIZE = 20;
