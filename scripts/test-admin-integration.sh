@@ -118,7 +118,8 @@ fi
 
 if python3 scripts/smoke-admin.py \
     --host 127.0.0.1 \
-    --port "$TEST_PORT"
+    --port "$TEST_PORT" \
+    --mutating
 then
     echo "ADMIN INTEGRATION: PASS"
 else
