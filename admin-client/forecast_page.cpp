@@ -126,18 +126,59 @@ void ForecastPage::setupUi()
 
 void ForecastPage::requestStationList()
 {
+    m_stationListSeq = -1;
+    m_stationListPage = 0;
+    m_stationListTotal = 0;
+    m_stationListSelectedId = m_stationFilter->currentData().toLongLong();
+    m_pendingStationOptions.clear();
+    m_pendingStationOptionIds.clear();
+    m_stationFilter->setToolTip(QStringLiteral("正在加载站点筛选项…"));
+    requestStationListPage(1);
+}
+
+void ForecastPage::requestStationListPage(int page)
+{
     const int seq = m_net->send(ecp::CMD_STATION_LIST, QJsonObject{
-        { QStringLiteral("page"), 1 },
-        { QStringLiteral("size"), 100 }
+        { QStringLiteral("page"), page },
+        { QStringLiteral("size"), STATION_OPTION_PAGE_SIZE }
     });
     if (seq < 0) {
-        m_stationListSeq = -1;
-        m_stationFilter->setToolTip(
+        abortStationListLoad(
             QStringLiteral("站点筛选项请求发送失败，请检查网络连接"));
         return;
     }
     m_stationListSeq = seq;
-    m_stationFilter->setToolTip(QStringLiteral("正在加载站点筛选项…"));
+    m_stationListPage = page;
+}
+
+void ForecastPage::abortStationListLoad(const QString &message)
+{
+    m_stationListSeq = -1;
+    m_stationListPage = 0;
+    m_stationListTotal = 0;
+    m_pendingStationOptions.clear();
+    m_pendingStationOptionIds.clear();
+    m_stationFilter->setToolTip(message);
+}
+
+void ForecastPage::commitStationOptions()
+{
+    const int acceptedCount = m_pendingStationOptions.size();
+    const QSignalBlocker blocker(m_stationFilter);
+    m_stationFilter->clear();
+    m_stationFilter->addItem(QStringLiteral("全部站点"), qint64(0));
+    for (const StationOption &option : m_pendingStationOptions)
+        m_stationFilter->addItem(option.name, option.stationId);
+
+    const int selectedIndex = m_stationFilter->findData(m_stationListSelectedId);
+    m_stationFilter->setCurrentIndex(selectedIndex >= 0 ? selectedIndex : 0);
+    m_stationFilter->setToolTip(
+        QStringLiteral("已加载 %1 / %2 个站点筛选项")
+            .arg(acceptedCount).arg(m_stationListTotal));
+
+    m_stationListPage = 0;
+    m_pendingStationOptions.clear();
+    m_pendingStationOptionIds.clear();
 }
 
 void ForecastPage::requestForecast()
@@ -175,17 +216,22 @@ void ForecastPage::handleStationListResponse(int code, const QString &msg,
                                              const QJsonObject &data)
 {
     if (code != ecp::ERR_OK) {
-        m_stationFilter->setToolTip(
+        abortStationListLoad(
             QStringLiteral("站点筛选项加载失败：%1").arg(msg));
         return;
     }
 
-    const qint64 selectedStationId = m_stationFilter->currentData().toLongLong();
-    const QSignalBlocker blocker(m_stationFilter);
-    m_stationFilter->clear();
-    m_stationFilter->addItem(QStringLiteral("全部站点"), qint64(0));
+    const QJsonValue totalValue = data.value(QStringLiteral("total"));
+    const QJsonValue listValue = data.value(QStringLiteral("list"));
+    const qint64 total = totalValue.toInteger(-1);
+    if (!totalValue.isDouble() || total < 0 || !listValue.isArray()) {
+        abortStationListLoad(
+            QStringLiteral("站点筛选项加载失败：服务器响应格式异常"));
+        return;
+    }
 
-    const QJsonArray list = data.value(QStringLiteral("list")).toArray();
+    m_stationListTotal = total;
+    const QJsonArray list = listValue.toArray();
     for (const QJsonValue &value : list) {
         if (!value.isObject()) continue;
         const QJsonObject item = value.toObject();
@@ -194,14 +240,19 @@ void ForecastPage::handleStationListResponse(int code, const QString &msg,
         if (!idValue.isDouble() || !nameValue.isString()) continue;
         const qint64 stationId = idValue.toInteger();
         const QString name = nameValue.toString();
-        if (stationId <= 0 || name.isEmpty()) continue;
-        m_stationFilter->addItem(name, stationId);
+        if (stationId <= 0 || name.isEmpty()
+            || m_pendingStationOptionIds.contains(stationId)) {
+            continue;
+        }
+        m_pendingStationOptions.append({stationId, name});
+        m_pendingStationOptionIds.insert(stationId);
     }
 
-    const int selectedIndex = m_stationFilter->findData(selectedStationId);
-    m_stationFilter->setCurrentIndex(selectedIndex >= 0 ? selectedIndex : 0);
-    m_stationFilter->setToolTip(
-        QStringLiteral("已加载 %1 个站点筛选项").arg(m_stationFilter->count() - 1));
+    if (qint64(m_stationListPage) * STATION_OPTION_PAGE_SIZE < total) {
+        requestStationListPage(m_stationListPage + 1);
+        return;
+    }
+    commitStationOptions();
 }
 
 void ForecastPage::handleForecastResponse(int code, const QString &msg,
