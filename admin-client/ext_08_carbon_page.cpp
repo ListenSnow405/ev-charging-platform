@@ -681,8 +681,10 @@ void Ext08CarbonPage::submitFactor(const CarbonFactorForm &form)
 // -----------------------------------------------------------------------------
 QString Ext08CarbonPage::describeError(int code, const QString &serverMsg)
 {
-    // 裁决 D5：6700 段的中文文案由页面本地映射。服务端的 msg 来自冻结的
-    // errMsg()，对扩展码只会给「未知错误(NNNN)」—— 那不该端到用户面前。
+    // 2026-09-08 起服务端已能对 6700 段返回中文（error_code.h 的 ExtMsgProvider 挂钩，
+    // 由 server/main.cpp 注册 errMsgExt）。本地映射因此不再是唯一来源，但保留：
+    //   · 对着旧版服务端仍能显示人话，不会退化成「未知错误(6701)」
+    //   · 页面能给出比通用文案更贴合当前界面的指引（如「请先在右侧新增因子版本」）
     switch (code) {
     case ecp::ERR_CARBON_NO_FACTOR:
         return QStringLiteral("该时间段没有生效的排放因子，请先在右侧新增因子版本");

@@ -122,8 +122,8 @@ private:
     void updateShareTable(const QJsonObject &totals);
     void updateTrend(const QVector<DayPoint> &points);
 
-    // 扩展错误码 → 中文。裁决 D5：buildResponse() 的 msg 来自冻结的 errMsg()，
-    // 对 6700 段一律是「未知错误(NNNN)」，因此文案由页面本地映射，不动契约。
+    // 扩展错误码 → 中文。服务端已能返回中文（error_code.h 的 ExtMsgProvider 挂钩），
+    // 本地映射作为兜底保留：旧版服务端仍能显示人话，也便于给出贴合本页的指引。
     static QString describeError(int code, const QString &serverMsg);
 
     NetClient *m_net = nullptr;

@@ -5,14 +5,17 @@
 //  ⚠ 本文件**不是**冻结契约。属主与规则同 common/protocol_ext.h。
 //    每模块一个百号段，见 docs/expand/00 第 4.3 节。
 //
-//  ⚠ 重要 —— errMsgExt() 只用于**服务端日志**，不进响应报文。
-//    common/protocol.h 的 buildResponse() 写死了 msg = errMsg(code)，
-//    而 errMsg() 在冻结的 common/error_code.h 里，对 6000 段一律返回「未知错误(NNNN)」。
-//    为三个错误码去动 L1 的冻结契约不划算，因此：
-//      · 服务端：用 errMsgExt() 写日志，客户端拿到的 code 仍然准确
-//      · 客户端：各扩展页面自带 code → 文案 映射表（见 admin-client/ext_08_carbon_page.cpp）
-//    若日后希望服务端 msg 也返回中文，走 CR 给 errMsg() 加一条 fallback。
-//    已登记为遗留项，见 docs/expand/08-实现规划.md 裁决 D5 与第 10 节。
+//  ⚠ errMsgExt() 同时充当 error_code.h 的**扩展文案提供者**。
+//    2026-09-08 L1 授权后，common/error_code.h 加了一个 ExtMsgProvider 挂钩：
+//    冻结契约不 include 本文件（否则 L1 的契约会被各扩展模块的进度绑架），
+//    改由扩展侧在进程启动时注册一次：
+//        ecp::registerExtMsgProvider(&ecp::errMsgExt);   // server/main.cpp
+//    于是 buildResponse() 的 msg 对 6000 段也能给出中文，客户端不必再靠本地映射兜底。
+//    （裁决 D5 的遗留项就此了结，见 docs/expand/08-实现规划.md 第 10 节。）
+//
+//  ⚠ 因此 **未知码必须返回空串**，不能返回「未知扩展错误(NNNN)」——
+//    那会盖住 errMsg() 自己的兜底文案，别人的错误码也会被本文件冒名顶替。
+//    需要人话的日志请自行判空。
 // =============================================================================
 
 #include <QString>
@@ -27,7 +30,8 @@ enum ErrCodeExt {
     ERR_CARBON_REPORT_NOT_FOUND = 6704  // 报告不存在（段内自治新增，见 08 实现规划第 4 节）
 };
 
-// 扩展错误码 → 中文描述。仅供服务端日志与客户端本地映射参考，理由见文件头。
+// 扩展错误码 → 中文描述。注册给 errMsg() 用，也可直接用于服务端日志。
+// **不认识的码返回空串**，理由见文件头。
 inline QString errMsgExt(int code)
 {
     switch (code) {
@@ -35,7 +39,7 @@ inline QString errMsgExt(int code)
     case ERR_CARBON_FACTOR_OVERLAP: return QStringLiteral("因子生效区间与已有因子重叠，请调整生效时间");
     case ERR_CARBON_REPORT_STALE:   return QStringLiteral("源数据已变更，该报告需重新生成");
     case ERR_CARBON_REPORT_NOT_FOUND: return QStringLiteral("报告不存在或已被删除");
-    default:                        return QStringLiteral("未知扩展错误(%1)").arg(code);
+    default:                        return QString();   // 交回 errMsg() 兜底，勿改
     }
 }
 

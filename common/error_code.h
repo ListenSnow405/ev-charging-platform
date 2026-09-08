@@ -49,6 +49,36 @@ enum ErrCode {
     ERR_ADMIN_AUTH          = 5001    // [说明书] 账号或密码错误
 };
 
+// -----------------------------------------------------------------------------
+//  扩展错误码文案挂钩（6000 段及以后）
+//
+//  扩展模块的错误码住在 common/error_code_ext.h，那是「只加不改」的共管文件，
+//  每周都可能长出新码。**冻结契约不能反向 include 它** —— 否则 L1 的契约就被
+//  各扩展模块的进度绑架了，改一个扩展错误码等于改一次冻结文件。
+//
+//  所以这里只留一个函数指针挂钩：扩展侧在进程启动时注册一次，errMsg() 在
+//  默认分支询问它。没注册时行为与从前完全一致（返回「未知错误(NNNN)」），
+//  因此对既有代码零影响，也不影响没有任何扩展的构建。
+//
+//  ⚠ 只能在**起线程池之前**注册一次，此后只读。它是进程级全局量，
+//    运行期改写会与工作线程的 errMsg() 调用竞态。
+//  ⚠ 提供者对不认识的码应返回空串，errMsg() 会退回原来的「未知错误」文案。
+// -----------------------------------------------------------------------------
+using ExtMsgProvider = QString (*)(int);
+
+inline ExtMsgProvider &extMsgProviderRef()
+{
+    static ExtMsgProvider provider = nullptr;   // C++17 inline 函数的局部静态全程唯一
+    return provider;
+}
+
+// 由扩展侧在 main() 里调用一次，例如：
+//     ecp::registerExtMsgProvider(&ecp::errMsgExt);
+inline void registerExtMsgProvider(ExtMsgProvider provider)
+{
+    extMsgProviderRef() = provider;
+}
+
 // 错误码 → 面向用户的中文描述。
 // [说明书] 2.3：错误提示必须说清发生了什么，不要只回「操作失败」。
 inline QString errMsg(int code)
@@ -77,8 +107,16 @@ inline QString errMsg(int code)
     case ERR_ORDER_STATUS:       return QStringLiteral("当前订单状态不允许该操作");
     case ERR_ORDER_SETTLED:      return QStringLiteral("订单已结算，请勿重复操作");
     case ERR_ADMIN_AUTH:         return QStringLiteral("账号或密码错误");
-    default:                     return QStringLiteral("未知错误(%1)").arg(code);
+    default:                     break;
     }
+
+    // 核心段没命中 → 问一下扩展侧。没注册提供者、或提供者也不认识这个码，
+    // 就回到原来的兜底文案。
+    if (const ExtMsgProvider provider = extMsgProviderRef()) {
+        const QString ext = provider(code);
+        if (!ext.isEmpty()) return ext;
+    }
+    return QStringLiteral("未知错误(%1)").arg(code);
 }
 
 } // namespace ecp

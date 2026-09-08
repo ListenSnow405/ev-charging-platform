@@ -212,6 +212,14 @@ def validate_no_factor(client, token):
             f"演示因子生效期之前 → ERR_CARBON_NO_FACTOR({ERR_CARBON_NO_FACTOR})", response["code"])
     print(f"[PASS] 无因子时段：1999-12 查询 → {ERR_CARBON_NO_FACTOR}（不编造排放量）")
 
+    # 服务端对扩展段错误码也应返回中文文案，而不是「未知错误(6701)」。
+    # 这条验的是 common/error_code.h 的 ExtMsgProvider 挂钩确实被注册上了 ——
+    # 非 Qt 客户端（脚本、调试工具）只看 msg，拿不到本地映射表。
+    msg = response["msg"]
+    require("未知错误" not in msg and bool(msg.strip()), CMD_EXT_CARBON_METRIC,
+            "msg 为扩展码的中文文案，而非「未知错误(NNNN)」", repr(msg))
+    print(f"[PASS] 扩展错误码文案：服务端 msg = {msg!r}")
+
 
 def validate_factor_set_guards(client, token, existing):
     """3742 的拒绝路径 —— 全部在写入前返回，不会改动 t_carbon_factor。"""
