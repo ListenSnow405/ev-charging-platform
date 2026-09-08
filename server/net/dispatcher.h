@@ -9,7 +9,9 @@
 #include <QHash>
 #include <QJsonObject>
 #include <functional>
+#include <memory>
 #include "session.h"
+#include "conn_ctx.h"
 
 namespace ecp {
 
@@ -20,6 +22,10 @@ struct Request {
     QJsonObject data;
     SessionInfo session;      // 已鉴权时有效
     bool        authed = false;
+
+    // 本条请求所属连接（非拥有）。仅本任务处理期间有效，
+    // 供 9001 设备注册等需要回连自身连接的 handler 使用。
+    std::shared_ptr<ConnectionCtx> conn;
 };
 
 // handler 返回错误码，通过 out 填充响应 data
@@ -33,8 +39,9 @@ public:
     // needAuth=false 的命令（登录等）不校验 token
     void registerHandler(int cmd, Handler h, bool needAuth = true);
 
-    // 处理一条完整报文，返回待发送的响应 payload
-    QByteArray handle(const QByteArray &payload);
+    // 处理一条完整报文，返回待发送的响应 payload。
+    // conn 为请求所属连接，handler 可通过 req.conn 取用（可为空）。
+    QByteArray handle(const QByteArray &payload, std::shared_ptr<ConnectionCtx> conn);
 
 private:
     Dispatcher() = default;

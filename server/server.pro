@@ -11,6 +11,8 @@ QT      -= gui
 CONFIG  += console c++17
 CONFIG  -= app_bundle
 
+DEFINES += _GNU_SOURCE        # epoll/eventfd 需要（io_wake.cpp / epoll_loop.cpp）
+
 include(../common/common.pri)      # 冻结契约：协议 / 错误码 / 帧编解码 / 日志 / 时间
 
 INCLUDEPATH += $$PWD
@@ -21,6 +23,10 @@ SOURCES += \
     net/tcp_server.cpp \
     net/session.cpp \
     net/dispatcher.cpp \
+    net/conn_ctx.cpp \
+    net/io_wake.cpp \
+    net/device_registry.cpp \
+    net/epoll_loop.cpp \
     dao/db.cpp \
     biz/user_service.cpp \
     biz/admin_service.cpp \
@@ -41,5 +47,9 @@ HEADERS += \
     net/tcp_server.h \
     net/session.h \
     net/dispatcher.h \
+    net/conn_ctx.h \
+    net/io_wake.h \
+    net/device_registry.h \
+    net/epoll_loop.h \
     dao/db.h \
     biz/ext_08_carbon_calc.h

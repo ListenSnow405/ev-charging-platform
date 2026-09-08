@@ -16,7 +16,7 @@ void Dispatcher::registerHandler(int cmd, Handler h, bool needAuth)
     m_needAuth.insert(cmd, needAuth);
 }
 
-QByteArray Dispatcher::handle(const QByteArray &payload)
+QByteArray Dispatcher::handle(const QByteArray &payload, std::shared_ptr<ConnectionCtx> conn)
 {
     QJsonObject env;
     if (!parseEnvelope(payload, env, EnvelopeType::Request)) {
@@ -29,6 +29,7 @@ QByteArray Dispatcher::handle(const QByteArray &payload)
     req.seq   = env.value("seq").toInt();
     req.token = env.value("token").toString();
     req.data  = env.value("data").toObject();
+    req.conn  = std::move(conn);
 
     auto it = m_handlers.find(req.cmd);
     if (it == m_handlers.end()) {

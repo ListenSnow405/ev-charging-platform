@@ -1,11 +1,11 @@
 // -----------------------------------------------------------------------------
-//  server/main.cpp  —  业务服务端入口
+//  server/main.cpp  —  业务服务端入口（改造后）
 //
 //  [说明书] 1.6 Socket 通信 + 多线程(pthread) 主框架
 //  [说明书] 1.6 QSQLite 数据存储
 //
 //  运行：./ecp-server [配置文件路径]
-//        默认读 config/app.ini，读不到则用内置默认值。
+//  主线程跑 Qt 事件循环：QSocketNotifier 接 listen fd、QTimer 轮询退出标志。
 // -----------------------------------------------------------------------------
 #include <QCoreApplication>
 #include <QDir>
@@ -14,9 +14,10 @@
 #include <QHash>
 #include <QSqlError>
 #include <QSqlQuery>
+#include <QTimer>
 #include <QVariant>
+#include <atomic>
 #include <csignal>
-#include <unistd.h>
 
 #include "logger.h"
 #include "error_code_ext.h"
@@ -28,22 +29,10 @@
 
 using namespace ecp;
 
-// 信号处理函数里只能碰 volatile sig_atomic_t 和 async-signal-safe 的调用。
-// 以前这里直接调 TcpServer::stop()，它要加锁还要 pthread_join，一旦有工作线程
-// 卡在 recv 上就永远 join 不回来，主线程被锁死在信号上下文里，进程关不掉。
-// 现在只往 self-pipe 写一字节唤醒 accept 循环，真正的停止流程回到主线程做。
-static volatile sig_atomic_t g_wakeFd  = -1;
-static volatile sig_atomic_t g_lastSig = 0;
+// 信号处理函数里只做 async-signal-safe 的 atomic 置位，真正停止回到主线程。
+static std::atomic<bool> g_quitRequested{false};
 
-static void onSignal(int sig)
-{
-    g_lastSig = sig;
-    if (g_wakeFd >= 0) {
-        const char b = 1;
-        const ssize_t ignored = ::write(g_wakeFd, &b, 1);   // write 是 async-signal-safe 的
-        (void)ignored;
-    }
-}
+static void onSignal(int) { g_quitRequested.store(true); }
 
 // -----------------------------------------------------------------------------
 //  业务 handler 注册。
@@ -212,14 +201,13 @@ int main(int argc, char *argv[])
         LOG_E(QStringLiteral("服务端启动失败"));
         return 1;
     }
-    g_wakeFd = server.wakeFd();   // 必须在 listenOn 之后：self-pipe 在那里才建好
 
-    server.run();                 // 阻塞至收到停止信号
+    // 退出：信号处理器只置 atomic 标志，由 Qt 事件循环里的定时器轮询并优雅停止
+    QTimer quitTimer;
+    QObject::connect(&quitTimer, &QTimer::timeout, &app, [&] {
+        if (g_quitRequested.load()) { server.stop(); app.quit(); }
+    });
+    quitTimer.start(200);
 
-    // 回到主线程再做清理：断开在用连接 → 工作线程退出 → join 返回
-    if (g_lastSig != 0)
-        LOG_I(QStringLiteral("收到信号 %1，正在停止服务端…").arg(static_cast<int>(g_lastSig)));
-    g_wakeFd = -1;
-    server.stop();
-    return 0;
+    return app.exec();
 }
