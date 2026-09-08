@@ -30,7 +30,9 @@ Qt 主线程运行事件循环，负责 IO 事件通知与定时任务；创建�
 | `conn_ctx.h/.cpp` | 单连接状态（发送队列/解析器） | 业务线程只调 `enqueueSend()`，不碰 fd |
 | `session.h/.cpp` | token 会话表 | 接口已自带锁，勿自行加锁 |
 | `dispatcher.h/.cpp` | 命令字分发 | L2 用 `registerHandler`；handler 只读 `req.session` |
-| `device_registry.h/.cpp` | 电桩↔连接映射 | 2112 用 `pushToDevice`；9001 用 `registerDevice` |
+| `device_registry.h/.cpp` | 电桩↔连接映射 | L2 用 `pushToDevice` / `isOnline` / `lastReport` / `startCharging` / `stopCharging` |
+| `user_registry.h/.cpp` | 用户连接映射 | L2 用 `pushToUser` 推 1208 |
+| `device_service.cpp` | 设备命令字 9001/9002/9004 处理 | 内部 |
 | `io_wake.h/.cpp` | eventfd 唤醒 | 内部，业务不直接调 |
 
 ## 服务清单
@@ -39,10 +41,12 @@ Qt 主线程运行事件循环，负责 IO 事件通知与定时任务；创建�
 
 | 命令字 | 常量 | 方向 | 说明 | 状态 |
 | --- | --- | --- | --- | --- |
-| 9001 | `CMD_DEV_REGISTER` | 设备→服务端 | 注册上线，登记映射、置 online=1 | 待做 |
-| 9002 | `CMD_DEV_REPORT` | 设备→服务端 | 状态/电量上报 | 待做 |
-| 9003 | `CMD_DEV_REBOOT` | 服务端→设备 | 重启指令下发（2112 触发） | 待做 |
-| 9004 | `CMD_DEV_HEARTBEAT` | 设备→服务端 | 心跳，刷 last_heartbeat | 待做 |
+| 9001 | `CMD_DEV_REGISTER` | 设备→服务端 | 注册上线，登记映射、置 online=1 | 已实现 |
+| 9002 | `CMD_DEV_REPORT` | 设备→服务端 | 状态/电量上报 | 已实现 |
+| 9003 | `CMD_DEV_REBOOT` | 服务端→设备 | 重启指令下发（2112 触发） | 待 L2 实现 2112 |
+| 9004 | `CMD_DEV_HEARTBEAT` | 设备→服务端 | 心跳，刷 last_heartbeat | 已实现 |
+| 9005 | `CMD_DEV_START` | 服务端→设备 | 开始充电（累计清零） | 已实现 |
+| 9006 | `CMD_DEV_STOP` | 服务端→设备 | 结束充电（停止累计） | 已实现 |
 
 ## 2026-09-08 大规模改动总结
 
