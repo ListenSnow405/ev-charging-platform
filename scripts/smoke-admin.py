@@ -23,18 +23,21 @@ FRAME_MAX_PAYLOAD = 1024 * 1024
 
 ERR_OK = 0
 ERR_NOT_LOGIN = 1002
+ERR_CMD_UNKNOWN = 1005
 
 CMD_ADMIN_LOGIN = 2001
 CMD_STATION_LIST = 2101
 CMD_STATION_ADD = 2102
 CMD_STATION_DETAIL = 2103
 CMD_PILE_LIST = 2111
+CMD_PILE_REBOOT = 2112
 CMD_ADMIN_USER_LIST = 2201
 CMD_ADMIN_USER_STATUS = 2202
 CMD_STAT_REVENUE = 2301
 CMD_STAT_REVENUE_TREND = 2302
 CMD_STAT_PILE_STATUS = 2303
 CMD_ADMIN_ORDER_LIST = 2304
+CMD_STAT_LOAD_FORECAST = 2305
 
 
 class SmokeFailure(Exception):
@@ -196,6 +199,20 @@ def expect_ok(response, cmd):
         f"code={code}, msg={response['msg']!r}",
     )
     return response["data"]
+
+
+def probe_handler_registration(client, token, cmd, data, label):
+    response = client.request(cmd, token, data)
+    code = response["code"]
+    if code == ERR_CMD_UNKNOWN:
+        print(f"[SKIP] {cmd} {label}: handler not registered")
+        return False
+
+    print(
+        f"[DETECTED] {cmd} {label}: handler registered "
+        f"(probe code={code}, msg={response['msg']})"
+    )
+    return True
 
 
 def load_target(host_override=None, port_override=None):
@@ -573,6 +590,22 @@ def run_smoke(host, port, account, password, mutating=False):
         validate_revenue_trend(client, token, 30)
         validate_pile_status(client, token)
         validate_order_list(client, token)
+
+        probe_handler_registration(
+            client,
+            token,
+            CMD_PILE_REBOOT,
+            {"pileId": -1},
+            "pile reboot",
+        )
+        probe_handler_registration(
+            client,
+            token,
+            CMD_STAT_LOAD_FORECAST,
+            {"stationId": -1, "horizon": 0},
+            "load forecast",
+        )
+
         if mutating:
             validate_station_add(client, token)
             validate_user_status_change(client, token)
@@ -589,13 +622,9 @@ def main():
         run_smoke(host, port, account, password, args.mutating)
     except (SmokeFailure, OSError, socket.timeout) as exc:
         print(f"[FAIL] {exc}")
-        print("[SKIP] 2112 server handler not implemented")
-        print("[SKIP] 2305 server handler not implemented")
         print("\nRESULT: FAIL")
         return 1
 
-    print("[SKIP] 2112 server handler not implemented")
-    print("[SKIP] 2305 server handler not implemented")
     print("\nRESULT: PASS")
     return 0
 
