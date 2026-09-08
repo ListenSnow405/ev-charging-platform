@@ -3,7 +3,18 @@
 
 namespace ecp {
 
-ThreadPool::~ThreadPool() { stop(); }
+ThreadPool::ThreadPool()
+{
+    pthread_mutex_init(&m_mtx, nullptr);
+    pthread_cond_init(&m_cv, nullptr);
+}
+
+ThreadPool::~ThreadPool()
+{
+    stop();
+    pthread_mutex_destroy(&m_mtx);
+    pthread_cond_destroy(&m_cv);
+}
 
 void *ThreadPool::entry(void *arg)
 {
@@ -15,6 +26,12 @@ bool ThreadPool::start(int n)
 {
     if (n <= 0) return false;
     pthread_mutex_lock(&m_mtx);
+    if (m_running) {   // 已启动，禁止重复 start
+        const size_t count = m_threads.size();
+        pthread_mutex_unlock(&m_mtx);
+        LOG_E(QStringLiteral("线程池已经启动，请勿重复启动，当前工作线程数 %1").arg(count));
+        return false;
+    }
     m_running = true;
     pthread_mutex_unlock(&m_mtx);
 
@@ -57,7 +74,13 @@ void ThreadPool::loop()
         m_tasks.pop();
         pthread_mutex_unlock(&m_mtx);            // 执行任务时不持锁
 
-        task();
+        try {
+            task();
+        } catch (...) {
+            // C++ 异常无法穿越 pthread 入口（entry 是 C 函数指针），
+            // 不捕获会触发 std::terminate 杀死整个进程，故在此兜底吞掉。
+            LOG_E(QStringLiteral("线程池任务抛出异常，已忽略，线程继续运行"));
+        }
     }
 }
 
