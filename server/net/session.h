@@ -38,13 +38,16 @@ public:
     int invalidateSessions(int id, Role role);
 
     void sweepExpired();          // 清理过期会话，可由定时任务调用
-    int  count() const;
 
-    void setTtl(qint64 sec) { m_ttl = sec; }
+    // 清空全部会话，所有 token 立即失效；仅供热重载/管理场景使用，运行中勿调。
+    void clearAll();
+
+    void setTtl(qint64 sec);      // 设置 token 有效期（秒）。TODO：待接入 t_sys_config.token_ttl_sec
 
 private:
-    SessionTable() = default;
-    mutable pthread_rwlock_t   m_lock = PTHREAD_RWLOCK_INITIALIZER;
+    SessionTable();
+    ~SessionTable();
+    mutable pthread_rwlock_t   m_lock;
     QHash<QString, SessionInfo> m_map;
     qint64 m_ttl = 7200;          // t_sys_config.token_ttl_sec
 };

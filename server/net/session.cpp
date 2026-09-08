@@ -1,4 +1,5 @@
 #include "session.h"
+#include "logger.h"
 #include <QDateTime>
 #include <QRandomGenerator>
 
@@ -8,6 +9,16 @@ SessionTable &SessionTable::instance()
 {
     static SessionTable s;
     return s;
+}
+
+SessionTable::SessionTable()
+{
+    pthread_rwlock_init(&m_lock, nullptr);
+}
+
+SessionTable::~SessionTable()
+{
+    pthread_rwlock_destroy(&m_lock);
 }
 
 static QString makeToken()
@@ -80,12 +91,20 @@ void SessionTable::sweepExpired()
     pthread_rwlock_unlock(&m_lock);
 }
 
-int SessionTable::count() const
+void SessionTable::setTtl(qint64 sec)
 {
-    pthread_rwlock_rdlock(&m_lock);
-    const int n = m_map.size();
+    pthread_rwlock_wrlock(&m_lock);
+    m_ttl = sec;
     pthread_rwlock_unlock(&m_lock);
-    return n;
+}
+
+void SessionTable::clearAll()
+{
+    pthread_rwlock_wrlock(&m_lock);
+    const int n = m_map.size();
+    m_map.clear();
+    pthread_rwlock_unlock(&m_lock);
+    LOG_I(QStringLiteral("会话表已清空，清除会话数 %1").arg(n));
 }
 
 } // namespace ecp
