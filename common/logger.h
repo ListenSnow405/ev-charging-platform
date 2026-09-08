@@ -14,13 +14,14 @@
 #include <QFileInfo>
 #include <QString>
 #include <pthread.h>
+#include "time_util.h"
 
 namespace ecp {
 
 inline QString logPrefix(const char *level, const char *file, int line)
 {
     return QStringLiteral("%1 [%2] [%3] %4:%5")
-        .arg(QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss")))
+        .arg(nowStr())
         .arg(QString::fromLatin1(level))
         .arg(static_cast<quint64>(pthread_self()), 0, 16)
         .arg(QFileInfo(QString::fromLatin1(file)).fileName())
