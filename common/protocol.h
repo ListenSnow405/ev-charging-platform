@@ -59,6 +59,8 @@ enum Cmd {
     CMD_DEV_REPORT          = 9002,   // 状态与电量上报
     CMD_DEV_REBOOT          = 9003,   // [说明书] 重启指令下发
     CMD_DEV_HEARTBEAT       = 9004,   // 心跳
+    CMD_DEV_START           = 9005,   // 开始充电（累计清零）
+    CMD_DEV_STOP            = 9006,   // 结束充电（停止累计）
 };
 
 // ---- 业务枚举（与 docs/db-schema.sql 一致）--------------------------------------
