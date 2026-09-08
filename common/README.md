@@ -11,6 +11,7 @@
 | `frame.h` | 4 字节长度头 + JSON 体的编解码，**处理粘包与半包** | `docs/protocol.md` 第 2 节 |
 | `logger.h` | `LOG_I / LOG_W / LOG_E` 统一日志宏 | CLAUDE.md 第 7 节 |
 | `time_util.h` | 时间字符串格式、分↔元换算 | `docs/db-schema.sql` 表头说明 |
+| `app_path.h` | 资源路径解析（定位项目根、解析 `config/` 与数据库路径） | — |
 | `common.pri` | qmake 引入片段 | — |
 
 ## 接入方式
@@ -39,7 +40,8 @@ m_parser.append(socket->readAll());   // 有多少喂多少：半包、整包、
 QByteArray one;
 while (m_parser.next(one)) {
     QJsonObject env;
-    if (!ecp::parseEnvelope(one, env)) { /* 回 ERR_FRAME */ continue; }
+    // 客户端收的是响应(Response)；服务端收请求则传 ecp::EnvelopeType::Request
+    if (!ecp::parseEnvelope(one, env, ecp::EnvelopeType::Response)) { /* 回 ERR_FRAME */ continue; }
     // 按 env["cmd"] 分发
 }
 if (m_parser.overflow()) { /* 长度头越界：记日志并关闭连接 */ }
