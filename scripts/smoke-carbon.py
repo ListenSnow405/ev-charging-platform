@@ -38,10 +38,15 @@ CMD_ADMIN_LOGIN = 2001
 CMD_EXT_CARBON_METRIC = 3740
 CMD_EXT_FACTOR_LIST = 3741
 CMD_EXT_FACTOR_SET = 3742
+CMD_EXT_REPORT_GEN = 3743
+CMD_EXT_REPORT_EXPORT = 3744
 CMD_EXT_CARBON_AGGREGATE = 3745
+CMD_EXT_REPORT_LIST = 3746
 
 ERR_CARBON_NO_FACTOR = 6701
 ERR_CARBON_FACTOR_OVERLAP = 6702
+ERR_CARBON_REPORT_STALE = 6703
+ERR_CARBON_REPORT_NOT_FOUND = 6704
 
 DISCLAIMER = "课程项目估算，非认证碳数据，不可用于碳交易或监管申报"
 ALGO_VERSION = "carbon-v1"
@@ -280,6 +285,94 @@ def validate_factor_set_write(client, token, existing):
     print("[PASS] 3742 相邻区间：[2027,2028) 与 [2028,∞) 不判重叠，正常写入")
 
 
+def validate_report_guards(client, token):
+    """3744/3746 的只读检查 —— 不生成任何报告，不写库。"""
+    data = expect_ok(client.request(CMD_EXT_REPORT_LIST, token, {}), CMD_EXT_REPORT_LIST)
+    rows = data["list"]
+    require(isinstance(rows, list), CMD_EXT_REPORT_LIST, "list 为数组", type(rows).__name__)
+    for row in rows:
+        require(row["status"] in ("GENERATING", "READY", "FAILED", "STALE"),
+                CMD_EXT_REPORT_LIST, "status 落在四种取值内", row["status"])
+        # 报告是快照，四项分时之和必须仍然守恒
+        parts = (row["peakKwhX100"] + row["flatKwhX100"]
+                 + row["valleyKwhX100"] + row["unallocKwhX100"])
+        require(parts == row["totalKwhX100"], CMD_EXT_REPORT_LIST,
+                f"报告 {row['reportId']} 分时守恒", f"{parts} != {row['totalKwhX100']}")
+    stale = [r for r in rows if r["status"] == "STALE"]
+    print(f"[PASS] 3746 报告列表：{len(rows)} 份（其中 {len(stale)} 份已过期），分时守恒")
+
+    bad = [
+        ({}, "空入参"),
+        ({"reportId": 1}, "缺 format"),
+        ({"reportId": 1, "format": "pdf"}, "不支持的格式"),
+        ({"reportId": 0, "format": "csv"}, "reportId 非正"),
+    ]
+    for payload, name in bad:
+        response = client.request(CMD_EXT_REPORT_EXPORT, token, payload)
+        require(response["code"] == ERR_PARAM, CMD_EXT_REPORT_EXPORT,
+                f"{name} → ERR_PARAM({ERR_PARAM})", response["code"])
+    response = client.request(CMD_EXT_REPORT_EXPORT, token, {"reportId": 999999, "format": "csv"})
+    require(response["code"] == ERR_CARBON_REPORT_NOT_FOUND, CMD_EXT_REPORT_EXPORT,
+            f"不存在的报告 → {ERR_CARBON_REPORT_NOT_FOUND}", response["code"])
+    print(f"[PASS] 3744 入参校验：{len(bad)} 种非法入参被拒，不存在的报告 → "
+          f"{ERR_CARBON_REPORT_NOT_FOUND}")
+
+    # scope 与 stationId 必须自洽，否则表里会出现解释不清的行
+    for payload, name in [
+        ({"scope": "ALL", "stationId": 1, "dateFrom": "2026-08-01", "dateTo": "2026-08-02"},
+         "scope=ALL 却带站号"),
+        ({"scope": "STATION", "stationId": 0, "dateFrom": "2026-08-01", "dateTo": "2026-08-02"},
+         "scope=STATION 却没站号"),
+        ({"scope": "EVERYTHING", "stationId": 0, "dateFrom": "2026-08-01", "dateTo": "2026-08-02"},
+         "未知 scope"),
+    ]:
+        response = client.request(CMD_EXT_REPORT_GEN, token, payload)
+        require(response["code"] == ERR_PARAM, CMD_EXT_REPORT_GEN,
+                f"{name} → ERR_PARAM({ERR_PARAM})", response["code"])
+    print("[PASS] 3743 入参校验：scope 与 stationId 必须自洽")
+
+
+def validate_report_write(client, token, date_from, date_to):
+    """真正生成并导出一份报告（仅 --mutating）。"""
+    req_id = f"smoke-{date_from}-{date_to}"
+    args = {"scope": "ALL", "stationId": 0, "dateFrom": date_from, "dateTo": date_to,
+            "reqId": req_id}
+    gen = expect_ok(client.request(CMD_EXT_REPORT_GEN, token, args), CMD_EXT_REPORT_GEN)
+    require(gen["status"] == "READY", CMD_EXT_REPORT_GEN, "新报告状态 READY", gen["status"])
+    report_id = gen["reportId"]
+    print(f"[PASS] 3743 生成报告：id={report_id} v{gen['version']} {gen['status']}")
+
+    again = expect_ok(client.request(CMD_EXT_REPORT_GEN, token, args), CMD_EXT_REPORT_GEN)
+    require(again["created"] is False and again["reportId"] == report_id,
+            CMD_EXT_REPORT_GEN, "同 reqId 幂等返回原报告", again)
+    print("[PASS] 3743 写幂等：同 reqId 重发未新建版本")
+
+    # 报告快照必须与 3740 的当前汇总一致（刚生成，两者同源）
+    metric = expect_ok(client.request(CMD_EXT_CARBON_METRIC, token,
+                                      {"stationId": 0, "dateFrom": date_from, "dateTo": date_to}),
+                       CMD_EXT_CARBON_METRIC)
+    rows = expect_ok(client.request(CMD_EXT_REPORT_LIST, token, {}), CMD_EXT_REPORT_LIST)["list"]
+    row = next(r for r in rows if r["reportId"] == report_id)
+    for key in ("totalKwhX100", "peakKwhX100", "flatKwhX100", "valleyKwhX100", "emissionG"):
+        require(row[key] == metric["totals"][key], CMD_EXT_REPORT_GEN,
+                f"报告快照 {key} == 3740 当前汇总 {metric['totals'][key]}", row[key])
+    print("[PASS] 报告快照与 3740 当前汇总逐格一致")
+
+    for fmt, marker in (("csv", "指标,数值,单位"), ("html", "<!doctype html>")):
+        exp = expect_ok(client.request(CMD_EXT_REPORT_EXPORT, token,
+                                       {"reportId": report_id, "format": fmt}),
+                        CMD_EXT_REPORT_EXPORT)
+        require(exp["stale"] is False, CMD_EXT_REPORT_EXPORT, "READY 报告导出不标过期", exp)
+        path = Path(exp["absPath"])
+        require(path.is_file(), CMD_EXT_REPORT_EXPORT, f"导出文件已落盘 {path}", "文件不存在")
+        text = path.read_text(encoding="utf-8-sig")
+        require(marker in text, CMD_EXT_REPORT_EXPORT, f"{fmt} 内容含 {marker!r}", "未找到")
+        # 免责声明与口径标注三处一致：页眉、导出文件、快照 JSON
+        require(DISCLAIMER in text, CMD_EXT_REPORT_EXPORT, "导出含免责声明", "未找到")
+        require("固定时段" in text, CMD_EXT_REPORT_EXPORT, "导出标注固定时段口径", "未找到")
+        print(f"[PASS] 3744 导出 {fmt}：{exp['path']}（含免责声明与口径标注）")
+
+
 def validate_empty_range(client, token):
     """空日期范围必须返回空结果而不是崩溃或伪造 100% 完整度。"""
     data = expect_ok(client.request(CMD_EXT_CARBON_METRIC, token,
@@ -428,6 +521,7 @@ def run_smoke(host, port, account, password, args):
         if args.mutating:
             validate_factor_set_write(client, token, factors)
         validate_empty_range(client, token)
+        validate_report_guards(client, token)
 
         print(f"\n查询范围：{date_from} ~ {date_to}")
         metric = validate_idempotent(client, token, date_from, date_to)
@@ -437,6 +531,10 @@ def run_smoke(host, port, account, password, args):
             validate_against_db(args.db, metric, date_from, date_to)
         else:
             print(f"[SKIP] 未找到 {args.db}，跳过 SQLite 对拍")
+        if args.mutating:
+            validate_report_write(client, token, date_from, date_to)
+        else:
+            print("[SKIP] 3743/3744 写入测试需 --mutating（会生成报告行与导出文件）")
 
         totals = metric["totals"]
         print(f"\n汇总：电量 {totals['totalKwhX100'] / 100:.2f} 度　"

@@ -98,6 +98,10 @@ private:
     void requestMetric();
     void requestFactorList();
     void requestAggregate();
+    void requestReportList();
+    void requestReportGen();
+    void requestReportExport(const QString &format, bool allowStale);
+    int  selectedReportId() const;
     void openFactorDialog();
     void submitFactor(const CarbonFactorForm &form);
 
@@ -108,6 +112,9 @@ private:
     void handleFactorListResponse(int code, const QString &msg, const QJsonObject &data);
     void handleAggregateResponse(int code, const QString &msg, const QJsonObject &data);
     void handleFactorSetResponse(int code, const QString &msg, const QJsonObject &data);
+    void handleReportListResponse(int code, const QString &msg, const QJsonObject &data);
+    void handleReportGenResponse(int code, const QString &msg, const QJsonObject &data);
+    void handleReportExportResponse(int code, const QString &msg, const QJsonObject &data);
 
     void updateStatusLabel();
     void clearMetrics();
@@ -128,6 +135,9 @@ private:
     QPushButton *m_queryButton = nullptr;
     QPushButton *m_aggregateButton = nullptr;
     QPushButton *m_addFactorButton = nullptr;
+    QPushButton *m_genReportButton = nullptr;
+    QPushButton *m_exportCsvButton = nullptr;
+    QPushButton *m_exportHtmlButton = nullptr;
 
     QLabel *m_totalKwh = nullptr;
     QLabel *m_emission = nullptr;
@@ -138,6 +148,7 @@ private:
     QTableWidget *m_shareTable = nullptr;     // 峰平谷构成
     QTableWidget *m_factorTable = nullptr;    // 排放因子版本
     QTableWidget *m_trendTable = nullptr;     // QtCharts 缺席时的降级表格
+    QTableWidget *m_reportTable = nullptr;    // 已生成的报告版本，含 STALE 角标
 
 #ifdef HAVE_CHARTS
     QChart        *m_trendChart = nullptr;
@@ -151,6 +162,9 @@ private:
     QTimer *m_aggregateTimer = nullptr;
     QTimer *m_stationTimer = nullptr;
     QTimer *m_factorSetTimer = nullptr;
+    QTimer *m_reportListTimer = nullptr;
+    QTimer *m_reportGenTimer = nullptr;
+    QTimer *m_reportExportTimer = nullptr;
 
     LoadState m_metricState = LoadState::Idle;
     LoadState m_factorState = LoadState::Idle;
@@ -163,4 +177,12 @@ private:
     int m_factorSeq = -1;
     int m_aggregateSeq = -1;
     int m_factorSetSeq = -1;
+    int m_reportListSeq = -1;
+    int m_reportGenSeq = -1;
+    int m_reportExportSeq = -1;
+
+    // 收到 6703 后记住用户本来要导的格式，确认过期后原样重发（带 allowStale）
+    QString m_pendingExportFormat;
+    // 刚生成的报告号：列表刷新后要选中它，否则用户紧接着点「导出」导的是上一份
+    int m_selectReportId = -1;
 };
