@@ -15,8 +15,8 @@
 //    本文件只负责取数、循环、落库 —— 不要在这里就地再写一遍算式，
 //    那样夹具就管不到它了，两边迟早分叉。
 //
-//  实施进度：S1 底座 → S2 计算核心 → **S3 聚合与查询（本文件当前状态）**
-//            → S4 管理端与因子管理 → S5 报告导出与大屏
+//  实施进度：S1 底座 → S2 计算核心 → S3 聚合与查询
+//            → **S4 因子管理（本文件当前状态）** → S5 报告导出与大屏
 // -----------------------------------------------------------------------------
 #include <QDate>
 #include <QDateTime>
@@ -563,6 +563,129 @@ static int handleCarbonAggregate(const Request &req, QJsonObject &out)
 }
 
 // -----------------------------------------------------------------------------
+//  3742 CMD_EXT_FACTOR_SET  新增排放因子版本
+//
+//  ⚠ 因子版本一经写入即**不可变**：同一 (region, version) 再次提交，
+//    内容相同 → 幂等返回原 factorId；内容不同 → ERR_PARAM，要求发新 version。
+//    理由是不变量 6 —— t_carbon_daily 与 t_carbon_report 都靠 factor_version
+//    追溯当时用的是哪个数。允许就地改内容，等于让所有历史结果的出处凭空变样。
+//    因此本命令只「新增版本」，不提供修改与启用/停用。
+//
+//  重叠校验只在**启用中**的因子之间做（停用的不参与 pickFactor，重叠也不产生歧义）。
+//  由于本命令不提供重新启用，不存在「先停用再启用造成重叠」的隐患。
+//
+//  写入后不必手动重算：新因子版本在 t_carbon_daily 里没有对应行，
+//  下一次 3740 的懒聚合判据自然认定「没算过」并重算，旧版本行原样保留。
+// -----------------------------------------------------------------------------
+static int handleFactorSet(const Request &req, QJsonObject &out)
+{
+    if (req.session.role != ROLE_ADMIN) return ERR_NO_PERMISSION;
+
+    const QString region  = req.data.value("region").toString().trimmed();
+    const QString version = req.data.value("version").toString().trimmed();
+    const QString source  = req.data.value("source").toString().trimmed();
+    if (region.isEmpty() || version.isEmpty()) return ERR_PARAM;
+    // 08 文档第 9 节把「排放因子来源不可靠」列为风险：没有来源说明的因子不许入库
+    if (source.isEmpty()) return ERR_PARAM;
+
+    const QJsonValue gValue = req.data.value("factorGPerKwh");
+    if (!gValue.isDouble()) return ERR_PARAM;
+    const qint64 gPerKwh = gValue.toInteger(0);
+    if (gPerKwh <= 0) return ERR_PARAM;              // 与建表 CHECK 一致
+
+    const QString effectFrom = req.data.value("effectFrom").toString().trimmed();
+    const QString effectTo   = req.data.value("effectTo").toString().trimmed();
+    // 裁决 D6：生效边界必须对齐自然日 00:00:00，否则一天会横跨两个因子版本
+    if (!isDayAlignedBoundary(effectFrom)) return ERR_PARAM;
+    if (!effectTo.isEmpty()) {
+        if (!isDayAlignedBoundary(effectTo)) return ERR_PARAM;
+        if (effectTo <= effectFrom) return ERR_PARAM;   // 与建表 CHECK 一致
+    }
+
+    QSqlDatabase db = threadDb();
+    if (!db.isOpen()) {
+        LOG_E(QStringLiteral("新增排放因子获取数据库连接失败: %1").arg(db.lastError().text()));
+        return ERR_INTERNAL;
+    }
+
+    // ---- 幂等：(region, version) 是写幂等键（建表 UNIQUE），不另设 req_id 列 ----
+    QSqlQuery dup(db);
+    dup.prepare(QStringLiteral(
+        "SELECT factor_id, effect_from, effect_to, factor_g_per_kwh, source"
+        " FROM t_carbon_factor WHERE region = ? AND version = ?"));
+    dup.addBindValue(region);
+    dup.addBindValue(version);
+    if (!dup.exec()) {
+        LOG_E(QStringLiteral("查询因子重名失败: %1").arg(dup.lastError().text()));
+        return ERR_INTERNAL;
+    }
+    if (dup.next()) {
+        const QString oldTo = dup.value(2).isNull() ? QString() : dup.value(2).toString();
+        const bool same = dup.value(1).toString() == effectFrom
+                       && oldTo == effectTo
+                       && dup.value(3).toLongLong() == gPerKwh
+                       && dup.value(4).toString() == source;
+        if (!same) {
+            LOG_W(QStringLiteral("因子 %1/%2 已存在且内容不同，拒绝就地修改（请发新 version）")
+                      .arg(region, version));
+            return ERR_PARAM;
+        }
+        out["factorId"] = dup.value(0).toInt();
+        out["created"]  = false;                     // 重复提交，原样返回首次结果
+        LOG_I(QStringLiteral("因子 %1/%2 重复提交，幂等返回 factorId=%3")
+                  .arg(region, version).arg(dup.value(0).toInt()));
+        return ERR_OK;
+    }
+
+    // ---- 生效区间重叠校验（SQLite 表约束表达不了区间重叠，只能在这里做）----
+    QVector<Factor> existing;
+    if (!loadFactors(db, &existing)) return ERR_INTERNAL;
+
+    Factor incoming;
+    incoming.region     = region;
+    incoming.version    = version;
+    incoming.effectFrom = effectFrom;
+    incoming.effectTo   = effectTo;
+    incoming.gPerKwh    = gPerKwh;
+    incoming.source     = source;
+    if (factorOverlaps(existing, incoming)) {
+        LOG_W(QStringLiteral("因子 %1/%2 [%3, %4) %5")
+                  .arg(region, version, effectFrom,
+                       effectTo.isEmpty() ? QStringLiteral("∞") : effectTo,
+                       errMsgExt(ERR_CARBON_FACTOR_OVERLAP)));
+        return ERR_CARBON_FACTOR_OVERLAP;
+    }
+
+    QSqlQuery ins(db);
+    ins.prepare(QStringLiteral(
+        "INSERT INTO t_carbon_factor"
+        " (region, version, effect_from, effect_to, factor_g_per_kwh, source, enabled, create_time)"
+        " VALUES (?,?,?,?,?,?,1,?)"));
+    ins.addBindValue(region);
+    ins.addBindValue(version);
+    ins.addBindValue(effectFrom);
+    // 空串存 NULL：建表用 effect_to IS NULL 表示右开无穷，存空串会让区间判断全线失灵
+    ins.addBindValue(effectTo.isEmpty() ? QVariant(QMetaType(QMetaType::QString)) : QVariant(effectTo));
+    ins.addBindValue(gPerKwh);
+    ins.addBindValue(source);
+    ins.addBindValue(nowText());
+    if (!ins.exec()) {
+        LOG_E(QStringLiteral("写入排放因子失败: %1").arg(ins.lastError().text()));
+        return ERR_INTERNAL;
+    }
+
+    const int factorId = ins.lastInsertId().toInt();
+    out["factorId"] = factorId;
+    out["created"]  = true;
+    LOG_I(QStringLiteral("新增排放因子 %1/%2 = %3 g/度，生效 [%4, %5)，factorId=%6。"
+                         "受影响日期将在下次 3740 查询时自动重算，旧版本行保留")
+              .arg(region, version).arg(gPerKwh)
+              .arg(effectFrom, effectTo.isEmpty() ? QStringLiteral("∞") : effectTo)
+              .arg(factorId));
+    return ERR_OK;
+}
+
+// -----------------------------------------------------------------------------
 //  3741 CMD_EXT_FACTOR_LIST  排放因子版本列表
 //
 //  纯只读，无计算。S1 用它把整条链路先打通：扩展头文件、鉴权门、功能开关、
@@ -616,10 +739,12 @@ void registerExt08CarbonService()
 {
     Dispatcher::instance().registerHandler(CMD_EXT_CARBON_METRIC,    handleCarbonMetric);
     Dispatcher::instance().registerHandler(CMD_EXT_FACTOR_LIST,      handleFactorList);
+    Dispatcher::instance().registerHandler(CMD_EXT_FACTOR_SET,       handleFactorSet);
     Dispatcher::instance().registerHandler(CMD_EXT_CARBON_AGGREGATE, handleCarbonAggregate);
 
     LOG_I(QStringLiteral("扩展模块 08 碳减排与能源报告已注册: 3740 日指标查询、"
-                         "3741 排放因子列表、3745 显式重算（3742/3743/3744/3746 待 S4–S5 落地）"));
+                         "3741 因子列表、3742 新增因子、3745 显式重算"
+                         "（3743/3744/3746 报告与导出待 S5 落地）"));
 }
 
 } // namespace ecp

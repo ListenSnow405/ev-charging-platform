@@ -5,6 +5,7 @@
 #include "pile_page.h"
 #include "station_page.h"
 #include "user_page.h"
+#include "ext_08_carbon_page.h"
 #include "error_code.h"
 #include <QHBoxLayout>
 
@@ -18,7 +19,8 @@ MainWindow::MainWindow(NetClient *net, QWidget *parent) : QWidget(parent), m_net
     // [说明书] 1.4 管理端六大功能
     m_nav->addItems({ QStringLiteral("数据总览"), QStringLiteral("电站管理"),
                       QStringLiteral("电桩管理"), QStringLiteral("订单管理"),
-                      QStringLiteral("用户管理"), QStringLiteral("负荷预测") });
+                      QStringLiteral("用户管理"), QStringLiteral("负荷预测"),
+                      QStringLiteral("碳排放报告") });   // 扩展模块 08（L5）
 
     m_pages = new QStackedWidget(this);
     m_pages->addWidget(new OverviewPage(m_net, m_pages));
@@ -27,6 +29,7 @@ MainWindow::MainWindow(NetClient *net, QWidget *parent) : QWidget(parent), m_net
     m_pages->addWidget(new OrderPage(m_net, m_pages));
     m_pages->addWidget(new UserPage(m_net, m_pages));
     m_pages->addWidget(new ForecastPage(m_net, m_pages));
+    m_pages->addWidget(new Ext08CarbonPage(m_net, m_pages));   // 扩展模块 08（L5）
 
     connect(m_nav, &QListWidget::currentRowChanged, m_pages, &QStackedWidget::setCurrentIndex);
     m_nav->setCurrentRow(0);

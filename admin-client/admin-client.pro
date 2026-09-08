@@ -26,7 +26,7 @@ INCLUDEPATH += $$PWD
 
 SOURCES += main.cpp net_client.cpp login_window.cpp main_window.cpp overview_page.cpp \
            station_page.cpp add_station_dialog.cpp pile_page.cpp user_page.cpp order_page.cpp \
-           forecast_page.cpp
+           forecast_page.cpp ext_08_carbon_page.cpp
 HEADERS +=          net_client.h   login_window.h   main_window.h   overview_page.h \
                    station_page.h add_station_dialog.h pile_page.h user_page.h order_page.h \
-                   forecast_page.h
+                   forecast_page.h ext_08_carbon_page.h

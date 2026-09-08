@@ -37,7 +37,11 @@ ERR_NOT_LOGIN = 1002
 CMD_ADMIN_LOGIN = 2001
 CMD_EXT_CARBON_METRIC = 3740
 CMD_EXT_FACTOR_LIST = 3741
+CMD_EXT_FACTOR_SET = 3742
 CMD_EXT_CARBON_AGGREGATE = 3745
+
+ERR_CARBON_NO_FACTOR = 6701
+ERR_CARBON_FACTOR_OVERLAP = 6702
 
 DISCLAIMER = "课程项目估算，非认证碳数据，不可用于碳交易或监管申报"
 ALGO_VERSION = "carbon-v1"
@@ -195,6 +199,87 @@ def validate_factor_list(client, token):
     return rows
 
 
+def validate_no_factor(client, token):
+    """2000-01-01 之前没有任何因子生效 → 必须报 6701，而不是编一个排放量出来。"""
+    response = client.request(CMD_EXT_CARBON_METRIC, token,
+                              {"stationId": 0, "dateFrom": "1999-12-01", "dateTo": "1999-12-05"})
+    require(response["code"] == ERR_CARBON_NO_FACTOR, CMD_EXT_CARBON_METRIC,
+            f"演示因子生效期之前 → ERR_CARBON_NO_FACTOR({ERR_CARBON_NO_FACTOR})", response["code"])
+    print(f"[PASS] 无因子时段：1999-12 查询 → {ERR_CARBON_NO_FACTOR}（不编造排放量）")
+
+
+def validate_factor_set_guards(client, token, existing):
+    """3742 的拒绝路径 —— 全部在写入前返回，不会改动 t_carbon_factor。"""
+    demo = existing[0]
+    bad = [
+        ({}, "空入参"),
+        ({"region": "", "version": "v", "source": "s", "factorGPerKwh": 500,
+          "effectFrom": "2027-01-01 00:00:00"}, "region 为空"),
+        ({"region": "测试区", "version": "v", "source": "", "factorGPerKwh": 500,
+          "effectFrom": "2027-01-01 00:00:00"}, "来源说明为空（08 第 9 节风险项）"),
+        ({"region": "测试区", "version": "v", "source": "s", "factorGPerKwh": 0,
+          "effectFrom": "2027-01-01 00:00:00"}, "因子非正"),
+        ({"region": "测试区", "version": "v", "source": "s", "factorGPerKwh": 500,
+          "effectFrom": "2027-01-01 12:00:00"}, "生效边界未对齐自然日（裁决 D6）"),
+        ({"region": "测试区", "version": "v", "source": "s", "factorGPerKwh": 500,
+          "effectFrom": "2027-01-01 00:00:00", "effectTo": "2026-01-01 00:00:00"}, "生效止早于生效起"),
+        ({"region": demo["region"], "version": demo["version"], "source": "改过的来源",
+          "factorGPerKwh": demo["factorGPerKwh"], "effectFrom": demo["effectFrom"]},
+         "同版本改内容（因子版本不可变）"),
+    ]
+    for data, name in bad:
+        response = client.request(CMD_EXT_FACTOR_SET, token, data)
+        require(response["code"] == ERR_PARAM, CMD_EXT_FACTOR_SET,
+                f"{name} → ERR_PARAM({ERR_PARAM})", response["code"])
+    print(f"[PASS] 3742 入参校验：{len(bad)} 种非法入参全部被拒")
+
+    # 与演示因子 [2000-01-01, ∞) 相交 → 6702
+    response = client.request(CMD_EXT_FACTOR_SET, token, {
+        "region": demo["region"], "version": "overlap-probe", "source": "重叠探针",
+        "factorGPerKwh": 500, "effectFrom": "2026-01-01 00:00:00"})
+    require(response["code"] == ERR_CARBON_FACTOR_OVERLAP, CMD_EXT_FACTOR_SET,
+            f"生效区间重叠 → ERR_CARBON_FACTOR_OVERLAP({ERR_CARBON_FACTOR_OVERLAP})", response["code"])
+    print(f"[PASS] 3742 重叠拒绝：与演示因子相交 → {ERR_CARBON_FACTOR_OVERLAP}")
+
+    # 原样重提演示因子 → 幂等命中，不新建
+    data = expect_ok(client.request(CMD_EXT_FACTOR_SET, token, {
+        "region": demo["region"], "version": demo["version"], "source": demo["source"],
+        "factorGPerKwh": demo["factorGPerKwh"], "effectFrom": demo["effectFrom"],
+        "effectTo": demo["effectTo"]}), CMD_EXT_FACTOR_SET)
+    require(data["created"] is False, CMD_EXT_FACTOR_SET, "重复提交 created == False", data["created"])
+    require(data["factorId"] == demo["factorId"], CMD_EXT_FACTOR_SET,
+            f"幂等返回原 factorId {demo['factorId']}", data["factorId"])
+    after = expect_ok(client.request(CMD_EXT_FACTOR_LIST, token, {}), CMD_EXT_FACTOR_LIST)["list"]
+    require(len(after) == len(existing), CMD_EXT_FACTOR_LIST,
+            f"因子条数不变 {len(existing)}", len(after))
+    print("[PASS] 3742 幂等：原样重提演示因子 → created=False，未新增行")
+
+
+def validate_factor_set_write(client, token, existing):
+    """真正写入一个新因子版本（仅 --mutating）。生效期紧邻演示因子右端，不重叠。"""
+    before = len(existing)
+    payload = {"region": "smoke-测试电网", "version": "smoke-v1",
+               "source": "smoke 测试写入的因子，非真实数据", "factorGPerKwh": 500,
+               "effectFrom": "2027-01-01 00:00:00", "effectTo": "2028-01-01 00:00:00"}
+    data = expect_ok(client.request(CMD_EXT_FACTOR_SET, token, payload), CMD_EXT_FACTOR_SET)
+    require(data["created"] is True, CMD_EXT_FACTOR_SET, "首次写入 created == True", data["created"])
+    print(f"[PASS] 3742 新增因子：factorId={data['factorId']}")
+
+    again = expect_ok(client.request(CMD_EXT_FACTOR_SET, token, payload), CMD_EXT_FACTOR_SET)
+    require(again["created"] is False and again["factorId"] == data["factorId"],
+            CMD_EXT_FACTOR_SET, "再发一次 → 幂等命中同一 factorId", again)
+    rows = expect_ok(client.request(CMD_EXT_FACTOR_LIST, token, {}), CMD_EXT_FACTOR_LIST)["list"]
+    require(len(rows) == before + 1, CMD_EXT_FACTOR_LIST, f"因子条数 {before} → {before + 1}", len(rows))
+    print("[PASS] 3742 写幂等：重发同一因子未产生第二行")
+
+    # 相邻区间 [2028-01-01, ∞) 不算重叠，必须放行
+    ok = expect_ok(client.request(CMD_EXT_FACTOR_SET, token, {
+        "region": "smoke-测试电网", "version": "smoke-v2", "source": "smoke 相邻区间",
+        "factorGPerKwh": 480, "effectFrom": "2028-01-01 00:00:00"}), CMD_EXT_FACTOR_SET)
+    require(ok["created"] is True, CMD_EXT_FACTOR_SET, "[a,b) 紧邻 [b,∞) 放行", ok)
+    print("[PASS] 3742 相邻区间：[2027,2028) 与 [2028,∞) 不判重叠，正常写入")
+
+
 def validate_empty_range(client, token):
     """空日期范围必须返回空结果而不是崩溃或伪造 100% 完整度。"""
     data = expect_ok(client.request(CMD_EXT_CARBON_METRIC, token,
@@ -309,6 +394,8 @@ def parse_args():
                         help="SQLite 路径，用于对拍与推断日期范围（只读打开）")
     parser.add_argument("--date-from", help="查询起始日，默认取库中最早结算日")
     parser.add_argument("--date-to", help="查询结束日，默认取库中最晚结算日")
+    parser.add_argument("--mutating", action="store_true",
+                        help="在只读检查全部通过后，额外跑 3742 真实写入测试（会新增因子行）")
     return parser.parse_args()
 
 
@@ -335,7 +422,11 @@ def run_smoke(host, port, account, password, args):
         print("[PASS] 2001 管理员登录：已获取 token")
 
         validate_param_guard(client, token)
-        validate_factor_list(client, token)
+        factors = validate_factor_list(client, token)
+        validate_no_factor(client, token)
+        validate_factor_set_guards(client, token, factors)
+        if args.mutating:
+            validate_factor_set_write(client, token, factors)
         validate_empty_range(client, token)
 
         print(f"\n查询范围：{date_from} ~ {date_to}")
