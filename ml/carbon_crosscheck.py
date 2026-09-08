@@ -190,7 +190,14 @@ def main():
 
     # ---- 逐格比对 ----
     bad = 0
+    skipped = 0
     for (sid, stat_date, tot, pk, fl, va, un, cnt, em, fver) in rows:
+        # 换因子后旧版本行会被保留（不变量 6）。它们是当时那一版算出来的历史结果，
+        # 拿现在的因子去对当然对不上 —— 跳过，但要报出条数，不能悄悄丢掉。
+        cur_version, _ = pick_factor(factors, f"{stat_date} 00:00:00")
+        if cur_version is not None and fver != cur_version:
+            skipped += 1
+            continue
         want = acc.get((sid, stat_date))
         if want is None:
             bad += 1
@@ -214,11 +221,13 @@ def main():
                       f"          独算 总{exp[0]} 峰{exp[1]} 平{exp[2]} 谷{exp[3]}"
                       f" 未分摊{exp[4]} 单{exp[5]} 排放{exp[6]}")
 
-    missing = len(acc) - (len(rows) - bad)
+    missing = len(acc) - (len(rows) - skipped - bad)
     if bad > MAX_REPORTED:
         print(f"  …另有 {bad - MAX_REPORTED} 行差异未列出")
 
-    print(f"\n比对 {len(rows)} 行，不一致 {bad} 行")
+    print(f"\n比对 {len(rows) - skipped} 行，不一致 {bad} 行")
+    if skipped:
+        print(f"（另跳过 {skipped} 行被取代的旧因子版本数据，保留在库里用于追溯）")
     if bad == 0 and missing > 0:
         # 库里少了一些（站, 日）组合。可能是这些日期还没查过（懒聚合尚未触发），
         # 不算错，但要说出来，免得「零不一致」被当成「全都算过了」

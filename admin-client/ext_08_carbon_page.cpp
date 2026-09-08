@@ -995,7 +995,15 @@ void Ext08CarbonPage::handleMetricResponse(int code, const QString &msg,
 
     m_metricState = LoadState::Success;
     m_metricError.clear();
+
+    // 查询本身会触发懒聚合：数据变了、或者因子换了版本，服务端就会就地重算，
+    // 并把受影响的 READY 报告置为 STALE。**必须跟着刷新报告列表** ——
+    // 否则库里已经是 STALE，界面上还挂着「可用」，用户会拿过期报告当最新的用。
+    const int rebuilt = data.value(QStringLiteral("rebuiltDays")).toInt();
+    if (rebuilt > 0)
+        m_actionNote = QStringLiteral("本次查询顺带重算了 %1 天").arg(rebuilt);
     updateStatusLabel();
+    requestReportList();
 }
 
 // 数字与出处一起清空：任何时候界面上的数字都必须有配套的因子版本与截止时刻
@@ -1135,12 +1143,24 @@ void Ext08CarbonPage::handleFactorSetResponse(int code, const QString &msg,
         QMessageBox::warning(this, QStringLiteral("新增因子失败"), describeError(code, msg));
         return;
     }
-    m_actionNote = data.value(QStringLiteral("created")).toBool()
-        ? QStringLiteral("已新增排放因子（factorId=%1）。受影响日期将在下次查询时自动重算")
-              .arg(data.value(QStringLiteral("factorId")).toInt())
-        : QStringLiteral("该因子版本已存在，内容一致，未重复写入");
+    const bool created = data.value(QStringLiteral("created")).toBool();
+    const int superseded = data.value(QStringLiteral("supersededFactorId")).toInt();
+    if (!created) {
+        m_actionNote = QStringLiteral("该因子版本已存在，内容一致，未重复写入");
+    } else if (superseded > 0) {
+        // 接续会改变新起点之后所有日期的结果，用户必须知道自己刚做了什么
+        m_actionNote = QStringLiteral("已新增排放因子（factorId=%1），并接续闭合了旧因子 %2。"
+                                      "新生效时刻之后的日期将改用新因子重算")
+                           .arg(data.value(QStringLiteral("factorId")).toInt()).arg(superseded);
+    } else {
+        m_actionNote = QStringLiteral("已新增排放因子（factorId=%1）")
+                           .arg(data.value(QStringLiteral("factorId")).toInt());
+    }
     updateStatusLabel();
     requestFactorList();
+    // 主动重查一次：懒聚合会就地重算受影响日期，报告的 STALE 角标随之出现。
+    // 不这样做的话，用户得自己想到再点一次「查询」才能看见后果。
+    if (created) requestMetric();
 }
 
 void Ext08CarbonPage::updateStatusLabel()

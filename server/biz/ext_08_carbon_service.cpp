@@ -647,6 +647,9 @@ static int handleCarbonMetric(const Request &req, QJsonObject &out)
     // 模块 05 分时电价未落地，峰平谷用固定时段。页面与导出**必须**照此标注口径
     out["tariffMode"]    = QStringLiteral("FIXED_RANGE");
     out["disclaimer"]    = disclaimerText();
+    // 本次查询顺带重算了几天。页面据此提示用户「数字刚被刷新过」，
+    // 也是懒聚合唯一对外可见的信号 —— 否则重算发生了却无人知晓。
+    out["rebuiltDays"]   = daysRebuilt;
     return ERR_OK;
 }
 

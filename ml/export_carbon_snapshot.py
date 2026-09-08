@@ -14,6 +14,10 @@ ml/export_carbon_snapshot.py  —  碳排放大屏快照导出　归属 L5
 ⚠ 快照只包含 t_carbon_daily 里**已经算过**的日期。某个日期从没被查询过（懒聚合未触发）
   就不会出现在这里 —— 这不是 bug，先在管理端查一次或调 3745 即可。
 
+⚠ 同一天可能存在**多个因子版本的行**：换因子后旧版本行会被保留（不变量 6，用于追溯）。
+  必须按日挑出「当前生效的那一版」，否则会把新旧两版加在一起，数字凭空翻倍。
+  服务端 loadRangeTotals() 就是这么做的，这里必须与它一致。
+
 用法：python3 ml/export_carbon_snapshot.py [charging.db] [dataviz/data/carbon.json]
 """
 import json
@@ -28,9 +32,26 @@ OUT = Path(sys.argv[2] if len(sys.argv) > 2 else "dataviz/data/carbon.json")
 FMT = "%Y-%m-%d %H:%M:%S"
 POLL_INTERVAL_SEC = 30
 ALGO_VERSION = "carbon-v1"
+FMT_DATE = "%Y-%m-%d"
 TREND_DAYS = 30                       # 趋势图回看窗口
 # 三处逐字一致：管理端页眉、服务端导出文件头、这里（实现规划第 2 节）
 DISCLAIMER = "课程项目估算，非认证碳数据，不可用于碳交易或监管申报"
+
+
+def pick_factor_version(factors, date_text):
+    """该日归哪个因子版本管。区间左闭右开，effect_to 为 NULL 表示右开无穷。
+
+    与 server/biz/ext_08_carbon_calc.cpp 的 pickFactor() 同口径：按 effect_from 倒序
+    取首个命中者，**不看 region**（全系统只有一条因子时间线，region 只是标签）。
+    """
+    at = datetime.strptime(f"{date_text} 00:00:00", FMT)
+    for version, eff_from, eff_to in factors:
+        if at < datetime.strptime(eff_from, FMT):
+            continue
+        if eff_to and at >= datetime.strptime(eff_to, FMT):
+            continue
+        return version
+    return None
 
 
 def pct_or_na(part, total):
@@ -58,9 +79,21 @@ def main():
 
     names = dict(conn.execute("SELECT station_id, name FROM t_station"))
 
+    # 逐日挑出当前生效的因子版本，旧版本行只作追溯保留，不参与汇总
+    factors = list(conn.execute(
+        "SELECT version, effect_from, effect_to FROM t_carbon_factor"
+        " WHERE enabled = 1 ORDER BY effect_from DESC"))
+    current_of = {}
+    for d in {r[0] for r in rows}:
+        current_of[d] = pick_factor_version(factors, d)
+
     daily, by_station, versions = {}, {}, set()
     cutoff = ""
+    superseded = 0
     for (d, sid, tot, pk, fl, va, un, cnt, em, fver, cut) in rows:
+        if fver != current_of.get(d):
+            superseded += 1               # 被取代的历史行：保留在库里，但不计入快照
+            continue
         versions.add(fver)
         if not cutoff or cut < cutoff:
             cutoff = cut                       # 取最保守的截止时刻，与服务端 3740 一致
@@ -120,6 +153,8 @@ def main():
     print(f"已导出 {OUT}：{len(series)} 天，{len(stations)} 站，"
           f"电量 {totals['total']/100:.2f} 度，排放 {totals['emission']/1000:.2f} kg，"
           f"完整度 {totals['completeness']}%")
+    if superseded:
+        print(f"  （跳过 {superseded} 行被取代的旧因子版本数据，它们保留在库里用于追溯）")
     if not series:
         print("[注意] t_carbon_daily 为空 —— 先在管理端查一次碳排放报告，或调 3745 重算")
     return 0
