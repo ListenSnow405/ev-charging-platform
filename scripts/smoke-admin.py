@@ -210,7 +210,7 @@ def probe_handler_registration(client, token, cmd, data, label):
 
     print(
         f"[DETECTED] {cmd} {label}: handler registered "
-        f"(probe code={code}, msg={response['msg']})"
+        f"(probe code={code}, msg={response['msg']!r})"
     )
     return True
 
