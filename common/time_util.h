@@ -17,12 +17,17 @@ inline QString TIME_FMT() { return QStringLiteral("yyyy-MM-dd HH:mm:ss"); }
 
 inline QString nowStr()                        { return QDateTime::currentDateTime().toString(TIME_FMT()); }
 inline QString toStr(const QDateTime &dt)      { return dt.toString(TIME_FMT()); }
+// 解析失败返回无效 QDateTime（isValid() == false），调用方必须自行判断后再用。
 inline QDateTime fromStr(const QString &s)     { return QDateTime::fromString(s, TIME_FMT()); }
 
 // 两个时间字符串之间的秒数（用于累计充电时长）
+// 任一时间非法（解析失败）返回 -1，调用方据此拒绝或记错误。
 inline qint64 secondsBetween(const QString &from, const QString &to)
 {
-    return fromStr(from).secsTo(fromStr(to));
+    const QDateTime f = fromStr(from);
+    const QDateTime t = fromStr(to);
+    if (!f.isValid() || !t.isValid()) return -1;
+    return f.secsTo(t);
 }
 
 // ---- 金额：内部一律 qint64「分」 ------------------------------------------------
