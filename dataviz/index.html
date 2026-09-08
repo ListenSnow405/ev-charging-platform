@@ -51,6 +51,9 @@
 <body>
 <header>
   <h1>充电桩运营数据大屏</h1>
+  <!-- 扩展模块 08（L5）碳排放大屏入口。本页其余内容一律不动，口径已与 2301-2303 对齐 -->
+  <a href="carbon.html" style="color:#7fb4e8;font-size:12px;text-decoration:none;
+     border:1px solid #2b5077;padding:3px 10px;border-radius:3px">碳减排报告 →</a>
   <div class="meta">
     <div>快照 <span id="genAt">—</span>　数据截止 <span id="asOf">—</span></div>
     <div>预测模型 <span id="modelVer">—</span>　下次刷新 <span id="countdown">—</span></div>
@@ -245,18 +248,24 @@ function drawHourly(s){
 
 function drawBehavior(s){
   const b = s.behavior;
-  init('cBehavior').setOption({...BASE,grid:null,
+  // 两个环形图并排挤在 1/6 屏宽的卡片里（内宽约 380px），饼心在 28% / 72%，
+  // 标签往外甩一定会被卡片切掉——实测左边「慢充 25.07%」只剩「2…」。
+  // 所以标签放进环内、只显示百分比，名称交给各自的小标题与图例。
+  // 四种颜色必须两两可分：原先「慢充」和「已结算」同为绿色，并排看会混。
+  const sub = (text, left) => ({text, left, top:6, textAlign:'center',
+    textStyle:{color:C('--head'),fontSize:12,fontWeight:'normal'}});
+  const pie = (name, data, colors, cx) => ({
+    name, type:'pie', radius:['32%','52%'], center:[cx,'52%'], avoidLabelOverlap:false,
+    data:data.map((x,i) => ({...x, itemStyle:{color:colors[i]}})),
+    label:{position:'inside', formatter:'{d}%', color:'#08192a', fontSize:11, fontWeight:600},
+    labelLine:{show:false}});
+  init('cBehavior').setOption({...BASE, grid:null,
+    title:[sub('充电类型','28%'), sub('订单终态','72%')],
     tooltip:{...BASE.tooltip,trigger:'item',formatter:'{a}<br>{b} {c} 单（{d}%）'},
-    legend:{bottom:0,textStyle:{color:C('--dim')}},
+    legend:{bottom:0,textStyle:{color:C('--dim')},itemWidth:12,itemHeight:8},
     series:[
-      {name:'充电类型',type:'pie',radius:['30%','48%'],center:['28%','45%'],
-       data:b.byPileType.map((x,i) => ({...x,
-         itemStyle:{color:[C('--head'),C('--ok')][i]}})),
-       label:{color:C('--fg'),fontSize:11,formatter:'{b}\n{d}%'}},
-      {name:'订单终态',type:'pie',radius:['30%','48%'],center:['72%','45%'],
-       data:b.orderStatus.map((x,i) => ({...x,
-         itemStyle:{color:[C('--ok'),C('--dim')][i]}})),
-       label:{color:C('--fg'),fontSize:11,formatter:'{b}\n{d}%'}},
+      pie('充电类型', b.byPileType,  [C('--head'), C('--warn')], '28%'),
+      pie('订单终态', b.orderStatus, [C('--ok'),   C('--dim')],  '72%'),
     ]});
 }
 

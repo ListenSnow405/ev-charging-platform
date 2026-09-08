@@ -39,7 +39,10 @@ void NetClient::onReadyRead()
     QByteArray payload;
     while (m_parser.next(payload)) {        // 逐条取出完整报文
         QJsonObject env;
-        if (!ecp::parseEnvelope(payload, env，ecp::EnvelopeType::Response)) { emit errorText(QStringLiteral("报文解析失败")); continue; }
+        if (!ecp::parseEnvelope(payload, env, ecp::EnvelopeType::Response)) {
+            emit errorText(QStringLiteral("报文解析失败"));
+            continue;
+        }
         emit response(env.value("cmd").toInt(), env.value("seq").toInt(),
                       env.value("code").toInt(), env.value("msg").toString(),
                       env.value("data").toObject());

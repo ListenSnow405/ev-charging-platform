@@ -30,11 +30,16 @@ SOURCES += \
     biz/pile_service.cpp \
     biz/reservation_service.cpp \
     biz/order_service.cpp \
-    biz/statistics_service.cpp
+    biz/statistics_service.cpp \
+    biz/ext_08_carbon_calc.cpp \
+    biz/ext_08_carbon_service.cpp
 
 HEADERS += \
+    ../common/protocol_ext.h \
+    ../common/error_code_ext.h \
     net/thread_pool.h \
     net/tcp_server.h \
     net/session.h \
     net/dispatcher.h \
-    dao/db.h
+    dao/db.h \
+    biz/ext_08_carbon_calc.h

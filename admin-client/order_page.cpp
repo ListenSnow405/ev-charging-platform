@@ -18,9 +18,12 @@
 #include <QTableWidget>
 #include <QTableWidgetItem>
 #include <QTime>
+#include <QTimer>
 #include <QVBoxLayout>
 
 namespace {
+
+constexpr int READ_RESPONSE_TIMEOUT_MS = 10000;
 
 QTableWidgetItem *centeredItem(const QString &text)
 {
@@ -35,8 +38,21 @@ OrderPage::OrderPage(NetClient *net, QWidget *parent)
     : QWidget(parent), m_net(net)
 {
     setupUi();
+    m_orderListTimer = new QTimer(this);
+    m_orderListTimer->setSingleShot(true);
+    connect(m_orderListTimer, &QTimer::timeout, this, [this] {
+        if (m_orderListSeq < 0) return;
+        m_orderListSeq = -1;
+        m_requestedPage = m_currentPage;
+        m_requestedStatus = m_currentStatus;
+        m_requestedDateFrom = m_currentDateFrom;
+        m_requestedDateTo = m_currentDateTo;
+        m_statusLabel->setText(QStringLiteral("订单列表请求超时，请重试"));
+        updatePaginationControls();
+    });
+
     connect(m_net, &NetClient::response, this, &OrderPage::handleResponse);
-    requestOrderList();
+    requestOrderList(1, -1, QString(), QString());
 }
 
 void OrderPage::setupUi()
@@ -110,13 +126,67 @@ void OrderPage::setupUi()
     m_table->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
     pageLayout->addWidget(m_table, 1);
 
+    auto *pagination = new QHBoxLayout;
+    m_previousPageButton = new QPushButton(QStringLiteral("上一页"), this);
+    m_pageLabel = new QLabel(this);
+    m_pageLabel->setAlignment(Qt::AlignCenter);
+    m_nextPageButton = new QPushButton(QStringLiteral("下一页"), this);
+    pagination->addStretch();
+    pagination->addWidget(m_previousPageButton);
+    pagination->addWidget(m_pageLabel);
+    pagination->addWidget(m_nextPageButton);
+    pagination->addStretch();
+    pageLayout->addLayout(pagination);
+    updatePaginationControls();
+
     connect(m_dateFilterEnabled, &QCheckBox::toggled, m_dateFrom, &QWidget::setEnabled);
     connect(m_dateFilterEnabled, &QCheckBox::toggled, m_dateTo, &QWidget::setEnabled);
-    connect(searchButton, &QPushButton::clicked, this, &OrderPage::requestOrderList);
+    connect(searchButton, &QPushButton::clicked, this, &OrderPage::searchOrders);
     connect(resetButton, &QPushButton::clicked, this, &OrderPage::resetFilters);
+    connect(m_previousPageButton, &QPushButton::clicked, this, [this] {
+        requestOrderList(m_currentPage - 1, m_currentStatus,
+                         m_currentDateFrom, m_currentDateTo);
+    });
+    connect(m_nextPageButton, &QPushButton::clicked, this, [this] {
+        requestOrderList(m_currentPage + 1, m_currentStatus,
+                         m_currentDateFrom, m_currentDateTo);
+    });
 }
 
-void OrderPage::requestOrderList()
+void OrderPage::requestOrderList(int page, int status, const QString &dateFrom,
+                                 const QString &dateTo)
+{
+    if (page < 1) return;
+
+    m_statusLabel->setText(QStringLiteral("正在加载订单…"));
+    const int seq = m_net->send(ecp::CMD_ADMIN_ORDER_LIST, QJsonObject{
+        { QStringLiteral("page"), page },
+        { QStringLiteral("size"), PAGE_SIZE },
+        { QStringLiteral("status"), status },
+        { QStringLiteral("dateFrom"), dateFrom },
+        { QStringLiteral("dateTo"), dateTo }
+    });
+    if (seq < 0) {
+        m_orderListTimer->stop();
+        m_orderListSeq = -1;
+        m_requestedPage = m_currentPage;
+        m_requestedStatus = m_currentStatus;
+        m_requestedDateFrom = m_currentDateFrom;
+        m_requestedDateTo = m_currentDateTo;
+        m_statusLabel->setText(QStringLiteral("订单列表请求发送失败，请检查网络连接"));
+        updatePaginationControls();
+        return;
+    }
+    m_orderListSeq = seq;
+    m_requestedPage = page;
+    m_requestedStatus = status;
+    m_requestedDateFrom = dateFrom;
+    m_requestedDateTo = dateTo;
+    m_orderListTimer->start(READ_RESPONSE_TIMEOUT_MS);
+    updatePaginationControls();
+}
+
+void OrderPage::searchOrders()
 {
     QString dateFrom;
     QString dateTo;
@@ -129,27 +199,14 @@ void OrderPage::requestOrderList()
         dateFrom = ecp::toStr(QDateTime(m_dateFrom->date(), QTime(0, 0, 0)));
         dateTo = ecp::toStr(QDateTime(m_dateTo->date(), QTime(23, 59, 59)));
     }
-
-    m_statusLabel->setText(QStringLiteral("正在加载订单…"));
-    const int seq = m_net->send(ecp::CMD_ADMIN_ORDER_LIST, QJsonObject{
-        { QStringLiteral("page"), 1 },
-        { QStringLiteral("size"), 100 },
-        { QStringLiteral("status"), m_statusFilter->currentData().toInt() },
-        { QStringLiteral("dateFrom"), dateFrom },
-        { QStringLiteral("dateTo"), dateTo }
-    });
-    if (seq < 0) {
-        m_orderListSeq = -1;
-        m_statusLabel->setText(QStringLiteral("订单列表请求发送失败，请检查网络连接"));
-        return;
-    }
-    m_orderListSeq = seq;
+    requestOrderList(1, m_statusFilter->currentData().toInt(), dateFrom, dateTo);
 }
 
 void OrderPage::handleResponse(int cmd, int seq, int code, const QString &msg,
                                const QJsonObject &data)
 {
     if (cmd != ecp::CMD_ADMIN_ORDER_LIST || seq != m_orderListSeq) return;
+    m_orderListTimer->stop();
     m_orderListSeq = -1;
     handleOrderListResponse(code, msg, data);
 }
@@ -158,12 +215,30 @@ void OrderPage::handleOrderListResponse(int code, const QString &msg,
                                         const QJsonObject &data)
 {
     if (code != ecp::ERR_OK) {
+        m_requestedPage = m_currentPage;
+        m_requestedStatus = m_currentStatus;
+        m_requestedDateFrom = m_currentDateFrom;
+        m_requestedDateTo = m_currentDateTo;
         m_statusLabel->setText(QStringLiteral("订单加载失败：%1").arg(msg));
+        updatePaginationControls();
+        return;
+    }
+
+    const QJsonValue totalValue = data.value(QStringLiteral("total"));
+    const QJsonValue listValue = data.value(QStringLiteral("list"));
+    const qint64 total = totalValue.toInteger(-1);
+    if (!totalValue.isDouble() || total < 0 || !listValue.isArray()) {
+        m_requestedPage = m_currentPage;
+        m_requestedStatus = m_currentStatus;
+        m_requestedDateFrom = m_currentDateFrom;
+        m_requestedDateTo = m_currentDateTo;
+        m_statusLabel->setText(QStringLiteral("订单加载失败：服务器响应格式异常"));
+        updatePaginationControls();
         return;
     }
 
     QVector<OrderData> orders;
-    const QJsonArray list = data.value(QStringLiteral("list")).toArray();
+    const QJsonArray list = listValue.toArray();
     orders.reserve(list.size());
     for (const QJsonValue &value : list) {
         if (!value.isObject()) continue;
@@ -185,10 +260,19 @@ void OrderPage::handleOrderListResponse(int code, const QString &msg,
     }
 
     m_orders = orders;
+    m_currentPage = total == 0 ? 1 : m_requestedPage;
+    m_total = total;
+    m_currentStatus = m_requestedStatus;
+    m_currentDateFrom = m_requestedDateFrom;
+    m_currentDateTo = m_requestedDateTo;
+    m_requestedPage = m_currentPage;
+    m_requestedStatus = m_currentStatus;
+    m_requestedDateFrom = m_currentDateFrom;
+    m_requestedDateTo = m_currentDateTo;
     refreshTable();
-    const qint64 total = data.value(QStringLiteral("total")).toInteger(m_orders.size());
     m_statusLabel->setText(QStringLiteral("已加载 %1 条订单，共 %2 条")
                                .arg(m_orders.size()).arg(total));
+    updatePaginationControls();
 }
 
 void OrderPage::refreshTable()
@@ -218,7 +302,21 @@ void OrderPage::resetFilters()
     m_dateFilterEnabled->setChecked(false);
     m_dateFrom->setDate(QDate::currentDate().addMonths(-1));
     m_dateTo->setDate(QDate::currentDate());
-    requestOrderList();
+    requestOrderList(1, -1, QString(), QString());
+}
+
+void OrderPage::updatePaginationControls()
+{
+    const qint64 totalPages = m_total > 0
+        ? (m_total + PAGE_SIZE - 1) / PAGE_SIZE
+        : 1;
+    m_pageLabel->setText(QStringLiteral("第 %1 / %2 页，共 %3 条订单")
+                             .arg(m_currentPage).arg(totalPages).arg(m_total));
+
+    const bool requestPending = m_orderListSeq >= 0;
+    m_previousPageButton->setEnabled(!requestPending && m_currentPage > 1);
+    m_nextPageButton->setEnabled(
+        !requestPending && qint64(m_currentPage) * PAGE_SIZE < m_total);
 }
 
 QString OrderPage::statusText(int status)

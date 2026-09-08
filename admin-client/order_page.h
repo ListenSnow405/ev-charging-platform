@@ -13,7 +13,9 @@ class QComboBox;
 class QDateEdit;
 class QJsonObject;
 class QLabel;
+class QPushButton;
 class QTableWidget;
+class QTimer;
 
 class OrderPage : public QWidget
 {
@@ -38,13 +40,16 @@ private:
     };
 
     void setupUi();
-    void requestOrderList();
+    void requestOrderList(int page, int status, const QString &dateFrom,
+                          const QString &dateTo);
+    void searchOrders();
     void handleResponse(int cmd, int seq, int code, const QString &msg,
                         const QJsonObject &data);
     void handleOrderListResponse(int code, const QString &msg,
                                  const QJsonObject &data);
     void refreshTable();
     void resetFilters();
+    void updatePaginationControls();
 
     static QString statusText(int status);
     static QString kwhText(qreal kwh);
@@ -56,7 +61,22 @@ private:
     QDateEdit    *m_dateFrom = nullptr;
     QDateEdit    *m_dateTo = nullptr;
     QTableWidget *m_table = nullptr;
+    QPushButton  *m_previousPageButton = nullptr;
+    QPushButton  *m_nextPageButton = nullptr;
     QLabel       *m_statusLabel = nullptr;
+    QLabel       *m_pageLabel = nullptr;
+    QTimer       *m_orderListTimer = nullptr;
     QVector<OrderData> m_orders;
+
+    static constexpr int PAGE_SIZE = 20;
+    int m_currentPage = 1;
+    qint64 m_total = 0;
+    int m_requestedPage = 1;
+    int m_currentStatus = -1;
+    QString m_currentDateFrom;
+    QString m_currentDateTo;
+    int m_requestedStatus = -1;
+    QString m_requestedDateFrom;
+    QString m_requestedDateTo;
     int m_orderListSeq = -1;
 };

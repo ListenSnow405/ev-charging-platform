@@ -12,6 +12,7 @@ class QJsonObject;
 class QLabel;
 class QPushButton;
 class QTableWidget;
+class QTimer;
 
 class StationPage : public QWidget
 {
@@ -39,7 +40,7 @@ private:
     };
 
     void setupUi();
-    void requestStationList();
+    void requestStationList(int page);
     void requestStationDetail(int row);
     void addStation();
     void handleResponse(int cmd, int seq, int code, const QString &msg,
@@ -53,6 +54,7 @@ private:
     void appendStationRow(const StationData &station);
     void showSelectedStationDetails();
     void showStationDetailDialog(const QVector<PileData> &piles);
+    void updatePaginationControls();
 
     static QString typeText(int type);
     static QString statusText(int status);
@@ -61,12 +63,24 @@ private:
     QTableWidget *m_table = nullptr;
     QPushButton  *m_detailsButton = nullptr;
     QPushButton  *m_addButton = nullptr;
+    QPushButton  *m_previousPageButton = nullptr;
+    QPushButton  *m_nextPageButton = nullptr;
     QLabel       *m_statusLabel = nullptr;
+    QLabel       *m_pageLabel = nullptr;
+    QTimer       *m_stationListTimer = nullptr;
+    QTimer       *m_stationAddTimer = nullptr;
+    QTimer       *m_stationDetailTimer = nullptr;
     QVector<StationData> m_stations;
 
+    static constexpr int PAGE_SIZE = 20;
+    int m_currentPage = 1;
+    qint64 m_total = 0;
+    int m_requestedPage = 1;
     int m_stationListSeq = -1;
     int m_stationAddSeq = -1;
     int m_stationDetailSeq = -1;
+    bool m_stationAddOutcomeUnknown = false;
+    QString m_pendingAddStationName;
     qint64 m_pendingDetailStationId = 0;
     QString m_pendingDetailStationName;
     QString m_pendingDetailStationAddress;

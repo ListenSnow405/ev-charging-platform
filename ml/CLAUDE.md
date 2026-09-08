@@ -47,6 +47,8 @@
 | `reports/forecast_eval.md` | 精度评估报告，答辩材料，随训练自动重生成 |
 | `predict.py` | 推理并回写 `t_load_forecast`；authorizer 锁死只可写这一张表 |
 | `selftest.py` | 全链路自动化自检，41 项断言；**全程在临时目录里跑，不碰真实库** |
+| `carbon_crosscheck.py` | 扩展 08 对拍：不复用 C++ 逻辑独立重算分摊与排放，与 `t_carbon_daily` 逐格比对；只读，不一致退出码 2 |
+| `export_carbon_snapshot.py` | 扩展 08 碳排放大屏快照 → `dataviz/data/carbon.json`；只读 `t_carbon_daily`，**不自己算分摊**（否则会与管理端显示成两个形状） |
 | `TESTING.md` | 人工测试流程：视觉、交互、跨模块联调、答辩前检查清单 |
 | `data/dev.db` | 私有开发副本（gitignored），全部建模工作在它上面做，不碰 `charging.db` |
 | `data/seed_manifest.json` | 播种批次记录，`--reset` 据此精确删除 |

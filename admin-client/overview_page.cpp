@@ -17,6 +17,7 @@
 #include <QTableWidget>
 #include <QTableWidgetItem>
 #include <QTime>
+#include <QTimer>
 #include <QVBoxLayout>
 #include <algorithm>
 
@@ -31,6 +32,8 @@
 
 namespace {
 
+constexpr int READ_RESPONSE_TIMEOUT_MS = 10000;
+
 QString percentageText(qint64 count, qint64 total)
 {
     if (total <= 0) return QStringLiteral("0.0%");
@@ -44,6 +47,38 @@ OverviewPage::OverviewPage(NetClient *net, QWidget *parent)
     : QWidget(parent), m_net(net)
 {
     setupUi();
+    m_revenueTimer = new QTimer(this);
+    m_revenueTimer->setSingleShot(true);
+    connect(m_revenueTimer, &QTimer::timeout, this, [this] {
+        if (m_revenueSeq < 0) return;
+        m_revenueSeq = -1;
+        m_revenueState = LoadState::Failed;
+        m_revenueError = QStringLiteral("请求超时，请重试");
+        updateStatusLabel();
+    });
+
+    m_pileStatusTimer = new QTimer(this);
+    m_pileStatusTimer->setSingleShot(true);
+    connect(m_pileStatusTimer, &QTimer::timeout, this, [this] {
+        if (m_pileStatusSeq < 0) return;
+        m_pileStatusSeq = -1;
+        m_pileStatusState = LoadState::Failed;
+        m_pileStatusError = QStringLiteral("请求超时，请重试");
+        updateStatusLabel();
+    });
+
+#ifdef HAVE_CHARTS
+    m_revenueTrendTimer = new QTimer(this);
+    m_revenueTrendTimer->setSingleShot(true);
+    connect(m_revenueTrendTimer, &QTimer::timeout, this, [this] {
+        if (m_revenueTrendSeq < 0) return;
+        m_revenueTrendSeq = -1;
+        m_revenueTrendState = LoadState::Failed;
+        m_revenueTrendError = QStringLiteral("请求超时，请重试");
+        updateStatusLabel();
+    });
+#endif
+
     connect(m_net, &NetClient::response, this, &OverviewPage::handleResponse);
     requestRevenue();
     requestPileStatus();
@@ -186,6 +221,7 @@ void OverviewPage::requestRevenue()
     updateStatusLabel();
     const int seq = m_net->send(ecp::CMD_STAT_REVENUE);
     if (seq < 0) {
+        m_revenueTimer->stop();
         m_revenueSeq = -1;
         m_revenueState = LoadState::Failed;
         m_revenueError = QStringLiteral("请求发送失败，请检查网络连接");
@@ -193,6 +229,7 @@ void OverviewPage::requestRevenue()
         return;
     }
     m_revenueSeq = seq;
+    m_revenueTimer->start(READ_RESPONSE_TIMEOUT_MS);
 }
 
 void OverviewPage::requestRevenueTrend(int days)
@@ -205,6 +242,7 @@ void OverviewPage::requestRevenueTrend(int days)
         { QStringLiteral("days"), days }
     });
     if (seq < 0) {
+        m_revenueTrendTimer->stop();
         m_revenueTrendSeq = -1;
         m_revenueTrendState = LoadState::Failed;
         m_revenueTrendError = QStringLiteral("请求发送失败，请检查网络连接");
@@ -212,6 +250,7 @@ void OverviewPage::requestRevenueTrend(int days)
         return;
     }
     m_revenueTrendSeq = seq;
+    m_revenueTrendTimer->start(READ_RESPONSE_TIMEOUT_MS);
 #else
     Q_UNUSED(days);
 #endif
@@ -224,6 +263,7 @@ void OverviewPage::requestPileStatus()
     updateStatusLabel();
     const int seq = m_net->send(ecp::CMD_STAT_PILE_STATUS);
     if (seq < 0) {
+        m_pileStatusTimer->stop();
         m_pileStatusSeq = -1;
         m_pileStatusState = LoadState::Failed;
         m_pileStatusError = QStringLiteral("请求发送失败，请检查网络连接");
@@ -231,6 +271,7 @@ void OverviewPage::requestPileStatus()
         return;
     }
     m_pileStatusSeq = seq;
+    m_pileStatusTimer->start(READ_RESPONSE_TIMEOUT_MS);
 }
 
 void OverviewPage::handleResponse(int cmd, int seq, int code, const QString &msg,
@@ -238,6 +279,7 @@ void OverviewPage::handleResponse(int cmd, int seq, int code, const QString &msg
 {
     if (cmd == ecp::CMD_STAT_REVENUE) {
         if (seq != m_revenueSeq) return;
+        m_revenueTimer->stop();
         m_revenueSeq = -1;
         handleRevenueResponse(code, msg, data);
         return;
@@ -245,6 +287,7 @@ void OverviewPage::handleResponse(int cmd, int seq, int code, const QString &msg
 #ifdef HAVE_CHARTS
     if (cmd == ecp::CMD_STAT_REVENUE_TREND) {
         if (seq != m_revenueTrendSeq) return;
+        m_revenueTrendTimer->stop();
         m_revenueTrendSeq = -1;
         handleRevenueTrendResponse(code, msg, data);
         return;
@@ -252,6 +295,7 @@ void OverviewPage::handleResponse(int cmd, int seq, int code, const QString &msg
 #endif
     if (cmd == ecp::CMD_STAT_PILE_STATUS) {
         if (seq != m_pileStatusSeq) return;
+        m_pileStatusTimer->stop();
         m_pileStatusSeq = -1;
         handlePileStatusResponse(code, msg, data);
     }
