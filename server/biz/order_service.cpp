@@ -18,6 +18,7 @@
 #include "dao/db.h"
 
 namespace ecp {
+void registerOrderFlowService();
 
 static bool positiveInteger(const QJsonValue &value, qint64 &out)
 {
@@ -88,6 +89,7 @@ static QJsonObject userOrderObject(const QSqlQuery &query)
     item["price"] = query.value("price").toLongLong();
     item["kwh"] = query.value("kwh_x100").toLongLong() / 100.0;
     item["amount"] = query.value("amount").toLongLong();
+    item["power"] = query.value("power").toDouble();
     item["reserveTime"] = timeText(query.value("reserve_time"));
     item["startTime"] = timeText(query.value("start_time"));
     item["endTime"] = timeText(query.value("end_time"));
@@ -117,7 +119,7 @@ static int handleUnfinishedOrder(const Request &req, QJsonObject &out)
     QSqlQuery query(db);
     query.prepare(QStringLiteral(
         "SELECT o.order_id, o.order_no, o.station_id, s.name AS station_name,"
-        " o.pile_id, p.pile_code, o.status, o.price, o.kwh_x100, o.amount,"
+        " o.pile_id, p.pile_code, o.status, o.price, o.kwh_x100, o.amount, p.power,"
         " o.reserve_time, o.start_time, o.end_time, o.settle_time"
         " FROM t_order o"
         " JOIN t_station s ON s.station_id = o.station_id"
@@ -187,7 +189,7 @@ static int handleUserOrderList(const Request &req, QJsonObject &out)
     QSqlQuery query(db);
     query.prepare(QStringLiteral(
         "SELECT o.order_id, o.order_no, o.station_id, s.name AS station_name,"
-        " o.pile_id, p.pile_code, o.status, o.price, o.kwh_x100, o.amount,"
+        " o.pile_id, p.pile_code, o.status, o.price, o.kwh_x100, o.amount, p.power,"
         " o.reserve_time, o.start_time, o.end_time, o.settle_time"
         " FROM t_order o"
         " JOIN t_station s ON s.station_id = o.station_id"
@@ -295,6 +297,7 @@ static int handleAdminOrderList(const Request &req, QJsonObject &out)
 
 void registerOrderService()
 {
+    registerOrderFlowService();
     Dispatcher::instance().registerHandler(CMD_ORDER_UNFINISHED, handleUnfinishedOrder);
     Dispatcher::instance().registerHandler(CMD_ORDER_LIST, handleUserOrderList);
     Dispatcher::instance().registerHandler(CMD_ADMIN_ORDER_LIST, handleAdminOrderList);

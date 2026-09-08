@@ -29,6 +29,7 @@
 #include <QUrl>
 #include <QUrlQuery>
 #include <QVBoxLayout>
+#include <QTimer>
 
 #ifdef HAVE_WEBENGINE
 #include <QWebEngineView>
@@ -113,6 +114,44 @@ static QString formatPrice(qint64 fen)
     return QStringLiteral("%1 元/度").arg(ecp::fenToYuan(fen));
 }
 
+static QString formatMoney(qint64 fen)
+{
+    return QStringLiteral("%1 元").arg(ecp::fenToYuan(fen));
+}
+
+static QString formatElapsedTime(const QString &startTime, const QString &endTime = QString())
+{
+    if (startTime.isEmpty()) return QStringLiteral("-");
+    const QString end = endTime.isEmpty() ? ecp::nowStr() : endTime;
+    const qint64 seconds = ecp::secondsBetween(startTime, end);
+    if (seconds < 0) return QStringLiteral("-");
+    const qint64 hours = seconds / 3600;
+    const qint64 minutes = (seconds % 3600) / 60;
+    const qint64 secs = seconds % 60;
+    return QStringLiteral("%1:%2:%3")
+        .arg(hours, 2, 10, QLatin1Char('0'))
+        .arg(minutes, 2, 10, QLatin1Char('0'))
+        .arg(secs, 2, 10, QLatin1Char('0'));
+}
+
+static qint64 estimateChargeAmountFen(const QJsonObject &order)
+{
+    const int status = order.value(QStringLiteral("status")).toInt(-1);
+    const qint64 amountFen = order.value(QStringLiteral("amount")).toVariant().toLongLong();
+    if (status != ecp::ORDER_CHARGING) return amountFen;
+
+    const qint64 priceFen = order.value(QStringLiteral("price")).toVariant().toLongLong();
+    const qreal powerKw = order.value(QStringLiteral("power")).toDouble(-1.0);
+    const QString startTime = order.value(QStringLiteral("startTime")).toString();
+    if (priceFen <= 0 || powerKw <= 0.0 || startTime.isEmpty()) return amountFen;
+
+    qint64 seconds = ecp::secondsBetween(startTime, ecp::nowStr());
+    if (seconds <= 0) seconds = 1;
+    qint64 kwhX100 = static_cast<qint64>(powerKw * seconds * 100.0 / 3600.0 + 0.5);
+    if (kwhX100 <= 0) kwhX100 = 1;
+    return (priceFen * kwhX100 + 50) / 100;
+}
+
 static QString stationLoadLabel(const QJsonObject &item)
 {
     const qint64 total = item.value(QStringLiteral("pileTotal")).toVariant().toLongLong();
@@ -145,6 +184,33 @@ static int stationSortCompare(const QJsonObject &left, const QJsonObject &right,
     const qint64 rightId = right.value(QStringLiteral("stationId")).toVariant().toLongLong();
     if (leftId == rightId) return 0;
     return leftId < rightId ? -1 : 1;
+}
+
+static QString pileTypeText(int type)
+{
+    return type == 0 ? QStringLiteral("快充") : QStringLiteral("慢充");
+}
+
+static QString pileStatusText(int status)
+{
+    switch (status) {
+    case 0: return QStringLiteral("在用");
+    case 1: return QStringLiteral("闲置");
+    case 2: return QStringLiteral("故障");
+    default: return QStringLiteral("未知");
+    }
+}
+
+static QString orderStatusText(int status)
+{
+    switch (status) {
+    case ecp::ORDER_RESERVED:   return QStringLiteral("已预约");
+    case ecp::ORDER_CHARGING:   return QStringLiteral("充电中");
+    case ecp::ORDER_TO_SETTLE:  return QStringLiteral("待结算");
+    case ecp::ORDER_SETTLED:    return QStringLiteral("已结算");
+    case ecp::ORDER_CANCELLED:  return QStringLiteral("已取消");
+    default: return QStringLiteral("未知");
+    }
 }
 }
 
@@ -183,6 +249,14 @@ MainWindow::MainWindow(NetClient *net, QWidget *parent)
 
     connect(m_net, &NetClient::response, this, &MainWindow::onNetResponse);
     connect(m_net, &NetClient::disconnected, this, &MainWindow::onNetDisconnected);
+    connect(m_tabs, &QTabWidget::currentChanged, this, [this](int index) {
+        if (index == 2) {
+            renderChargeStations();
+            renderChargePiles();
+            requestChargeUnfinishedOrder();
+            requestChargeOrders();
+        }
+    });
 
     requestProfile();
     requestNearbyStations();
@@ -457,8 +531,197 @@ QWidget *MainWindow::makeNavPage()
 
 QWidget *MainWindow::makeChargePage()
 {
-    return makePlaceholder(QStringLiteral("充电"),
-                           QStringLiteral("进入前会先查未结算订单。后续接入预约、开始、计费、结算流程。"));
+    auto *w = new QWidget;
+    auto *lay = new QVBoxLayout(w);
+    lay->setContentsMargins(18, 18, 18, 18);
+    lay->setSpacing(12);
+
+    auto *summary = new QFrame(w);
+    summary->setObjectName(QStringLiteral("Hero"));
+    auto *summaryLay = new QVBoxLayout(summary);
+    summaryLay->setContentsMargins(18, 18, 18, 18);
+    summaryLay->setSpacing(10);
+
+    auto *title = new QLabel(QStringLiteral("充电流程"), summary);
+    QFont titleFont = title->font();
+    titleFont.setPointSize(16);
+    titleFont.setBold(true);
+    title->setFont(titleFont);
+
+    m_chargeStage = new QLabel(QStringLiteral("正在检查未完成订单"), summary);
+    m_chargeStage->setObjectName(QStringLiteral("Muted"));
+    m_chargeStage->setWordWrap(true);
+
+    m_chargeStatus = new QLabel(QStringLiteral("页面准备中"), summary);
+    m_chargeStatus->setObjectName(QStringLiteral("Muted"));
+    m_chargeStatus->setWordWrap(true);
+
+    auto *orderRow = new QHBoxLayout;
+    m_chargeOrderMeta = new QLabel(QStringLiteral("当前订单：无"), summary);
+    m_chargeOrderMeta->setWordWrap(true);
+    m_chargeOrderMoney = new QLabel(QStringLiteral("费用：-"), summary);
+    m_chargeOrderMoney->setWordWrap(true);
+    m_chargeOrderTime = new QLabel(QStringLiteral("已充电时长：-"), summary);
+    m_chargeOrderTime->setWordWrap(true);
+    m_chargeOrderPrice = new QLabel(QStringLiteral("单价：-"), summary);
+    m_chargeOrderPrice->setWordWrap(true);
+    orderRow->addWidget(m_chargeOrderMeta, 1);
+    orderRow->addWidget(m_chargeOrderMoney, 0);
+    orderRow->addWidget(m_chargeOrderTime, 0);
+
+    summaryLay->addWidget(title);
+    summaryLay->addWidget(m_chargeStage);
+    summaryLay->addWidget(m_chargeStatus);
+    summaryLay->addLayout(orderRow);
+    summaryLay->addWidget(m_chargeOrderPrice);
+
+    auto *actionCard = new QFrame(w);
+    actionCard->setObjectName(QStringLiteral("Card"));
+    auto *actionLay = new QGridLayout(actionCard);
+    actionLay->setContentsMargins(16, 16, 16, 16);
+    actionLay->setHorizontalSpacing(10);
+    actionLay->setVerticalSpacing(10);
+
+    m_chargeStationCombo = new QComboBox(actionCard);
+    m_chargeStationCombo->setMinimumWidth(160);
+    m_chargeStationCombo->addItem(QStringLiteral("请选择充电站"), QVariant::fromValue<qint64>(-1));
+    m_chargeReserveBtn = new QPushButton(QStringLiteral("预约电桩"), actionCard);
+    m_chargeStartBtn = new QPushButton(QStringLiteral("开始充电"), actionCard);
+    m_chargeStopBtn = new QPushButton(QStringLiteral("结束计费"), actionCard);
+    m_chargeSettleBtn = new QPushButton(QStringLiteral("立即结算"), actionCard);
+    m_chargeCancelBtn = new QPushButton(QStringLiteral("取消预约"), actionCard);
+    m_chargeRefreshBtn = new QPushButton(QStringLiteral("刷新"), actionCard);
+    m_chargeReserveBtn->setObjectName(QStringLiteral("Primary"));
+    m_chargeStartBtn->setObjectName(QStringLiteral("Primary"));
+    m_chargeStopBtn->setObjectName(QStringLiteral("Primary"));
+    m_chargeSettleBtn->setObjectName(QStringLiteral("Primary"));
+    m_chargeCancelBtn->setObjectName(QStringLiteral("Danger"));
+
+    actionLay->addWidget(new QLabel(QStringLiteral("充电站"), actionCard), 0, 0);
+    actionLay->addWidget(m_chargeStationCombo, 0, 1);
+    actionLay->addWidget(m_chargeRefreshBtn, 0, 2);
+    actionLay->addWidget(m_chargeReserveBtn, 1, 0);
+    actionLay->addWidget(m_chargeStartBtn, 1, 1);
+    actionLay->addWidget(m_chargeStopBtn, 1, 2);
+    actionLay->addWidget(m_chargeSettleBtn, 2, 0);
+    actionLay->addWidget(m_chargeCancelBtn, 2, 1);
+
+    auto *pileCard = new QFrame(w);
+    pileCard->setObjectName(QStringLiteral("Card"));
+    auto *pileLay = new QVBoxLayout(pileCard);
+    pileLay->setContentsMargins(16, 16, 16, 16);
+    pileLay->setSpacing(8);
+    auto *pileTitle = new QLabel(QStringLiteral("可用电桩"), pileCard);
+    QFont pileTitleFont = pileTitle->font();
+    pileTitleFont.setPointSize(14);
+    pileTitleFont.setBold(true);
+    pileTitle->setFont(pileTitleFont);
+    m_chargeHint = new QLabel(QStringLiteral("先选中一个充电站，再从表格里挑电桩预约。"), pileCard);
+    m_chargeHint->setObjectName(QStringLiteral("Muted"));
+    m_chargeHint->setWordWrap(true);
+
+    m_chargePileTable = new QTableWidget(0, 5, pileCard);
+    m_chargePileTable->setHorizontalHeaderLabels({
+        QStringLiteral("编号"), QStringLiteral("类型"), QStringLiteral("功率"),
+        QStringLiteral("状态"), QStringLiteral("操作")
+    });
+    m_chargePileTable->horizontalHeader()->setStretchLastSection(true);
+    m_chargePileTable->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
+    m_chargePileTable->horizontalHeader()->setSectionResizeMode(4, QHeaderView::Stretch);
+    m_chargePileTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    m_chargePileTable->setSelectionMode(QAbstractItemView::SingleSelection);
+    m_chargePileTable->setSelectionBehavior(QAbstractItemView::SelectRows);
+    m_chargePileTable->setAlternatingRowColors(true);
+    m_chargePileTable->verticalHeader()->setVisible(false);
+    connect(m_chargePileTable, &QTableWidget::cellClicked, this, [this](int row, int) {
+        if (row < 0 || row >= m_nearbyPiles.size()) return;
+        const QJsonObject pile = m_nearbyPiles.at(row).toObject();
+        m_selectedChargePileId = pile.value(QStringLiteral("pileId")).toVariant().toLongLong();
+        updateChargeSummary();
+    });
+
+    pileLay->addWidget(pileTitle);
+    pileLay->addWidget(m_chargeHint);
+    pileLay->addWidget(m_chargePileTable);
+
+    auto *orderCard = new QFrame(w);
+    orderCard->setObjectName(QStringLiteral("Card"));
+    auto *orderLay = new QVBoxLayout(orderCard);
+    orderLay->setContentsMargins(16, 16, 16, 16);
+    orderLay->setSpacing(8);
+    auto *orderTitle = new QLabel(QStringLiteral("我的订单"), orderCard);
+    QFont orderTitleFont = orderTitle->font();
+    orderTitleFont.setPointSize(14);
+    orderTitleFont.setBold(true);
+    orderTitle->setFont(orderTitleFont);
+
+    m_chargeOrderTable = new QTableWidget(0, 6, orderCard);
+    m_chargeOrderTable->setHorizontalHeaderLabels({
+        QStringLiteral("订单号"), QStringLiteral("电桩"), QStringLiteral("状态"),
+        QStringLiteral("金额"), QStringLiteral("预约时间"), QStringLiteral("结算")
+    });
+    m_chargeOrderTable->horizontalHeader()->setStretchLastSection(true);
+    m_chargeOrderTable->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
+    m_chargeOrderTable->horizontalHeader()->setSectionResizeMode(5, QHeaderView::Stretch);
+    m_chargeOrderTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    m_chargeOrderTable->setSelectionMode(QAbstractItemView::SingleSelection);
+    m_chargeOrderTable->setSelectionBehavior(QAbstractItemView::SelectRows);
+    m_chargeOrderTable->setAlternatingRowColors(true);
+    m_chargeOrderTable->verticalHeader()->setVisible(false);
+
+    orderLay->addWidget(orderTitle);
+    orderLay->addWidget(m_chargeOrderTable);
+
+    lay->addWidget(summary);
+    lay->addWidget(actionCard);
+    lay->addWidget(pileCard, 1);
+    lay->addWidget(orderCard, 1);
+
+    connect(m_chargeRefreshBtn, &QPushButton::clicked, this, [this] {
+        requestChargeUnfinishedOrder();
+        requestChargeOrders();
+        if (m_selectedNearbyStationId > 0) {
+            requestStationPiles(m_selectedNearbyStationId);
+        }
+    });
+    connect(m_chargeStationCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int) {
+        const qint64 stationId = m_chargeStationCombo
+                                     ? m_chargeStationCombo->currentData().toLongLong()
+                                     : -1;
+        if (stationId > 0) {
+            m_selectedNearbyStationId = stationId;
+            requestStationPiles(stationId);
+        }
+    });
+    connect(m_chargeReserveBtn, &QPushButton::clicked, this, [this] {
+        reserveChargePile(m_selectedChargePileId);
+    });
+    connect(m_chargeStartBtn, &QPushButton::clicked, this, &MainWindow::startChargeOrder);
+    connect(m_chargeStopBtn, &QPushButton::clicked, this, &MainWindow::stopChargeOrder);
+    connect(m_chargeSettleBtn, &QPushButton::clicked, this, &MainWindow::settleChargeOrder);
+    connect(m_chargeCancelBtn, &QPushButton::clicked, this, [this] {
+        if (m_chargeOrderId <= 0) {
+            QMessageBox::information(this, QStringLiteral("提示"), QStringLiteral("当前没有可取消的预约"));
+            return;
+        }
+        if (!m_net || !m_net->isConnected()) {
+            setStatus(QStringLiteral("未连接到服务器"), true);
+            return;
+        }
+        setStatus(QStringLiteral("正在取消预约..."));
+        m_pendingChargeCancelSeq = m_net->send(ecp::CMD_ORDER_CANCEL,
+                                               QJsonObject{{QStringLiteral("orderId"), m_chargeOrderId}});
+    });
+
+    m_chargeSummaryTimer = new QTimer(this);
+    m_chargeSummaryTimer->setInterval(1000);
+    connect(m_chargeSummaryTimer, &QTimer::timeout, this, &MainWindow::updateChargeSummary);
+    m_chargeSummaryTimer->start();
+
+    updateChargeSummary();
+    requestChargeUnfinishedOrder();
+    requestChargeOrders();
+    return w;
 }
 
 QWidget *MainWindow::makeMinePage()
@@ -747,6 +1010,7 @@ void MainWindow::renderNearbyStations()
     m_nearbyCardsLay->addStretch();
     m_nearbyStatus->setText(QStringLiteral("站点列表已更新"));
     m_nearbyStatus->setStyleSheet(QStringLiteral("color:#6b7280;"));
+    renderChargeStations();
 }
 
 void MainWindow::renderStationPiles()
@@ -785,6 +1049,291 @@ void MainWindow::renderStationPiles()
     }
     m_nearbyPileStatus->setText(QStringLiteral("已加载 %1 个电桩").arg(m_nearbyPiles.size()));
     m_nearbyPileStatus->setStyleSheet(QStringLiteral("color:#6b7280;"));
+    renderChargePiles();
+}
+
+void MainWindow::renderChargeStations()
+{
+    if (!m_chargeStationCombo) return;
+
+    const qint64 currentStationId = m_chargeStationCombo->currentData().toLongLong();
+    m_chargeStationCombo->blockSignals(true);
+    m_chargeStationCombo->clear();
+    m_chargeStationCombo->addItem(QStringLiteral("请选择充电站"), QVariant::fromValue<qint64>(-1));
+    for (const QJsonValue &value : m_nearbyStations) {
+        const QJsonObject station = value.toObject();
+        const qint64 stationId = station.value(QStringLiteral("stationId")).toVariant().toLongLong();
+        const QString name = station.value(QStringLiteral("name")).toString();
+        const QString label = QStringLiteral("%1 · %2")
+                                  .arg(name.isEmpty() ? QStringLiteral("未命名站点") : name)
+                                  .arg(formatDistance(station.value(QStringLiteral("distance")).toVariant().toLongLong()));
+        m_chargeStationCombo->addItem(label, stationId);
+    }
+    int targetIndex = m_chargeStationCombo->findData(currentStationId);
+    if (targetIndex < 0 && m_selectedNearbyStationId > 0) {
+        targetIndex = m_chargeStationCombo->findData(m_selectedNearbyStationId);
+    }
+    if (targetIndex < 0) targetIndex = 0;
+    m_chargeStationCombo->setCurrentIndex(targetIndex);
+    m_chargeStationCombo->blockSignals(false);
+}
+
+void MainWindow::renderChargePiles()
+{
+    if (!m_chargePileTable) return;
+    m_chargePileTable->setRowCount(0);
+
+    if (m_nearbyPiles.isEmpty()) {
+        if (m_chargeHint) {
+            m_chargeHint->setText(QStringLiteral("当前没有可用电桩，请先在附近页刷新站点。"));
+        }
+        return;
+    }
+
+    m_chargePileTable->setRowCount(m_nearbyPiles.size());
+    int row = 0;
+    for (const QJsonValue &value : m_nearbyPiles) {
+        const QJsonObject pile = value.toObject();
+        const qint64 pileId = pile.value(QStringLiteral("pileId")).toVariant().toLongLong();
+        const QString code = pile.value(QStringLiteral("code")).toString();
+        const QString type = pileTypeText(pile.value(QStringLiteral("type")).toInt());
+        const QString power = QStringLiteral("%1 kW")
+                                  .arg(pile.value(QStringLiteral("power")).toVariant().toDouble(), 0, 'f', 0);
+        const QString status = pileStatusText(pile.value(QStringLiteral("status")).toInt());
+
+        m_chargePileTable->setItem(row, 0, new QTableWidgetItem(code));
+        m_chargePileTable->setItem(row, 1, new QTableWidgetItem(type));
+        m_chargePileTable->setItem(row, 2, new QTableWidgetItem(power));
+        m_chargePileTable->setItem(row, 3, new QTableWidgetItem(status));
+
+        auto *btn = new QPushButton(QStringLiteral("预约"), m_chargePileTable);
+        btn->setObjectName(QStringLiteral("Primary"));
+        btn->setEnabled(m_chargeOrder.isEmpty() && pile.value(QStringLiteral("status")).toInt() == 1);
+        connect(btn, &QPushButton::clicked, this, [this, pileId] {
+            m_selectedChargePileId = pileId;
+            reserveChargePile(pileId);
+        });
+        m_chargePileTable->setCellWidget(row, 4, btn);
+        ++row;
+    }
+    if (m_chargeHint) {
+        m_chargeHint->setText(QStringLiteral("从表格里选一个闲置电桩再预约。"));
+    }
+}
+
+void MainWindow::renderChargeOrders()
+{
+    if (!m_chargeOrderTable) return;
+    m_chargeOrderTable->setRowCount(0);
+
+    if (m_chargeOrders.isEmpty()) return;
+
+    m_chargeOrderTable->setRowCount(m_chargeOrders.size());
+    int row = 0;
+    for (const QJsonValue &value : m_chargeOrders) {
+        const QJsonObject order = value.toObject();
+        const qint64 orderId = order.value(QStringLiteral("orderId")).toVariant().toLongLong();
+        const QString orderNo = order.value(QStringLiteral("orderNo")).toString();
+        const QString pileCode = order.value(QStringLiteral("pileCode")).toString();
+        const int status = order.value(QStringLiteral("status")).toInt();
+        const qint64 amount = order.value(QStringLiteral("amount")).toVariant().toLongLong();
+        const QString reserveTime = order.value(QStringLiteral("reserveTime")).toString();
+
+        m_chargeOrderTable->setItem(row, 0, new QTableWidgetItem(orderNo));
+        m_chargeOrderTable->setItem(row, 1, new QTableWidgetItem(pileCode));
+        m_chargeOrderTable->setItem(row, 2, new QTableWidgetItem(orderStatusText(status)));
+        m_chargeOrderTable->setItem(row, 3, new QTableWidgetItem(formatMoney(amount)));
+        m_chargeOrderTable->setItem(row, 4, new QTableWidgetItem(reserveTime));
+
+        auto *settleBtn = new QPushButton(QStringLiteral("结算"), m_chargeOrderTable);
+        settleBtn->setEnabled(status == ecp::ORDER_TO_SETTLE);
+        connect(settleBtn, &QPushButton::clicked, this, [this, orderId] {
+            m_chargeOrderId = orderId;
+            settleChargeOrder();
+        });
+        m_chargeOrderTable->setCellWidget(row, 5, settleBtn);
+        ++row;
+    }
+}
+
+void MainWindow::requestChargeUnfinishedOrder()
+{
+    if (!m_net || !m_net->isConnected()) {
+        if (m_chargeStatus) m_chargeStatus->setText(QStringLiteral("未连接到服务器"));
+        return;
+    }
+    m_pendingChargeUnfinishedSeq = m_net->send(ecp::CMD_ORDER_UNFINISHED);
+    if (m_chargeStatus) m_chargeStatus->setText(QStringLiteral("正在检查未完成订单..."));
+}
+
+void MainWindow::requestChargeOrders()
+{
+    if (!m_net || !m_net->isConnected()) {
+        return;
+    }
+    m_pendingChargeOrdersSeq = m_net->send(ecp::CMD_ORDER_LIST,
+                                           QJsonObject{
+                                               {QStringLiteral("page"), 1},
+                                               {QStringLiteral("size"), 20},
+                                               {QStringLiteral("status"), -1}
+                                           });
+}
+
+void MainWindow::sendChargeReserveRequest(qint64 pileId)
+{
+    if (pileId <= 0) return;
+    if (!m_net || !m_net->isConnected()) {
+        setStatus(QStringLiteral("未连接到服务器"), true);
+        return;
+    }
+    m_selectedChargePileId = pileId;
+    setStatus(QStringLiteral("正在预约电桩..."));
+    m_pendingChargeReserveSeq = m_net->send(ecp::CMD_ORDER_RESERVE,
+                                            QJsonObject{{QStringLiteral("pileId"), pileId}});
+}
+
+void MainWindow::reserveChargePile(qint64 pileId)
+{
+    if (pileId <= 0) {
+        QMessageBox::information(this, QStringLiteral("提示"), QStringLiteral("请先选择一个电桩"));
+        return;
+    }
+    if (!m_net || !m_net->isConnected()) {
+        setStatus(QStringLiteral("未连接到服务器"), true);
+        return;
+    }
+    m_pendingChargeReservePileId = pileId;
+    m_suppressChargeUnfinishedPrompt = false;
+    requestChargeUnfinishedOrder();
+}
+
+void MainWindow::startChargeOrder()
+{
+    if (m_chargeOrderId <= 0) {
+        QMessageBox::information(this, QStringLiteral("提示"), QStringLiteral("先预约电桩再开始充电"));
+        return;
+    }
+    if (!m_net || !m_net->isConnected()) {
+        setStatus(QStringLiteral("未连接到服务器"), true);
+        return;
+    }
+    setStatus(QStringLiteral("正在开始充电..."));
+    m_pendingChargeStartSeq = m_net->send(ecp::CMD_ORDER_START,
+                                         QJsonObject{{QStringLiteral("orderId"), m_chargeOrderId}});
+}
+
+void MainWindow::stopChargeOrder()
+{
+    if (m_chargeOrderId <= 0) {
+        QMessageBox::information(this, QStringLiteral("提示"), QStringLiteral("当前没有可结束的充电订单"));
+        return;
+    }
+    if (!m_net || !m_net->isConnected()) {
+        setStatus(QStringLiteral("未连接到服务器"), true);
+        return;
+    }
+    setStatus(QStringLiteral("正在结束充电并计费..."));
+    m_pendingChargeStopSeq = m_net->send(ecp::CMD_ORDER_STOP,
+                                        QJsonObject{{QStringLiteral("orderId"), m_chargeOrderId}});
+}
+
+void MainWindow::settleChargeOrder()
+{
+    if (m_chargeOrderId <= 0) {
+        QMessageBox::information(this, QStringLiteral("提示"), QStringLiteral("当前没有可结算的订单"));
+        return;
+    }
+    if (!m_net || !m_net->isConnected()) {
+        setStatus(QStringLiteral("未连接到服务器"), true);
+        return;
+    }
+    setStatus(QStringLiteral("正在结算订单..."));
+    m_pendingChargeSettleSeq = m_net->send(ecp::CMD_ORDER_SETTLE,
+                                          QJsonObject{{QStringLiteral("orderId"), m_chargeOrderId}});
+}
+
+void MainWindow::setChargeOrder(const QJsonObject &order)
+{
+    m_chargeOrder = order;
+    m_chargeOrderId = order.value(QStringLiteral("orderId")).toVariant().toLongLong();
+    m_selectedChargePileId = order.value(QStringLiteral("pileId")).toVariant().toLongLong();
+    updateChargeSummary();
+    renderChargePiles();
+}
+
+void MainWindow::clearChargeOrder()
+{
+    m_chargeOrder = QJsonObject();
+    m_chargeOrderId = -1;
+    updateChargeSummary();
+    renderChargePiles();
+}
+
+QString MainWindow::chargeOrderStatusText(int status) const
+{
+    return orderStatusText(status);
+}
+
+QString MainWindow::chargeStageText() const
+{
+    if (m_chargeOrder.isEmpty()) return QStringLiteral("暂无未完成订单");
+    return QStringLiteral("当前订单状态：%1").arg(chargeOrderStatusText(m_chargeOrder.value(QStringLiteral("status")).toInt()));
+}
+
+void MainWindow::updateChargeSummary()
+{
+    if (m_chargeOrderMeta) {
+        if (m_chargeOrder.isEmpty()) {
+            m_chargeOrderMeta->setText(QStringLiteral("当前订单：无"));
+        } else {
+            m_chargeOrderMeta->setText(QStringLiteral("当前订单：%1 / %2")
+                                       .arg(m_chargeOrder.value(QStringLiteral("orderNo")).toString())
+                                       .arg(m_chargeOrder.value(QStringLiteral("pileCode")).toString()));
+        }
+    }
+    if (m_chargeOrderMoney) {
+        if (m_chargeOrder.isEmpty()) {
+            m_chargeOrderMoney->setText(QStringLiteral("费用：-"));
+        } else {
+            m_chargeOrderMoney->setText(QStringLiteral("费用：%1")
+                                        .arg(formatMoney(estimateChargeAmountFen(m_chargeOrder))));
+        }
+    }
+    if (m_chargeOrderTime) {
+        if (m_chargeOrder.isEmpty()) {
+            m_chargeOrderTime->setText(QStringLiteral("已充电时长：-"));
+        } else {
+            const QString startTime = m_chargeOrder.value(QStringLiteral("startTime")).toString();
+            const QString endTime = m_chargeOrder.value(QStringLiteral("endTime")).toString();
+            m_chargeOrderTime->setText(QStringLiteral("已充电时长：%1")
+                                       .arg(formatElapsedTime(startTime, endTime)));
+        }
+    }
+    if (m_chargeOrderPrice) {
+        if (m_chargeOrder.isEmpty()) {
+            m_chargeOrderPrice->setText(QStringLiteral("单价：-"));
+        } else {
+            m_chargeOrderPrice->setText(QStringLiteral("单价：%1")
+                                        .arg(formatPrice(m_chargeOrder.value(QStringLiteral("price")).toVariant().toLongLong())));
+        }
+    }
+    if (m_chargeStage) {
+        m_chargeStage->setText(chargeStageText());
+    }
+    if (m_chargeStatus) {
+        if (m_chargeOrder.isEmpty()) {
+            m_chargeStatus->setText(QStringLiteral("可以预约新的电桩"));
+        } else {
+            m_chargeStatus->setText(QStringLiteral("当前状态：%1").arg(chargeOrderStatusText(m_chargeOrder.value(QStringLiteral("status")).toInt())));
+        }
+    }
+    const int status = m_chargeOrder.value(QStringLiteral("status")).toInt(-1);
+    const bool hasOrder = !m_chargeOrder.isEmpty();
+    if (m_chargeReserveBtn) m_chargeReserveBtn->setEnabled(!hasOrder && m_selectedChargePileId > 0);
+    if (m_chargeStartBtn) m_chargeStartBtn->setEnabled(hasOrder && status == ecp::ORDER_RESERVED);
+    if (m_chargeStopBtn) m_chargeStopBtn->setEnabled(hasOrder && status == ecp::ORDER_CHARGING);
+    if (m_chargeSettleBtn) m_chargeSettleBtn->setEnabled(hasOrder && status == ecp::ORDER_TO_SETTLE);
+    if (m_chargeCancelBtn) m_chargeCancelBtn->setEnabled(hasOrder && status == ecp::ORDER_RESERVED);
 }
 
 void MainWindow::requestProfile()
@@ -933,15 +1482,140 @@ void MainWindow::onNetResponse(int cmd, int seq, int code, const QString &msg, c
     }
 
     if (cmd == ecp::CMD_ORDER_UNFINISHED) {
+        if (m_pendingChargeUnfinishedSeq >= 0 && seq != m_pendingChargeUnfinishedSeq) {
+            return;
+        }
+        m_pendingChargeUnfinishedSeq = -1;
         if (code != ecp::ERR_OK) {
-            setStatus(msg, true);
+            if (m_chargeStatus) m_chargeStatus->setText(msg);
+            m_suppressChargeUnfinishedPrompt = false;
             return;
         }
         const bool hasUnfinished = data.value(QStringLiteral("hasUnfinished")).toBool();
         if (hasUnfinished) {
-            QMessageBox::information(this, QStringLiteral("提示"),
-                                     QStringLiteral("您有未完成的充电订单，请先结算。"));
+            setChargeOrder(data.value(QStringLiteral("order")).toObject());
+            m_pendingChargeReservePileId = -1;
+            if (!m_suppressChargeUnfinishedPrompt) {
+                QMessageBox::information(this, QStringLiteral("提示"),
+                                         QStringLiteral("您有未完成的充电订单，请先结算。"));
+            }
+            m_suppressChargeUnfinishedPrompt = false;
+        } else {
+            clearChargeOrder();
+            if (m_pendingChargeReservePileId > 0) {
+                const qint64 pileId = m_pendingChargeReservePileId;
+                m_pendingChargeReservePileId = -1;
+                sendChargeReserveRequest(pileId);
+            }
         }
+        updateChargeSummary();
+        return;
+    }
+
+    if (cmd == ecp::CMD_ORDER_LIST) {
+        if (m_pendingChargeOrdersSeq >= 0 && seq != m_pendingChargeOrdersSeq) {
+            return;
+        }
+        m_pendingChargeOrdersSeq = -1;
+        if (code != ecp::ERR_OK) {
+            if (m_chargeStatus) m_chargeStatus->setText(msg);
+            return;
+        }
+        m_chargeOrders = data.value(QStringLiteral("list")).toArray();
+        renderChargeOrders();
+        return;
+    }
+
+    if (cmd == ecp::CMD_ORDER_RESERVE) {
+        if (m_pendingChargeReserveSeq >= 0 && seq != m_pendingChargeReserveSeq) return;
+        m_pendingChargeReserveSeq = -1;
+        if (code != ecp::ERR_OK) {
+            setStatus(msg, true);
+            return;
+        }
+        m_pendingChargeReservePileId = -1;
+        m_chargeOrderId = data.value(QStringLiteral("orderId")).toVariant().toLongLong();
+        setStatus(QStringLiteral("预约成功"));
+        m_suppressChargeUnfinishedPrompt = true;
+        requestChargeUnfinishedOrder();
+        requestChargeOrders();
+        return;
+    }
+
+    if (cmd == ecp::CMD_ORDER_CANCEL) {
+        if (m_pendingChargeCancelSeq >= 0 && seq != m_pendingChargeCancelSeq) return;
+        m_pendingChargeCancelSeq = -1;
+        if (code != ecp::ERR_OK) {
+            setStatus(msg, true);
+            return;
+        }
+        m_pendingChargeReservePileId = -1;
+        clearChargeOrder();
+        m_suppressChargeUnfinishedPrompt = false;
+        setStatus(QStringLiteral("预约已取消"));
+        requestChargeUnfinishedOrder();
+        requestChargeOrders();
+        return;
+    }
+
+    if (cmd == ecp::CMD_ORDER_START) {
+        if (m_pendingChargeStartSeq >= 0 && seq != m_pendingChargeStartSeq) return;
+        m_pendingChargeStartSeq = -1;
+        if (code != ecp::ERR_OK) {
+            setStatus(msg, true);
+            return;
+        }
+        if (!m_chargeOrder.isEmpty()) {
+            m_chargeOrder[QStringLiteral("status")] = ecp::ORDER_CHARGING;
+            m_chargeOrder[QStringLiteral("startTime")] = data.value(QStringLiteral("startTime"));
+        }
+        setStatus(QStringLiteral("充电已开始"));
+        requestChargeOrders();
+        updateChargeSummary();
+        return;
+    }
+
+    if (cmd == ecp::CMD_ORDER_STOP) {
+        if (m_pendingChargeStopSeq >= 0 && seq != m_pendingChargeStopSeq) return;
+        m_pendingChargeStopSeq = -1;
+        if (code != ecp::ERR_OK) {
+            setStatus(msg, true);
+            return;
+        }
+        if (!m_chargeOrder.isEmpty()) {
+            m_chargeOrder[QStringLiteral("status")] = ecp::ORDER_TO_SETTLE;
+            m_chargeOrder[QStringLiteral("endTime")] = data.value(QStringLiteral("endTime"));
+            m_chargeOrder[QStringLiteral("kwh")] = data.value(QStringLiteral("kwh"));
+            m_chargeOrder[QStringLiteral("amount")] = data.value(QStringLiteral("amount"));
+        }
+        setStatus(QStringLiteral("已结束充电，等待结算"));
+        QMessageBox::information(this, QStringLiteral("提示"),
+                                 QStringLiteral("本次充电已结束，请立即结算。"));
+        requestChargeOrders();
+        updateChargeSummary();
+        return;
+    }
+
+    if (cmd == ecp::CMD_ORDER_SETTLE) {
+        if (m_pendingChargeSettleSeq >= 0 && seq != m_pendingChargeSettleSeq) return;
+        m_pendingChargeSettleSeq = -1;
+        if (code != ecp::ERR_OK) {
+            if (code == ecp::ERR_BALANCE_NOT_ENOUGH) {
+                QMessageBox::warning(this, QStringLiteral("余额不足"), msg);
+            } else {
+                setStatus(msg, true);
+            }
+            return;
+        }
+        m_pendingChargeReservePileId = -1;
+        if (data.contains(QStringLiteral("balance"))) {
+            m_profile[QStringLiteral("balance")] = data.value(QStringLiteral("balance"));
+            updateMineTexts();
+        }
+        clearChargeOrder();
+        setStatus(QStringLiteral("结算成功"));
+        requestChargeUnfinishedOrder();
+        requestChargeOrders();
         return;
     }
 }
@@ -1013,3 +1687,4 @@ void MainWindow::logout()
     emit logoutRequested();
     close();
 }
+

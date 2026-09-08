@@ -38,7 +38,8 @@ SOURCES += \
     biz/order_service.cpp \
     biz/statistics_service.cpp \
     biz/ext_08_carbon_calc.cpp \
-    biz/ext_08_carbon_service.cpp
+    biz/ext_08_carbon_service.cpp \
+    biz/order_flow_service.cpp
 
 HEADERS += \
     ../common/protocol_ext.h \
