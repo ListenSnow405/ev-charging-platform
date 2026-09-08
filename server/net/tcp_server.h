@@ -1,12 +1,12 @@
 #pragma once
 // -----------------------------------------------------------------------------
-//  server/net/tcp_server.h  —  TCP 服务器（改造后）
+//  server/net/tcp_server.h  —  TCP 服务器：监听 + 组装各组件
 //  归属 L1。
 //
-//  模型：主线程 Qt 事件循环（QSocketNotifier 监听 listen fd + QTimer 定时清理）
-//        + 独立 pthread epoll IO 线程（管理全部业务 fd 的读写）
-//        + pthread 线程池（只跑短业务 handler）。
-//  socket/bind/listen/accept 仍是 POSIX 调用，仅「何时 accept」交由 Qt 通知。
+//  使用说明：只能由 main.cpp 主线调用，listenOn() 后跑 app.exec()，最终停止调 stop()。
+//
+//  依赖：epoll_loop、thread_pool；持有Qt 对象 QSocketNotifier/QTimer，只能主线使用）
+//  线程：所有 Qt 对象、槽函数**仅在 Qt 主线程执行**；不做任何 socket recv/send 系统调用
 // -----------------------------------------------------------------------------
 #include <QObject>
 #include <QSocketNotifier>

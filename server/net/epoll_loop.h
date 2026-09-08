@@ -1,10 +1,13 @@
 #pragma once
 // -----------------------------------------------------------------------------
 //  server/net/epoll_loop.h  —  epoll IO 线程
-//  归属 L1。pthread 线程，统一管理全部业务 socket 的读写。
-//   - recv + FrameParser 切帧（粘包/半包），不执行业务；
-//   - 切出完整 payload 后投递短任务到线程池；
-//   - EPOLLOUT 时从各连接发送队列取帧 send。
+//  归属 L1。
+//  独立 pthread 线程，统一管理全部业务 socket 的读写，负责 recv、FrameParser 切帧（处理粘包/半包）、投递短任务到线程池，不执行业务。
+//
+//  使用说明：内部组件，业务代码不接触，禁止外部直接操作。
+//
+//  依赖：conn_ctx、io_wake、device_registry、thread_pool
+// 线程：addConnection() 允许 Qt 主线调用；IO 事件处理仅运行在独立 pthread IO 线程
 // -----------------------------------------------------------------------------
 #include <atomic>
 #include <cstdint>

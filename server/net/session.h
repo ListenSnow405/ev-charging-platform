@@ -1,9 +1,14 @@
 #pragma once
 // -----------------------------------------------------------------------------
-//  server/net/session.h  —  会话表（token → 身份）
-//  归属 L1。 docs/protocol.md 第 6 节：token 32 位十六进制，有效期 7200 秒
+//  server/net/session.h  —  token 会话表
+//  归属 L1。
+//  跨线程共享，读多写少 → 用 pthread_rwlock 保护，可并发调用；。
 //
-//  会话表跨线程共享，读多写少 → 用 pthread_rwlock 保护。
+//  使用说明：
+//   - 接口自带 rwlock，调用方禁止自行加/解锁。
+//   - validate 失败即 token 无效。
+//   - 会话依靠token过期、登出、强制下线、sweepExpired来销毁，网络socket断开不会自动销毁会话，客户端断连重连可复用原有token。
+//   - sweepExpired() 由外部定时每60s触发，释放过期token。
 // -----------------------------------------------------------------------------
 #include <pthread.h>
 #include <QHash>

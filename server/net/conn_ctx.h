@@ -3,11 +3,18 @@
 //  server/net/conn_ctx.h  —  单条 TCP 连接的运行时状态
 //  归属 L1。
 //
-//  线程归属（改造后）：
+//  线程归属：
 //   - m_fd：只由 epoll IO 线程读写（recv/send/close），业务线程绝不碰 fd。
 //   - m_sendQueue + m_sendMtx：业务线程入队、IO 线程出队，跨线程共享。
 //   - parser / sending / sentOff / pileCode：仅 IO 线程访问，不加锁。
 //   - m_closed：IO 线程写，任意线程读（原子）。
+//
+//  使用说明：
+//   - 业务线程只调 enqueueSend() 投递待发送帧。
+//   - 禁止业务层直接读写 fd、直接调用 recv/send/shutdown。
+//
+//  依赖：无其他 net模块强依赖；生命周期由std::shared_ptr管理
+//  线程：enqueueSend()多线程安全；IO 字段仅允许 epoll‑IO 线程访问
 // -----------------------------------------------------------------------------
 #include <atomic>
 #include <deque>

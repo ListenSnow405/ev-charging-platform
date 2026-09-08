@@ -1,10 +1,14 @@
 #pragma once
 // -----------------------------------------------------------------------------
 //  server/net/dispatcher.h  —  命令字分发
-//  归属 L1（框架） / L2（注册各业务 handler）
+//  归属 L1（框架）/ L2（注册）。
 //
-//  docs/protocol.md 第 3 节：请求信封 {cmd, seq, token, data}
-//  未注册的命令字统一返回 ERR_CMD_UNKNOWN。
+//  使用说明：
+//   - L2 可调用 registerHandler() 注册，鉴权由 dispatcher 自动做，handler 只读 req.session。
+//   - 禁止 handler 内部阻塞过长时间；禁止 handler 直接操作 socket fd。
+//
+//  依赖：frame 帧解析、protocol；业务 biz、device_service 向它注册 handler
+//  线程：handle()运行在线程池工作线程
 // -----------------------------------------------------------------------------
 #include <QHash>
 #include <QJsonObject>

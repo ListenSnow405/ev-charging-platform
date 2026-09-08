@@ -1,8 +1,13 @@
 #pragma once
 // -----------------------------------------------------------------------------
-//  server/net/io_wake.h  —  epoll IO 线程唤醒机制（eventfd）
+//  server/net/io_wake.h  —  epoll IO 线程唤醒（eventfd）
 //  归属 L1。
-//  业务线程入队后调 wakeIoLoop() 写一字节唤醒 epoll_wait，由 IO 线程重新 arm EPOLLOUT。
+//  任意线程可调用 wakeIoLoop() 写一字节唤醒 epoll_wait，由 IO 线程重新 arm EPOLLOUT。
+//
+//  使用说明：内部唤醒机制，禁止外部操作原始 wake fd；不要多次 init、不要外部 close。
+//
+//  依赖：glibc GNU 扩展 (eventfd)
+//  线程：全部接口线程安全；仅内部初始化 / 销毁在 IO 线程
 // -----------------------------------------------------------------------------
 namespace ecp {
 

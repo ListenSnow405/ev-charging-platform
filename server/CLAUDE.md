@@ -7,7 +7,7 @@
 
 | 子目录 | 归属 | 内容 |
 | --- | --- | --- |
-| `net/` | **L1** | socket 监听、pthread 线程池、会话表、命令字分发 |
+| `net/` | **L1** | socket 监听、epoll IO 线程、pthread 线程池、会话表、命令字分发、设备注册表 |
 | `biz/` | **L2** | 九个业务服务，清单见 [biz/README.md](biz/README.md) |
 | `dao/` | **L2** | SQLite 访问层 |
 
@@ -15,8 +15,8 @@
 
 ## 本模块特有规则
 
-1. **网络层用 POSIX 原生 socket，不是 QTcpServer。** [说明书] 1.6 点名 Socket 编程，这是考核点。
-2. **线程池必须是 pthread，不得改用 QThread。** 同为 [说明书] 1.6 考核点。
+1. **网络层用 POSIX socket + epoll，叠加 Qt QSocketNotifier/QTimer 做事件调度。** [说明书] 1.6 Socket 编程。
+2. **线程池用 pthread 实现多线程结构。** [说明书] 1.6 多线程考核点。
 3. **每个工作线程一个数据库连接**，一律通过 `ecp::threadDb()` 获取，禁止自己 `addDatabase`。
 4. **`SIGPIPE` 已在 main 中忽略**，不要移除——向已关闭连接写数据会杀死进程。
 5. handler 抛异常会被 dispatcher 捕获并返回 `ERR_INTERNAL`，但不要依赖这个兜底，业务里该判的要判。
