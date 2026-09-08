@@ -10,6 +10,31 @@ ROOT=$(pwd)
 TMP_DIR=""
 SERVER_PID=""
 
+apply_sql_file()
+{
+    local database="$1"
+    local sql_file="$2"
+
+    if command -v sqlite3 >/dev/null; then
+        sqlite3 "$database" < "$sql_file"
+    else
+        python3 - "$sql_file" "$database" <<'PY'
+import pathlib
+import sqlite3
+import sys
+
+schema_path = pathlib.Path(sys.argv[1])
+database_path = pathlib.Path(sys.argv[2])
+connection = sqlite3.connect(database_path)
+try:
+    connection.executescript(schema_path.read_text(encoding="utf-8"))
+    connection.commit()
+finally:
+    connection.close()
+PY
+    fi
+}
+
 cleanup()
 {
     local status="${1:-$?}"
@@ -41,23 +66,22 @@ TEST_DB="$TMP_DIR/charging-test.db"
 TEST_CONFIG="$TMP_DIR/app-test.ini"
 SERVER_LOG="$TMP_DIR/server.log"
 
-if command -v sqlite3 >/dev/null; then
-    sqlite3 "$TEST_DB" < "$ROOT/docs/db-schema.sql"
-else
-    python3 - "$ROOT/docs/db-schema.sql" "$TEST_DB" <<'PY'
-import pathlib
-import sqlite3
-import sys
+apply_sql_file "$TEST_DB" "$ROOT/docs/db-schema.sql"
 
-schema_path = pathlib.Path(sys.argv[1])
-database_path = pathlib.Path(sys.argv[2])
-connection = sqlite3.connect(database_path)
-try:
-    connection.executescript(schema_path.read_text(encoding="utf-8"))
-    connection.commit()
-finally:
-    connection.close()
-PY
+shopt -s nullglob
+EXT_SQL=("$ROOT"/docs/db-schema-ext-*.sql)
+shopt -u nullglob
+if [ ${#EXT_SQL[@]} -gt 0 ]; then
+    echo "applying extension schemas (${#EXT_SQL[@]} files, 2 passes)..."
+    for pass in 1 2; do
+        echo "  pass $pass"
+        for file in "${EXT_SQL[@]}"; do
+            apply_sql_file "$TEST_DB" "$file"
+            echo "    ok ${file#"$ROOT"/}"
+        done
+    done
+else
+    echo "no extension schemas found"
 fi
 
 TEST_PORT=$(python3 - <<'PY'
