@@ -27,6 +27,8 @@ SOURCES += \
     net/io_wake.cpp \
     net/device_registry.cpp \
     net/epoll_loop.cpp \
+    net/device_service.cpp \
+    net/user_registry.cpp \
     dao/db.cpp \
     biz/user_service.cpp \
     biz/admin_service.cpp \
@@ -51,6 +53,7 @@ HEADERS += \
     net/conn_ctx.h \
     net/io_wake.h \
     net/device_registry.h \
+    net/user_registry.h \
     net/epoll_loop.h \
     dao/db.h \
     biz/ext_08_carbon_calc.h

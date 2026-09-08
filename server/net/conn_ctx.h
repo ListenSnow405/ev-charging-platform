@@ -52,6 +52,9 @@ public:
     qint64      sentOff = 0;    // 当前帧已发送偏移（处理半包写）
     QString     pileCode;       // 9001 注册后填入；非设备连接为空
 
+    // 用户鉴权后由 dispatcher 写入（写一次），closeConnection 读取注销；0 = 未登录
+    int         userId = 0;
+
 private:
     int                    m_fd;
     std::atomic<bool>      m_closed{false};

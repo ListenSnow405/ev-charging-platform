@@ -14,6 +14,7 @@
 #include "io_wake.h"
 #include "logger.h"
 #include "thread_pool.h"
+#include "user_registry.h"
 
 namespace ecp {
 
@@ -180,6 +181,8 @@ void EpollLoop::closeConnection(const std::shared_ptr<ConnectionCtx> &ctx)
     }
     if (!ctx->pileCode.isEmpty())
         DeviceRegistry::instance().unregisterDevice(ctx->pileCode, ctx.get());
+    if (ctx->userId != 0)
+        UserRegistry::instance().unregisterUser(ctx->userId, ctx.get());
     LOG_I(QStringLiteral("连接关闭 fd=%1").arg(fd));
 }
 

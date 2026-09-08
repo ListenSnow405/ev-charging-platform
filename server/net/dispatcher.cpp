@@ -1,6 +1,7 @@
 #include "dispatcher.h"
 #include "protocol.h"
 #include "logger.h"
+#include "user_registry.h"
 
 namespace ecp {
 
@@ -43,6 +44,11 @@ QByteArray Dispatcher::handle(const QByteArray &payload, std::shared_ptr<Connect
         if (!SessionTable::instance().validate(req.token, req.session))
             return buildResponse(req.cmd, req.seq, ERR_TOKEN_INVALID);
         req.authed = true;
+        // 登记用户连接（供 1208 推送）：仅 ROLE_USER
+        if (req.session.role == ROLE_USER && req.conn) {
+            req.conn->userId = req.session.id;
+            UserRegistry::instance().registerUser(req.session.id, req.conn);
+        }
     }
 
     QJsonObject out;

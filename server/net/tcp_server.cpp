@@ -14,6 +14,8 @@
 #include "logger.h"
 #include "session.h"
 
+namespace ecp { void sweepOfflineDevices(); }   // 定义在 device_service.cpp
+
 namespace ecp {
 
 TcpServer::TcpServer(QObject *parent)
@@ -105,7 +107,7 @@ void TcpServer::setupAccepted(int fd)
 void TcpServer::onSweep()
 {
     SessionTable::instance().sweepExpired();
-    // TODO(L1)：设备离线判定 —— last_heartbeat 超时的 t_pile 置 online=0，写 t_pile_log(event=1)
+    sweepOfflineDevices();   // 设备离线判定（device_service.cpp）
 }
 
 void TcpServer::stop()

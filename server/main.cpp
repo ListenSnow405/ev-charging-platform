@@ -39,7 +39,7 @@ static void onSignal(int) { g_quitRequested.store(true); }
 //  TODO(L2)：在 server/biz/ 下实现各服务后，在此逐个注册。
 //            清单见 server/biz/README.md 与 docs/protocol.md 第 4 节。
 // -----------------------------------------------------------------------------
-namespace ecp { void registerUserService(); void registerAdminService(); void registerWalletService(); void registerUserManagementService(); void registerStationService(); void registerPileService(); void registerReservationService(); void registerOrderService(); void registerStatisticsService(); }
+namespace ecp { void registerUserService(); void registerAdminService(); void registerWalletService(); void registerUserManagementService(); void registerStationService(); void registerPileService(); void registerReservationService(); void registerOrderService(); void registerStatisticsService(); void registerDeviceService(); }
 
 // 扩展模块（加分项）注册入口，各自独立文件，见 docs/expand/00 第 5.2 节
 namespace ecp { void registerExt08CarbonService(); }
@@ -126,6 +126,8 @@ static void registerAllServices()
     registerReservationService(); // 1202 / 1206 [说明书] 1.4 预约充电
     registerOrderService();     // 1201 / 1207 / 2304 [说明书] 1.4 订单查询
     registerStatisticsService(); // 2301–2303 [说明书] 1.4 营收与电桩状态统计
+
+    registerDeviceService();     // 9001–9004 [说明书] 1.4 远程重启（设备侧）
 
     // ---- 扩展模块（加分项）· 受 t_sys_config 功能开关控制 ----
     // 新增扩展模块时在这里加一行即可，开关键统一走 feat_<模块号>_<名字>
