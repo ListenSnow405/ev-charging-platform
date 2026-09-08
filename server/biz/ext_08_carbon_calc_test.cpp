@@ -232,12 +232,57 @@ int main()
     check(!factorOverlaps(factors, n), QStringLiteral("[a,b) 紧邻 [b,c) → 不算重叠"));
     n.effectFrom = QStringLiteral("2026-06-01 00:00:00"); n.effectTo = QString();
     n.region = QStringLiteral("华东");
-    check(!factorOverlaps(factors, n), QStringLiteral("不同区域 → 不比较"));
+    // 只有一条全局因子时间线，换个区域名不能成为绕过重叠校验的后门
+    check(factorOverlaps(factors, n), QStringLiteral("不同区域但时间重叠 → 仍判重叠"));
     n.region = QStringLiteral("华南");
     n.effectFrom = QStringLiteral("2026-01-01 00:00:00");
     n.effectTo   = QStringLiteral("2026-07-01 00:00:00");
     check(!factorOverlaps(factors, n, /*skipFactorId=*/1),
           QStringLiteral("修订自身时跳过自己 → 不判重叠"));
+
+    out << "\n[7b] 因子接续：开区间因子被新版本闭合（裁决 D9）\n";
+    {
+        QVector<Factor> line;
+        Factor open;  open.factorId = 10; open.region = QStringLiteral("全国");
+        open.version = QStringLiteral("2022");
+        open.effectFrom = QStringLiteral("2000-01-01 00:00:00");
+        open.effectTo = QString();                    // 开区间，正是种子因子的形状
+        open.gPerKwh = 581; line.append(open);
+
+        Factor next; next.region = QStringLiteral("全国"); next.version = QStringLiteral("2023");
+        next.effectFrom = QStringLiteral("2026-09-01 00:00:00");
+        eq(openEndedPredecessor(line, next), 10,
+           QStringLiteral("起点更晚 → 认定接续开区间因子 10"));
+
+        // 起点早于开区间因子的起点：那是往历史里插队，不是接续
+        next.effectFrom = QStringLiteral("1999-01-01 00:00:00");
+        eq(openEndedPredecessor(line, next), 0,
+           QStringLiteral("起点更早 → 不算接续（不能往历史里插队）"));
+
+        // 起点与开区间因子起点相同：同样不是接续，会与它整个区间重叠
+        next.effectFrom = QStringLiteral("2000-01-01 00:00:00");
+        eq(openEndedPredecessor(line, next), 0, QStringLiteral("起点相同 → 不算接续"));
+
+        // 闭区间因子不是接续对象
+        QVector<Factor> closed;
+        Factor c1 = open; c1.effectTo = QStringLiteral("2026-01-01 00:00:00");
+        closed.append(c1);
+        next.effectFrom = QStringLiteral("2026-09-01 00:00:00");
+        eq(openEndedPredecessor(closed, next), 0, QStringLiteral("闭区间因子不是接续对象"));
+
+        // 停用的开区间因子不参与
+        QVector<Factor> disabled;
+        Factor d1 = open; d1.enabled = false; disabled.append(d1);
+        eq(openEndedPredecessor(disabled, next), 0, QStringLiteral("停用的因子不是接续对象"));
+
+        // 多个开区间因子 = 破损状态，返回 -1 让调用方拒绝
+        QVector<Factor> broken = line;
+        Factor open2 = open; open2.factorId = 11; open2.version = QStringLiteral("2021");
+        open2.effectFrom = QStringLiteral("2001-01-01 00:00:00");
+        broken.append(open2);
+        eq(openEndedPredecessor(broken, next), -1,
+           QStringLiteral("存在多个开区间因子 → -1，调用方须拒绝写入"));
+    }
 
     out << "\n[8] 因子边界必须对齐自然日（裁决 D6）\n";
     check(isDayAlignedBoundary(QStringLiteral("2026-01-01 00:00:00")),

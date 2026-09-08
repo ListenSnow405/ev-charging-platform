@@ -89,7 +89,7 @@ int completenessPct(qint64 totalKwhX100, qint64 unallocKwhX100);
 // 排放因子。生效区间左闭右开 [effectFrom, effectTo)，effectTo 为空串表示右开无穷。
 struct Factor {
     int     factorId = 0;
-    QString region;
+    QString region;          // 描述性标签，不参与因子选择（见 factorOverlaps 说明）
     QString version;
     QString effectFrom;      // 'yyyy-MM-dd HH:mm:ss'
     QString effectTo;        // 空串 = 无穷
@@ -111,11 +111,28 @@ bool isDayAlignedBoundary(const QString &timeText);
 // 取在 atTime 生效的因子（左闭右开、只看 enabled）。无匹配返回 false。
 bool pickFactor(const QVector<Factor> &factors, const QString &atTime, Factor *out);
 
-// 新因子与同区域既有因子的生效区间是否重叠。相邻不算重叠（[a,b) 与 [b,c) 合法）。
+// 新因子与既有因子的生效区间是否重叠。相邻不算重叠（[a,b) 与 [b,c) 合法）。
 // 用于 3742 写入前校验，重叠返回 true → ERR_CARBON_FACTOR_OVERLAP(6702)。
 // skipFactorId > 0 时跳过该条（修订自身时用）。
+//
+// ⚠ **跨区域也算重叠**：本系统只有一条全局因子时间线，pickFactor() 不看 region
+//   （t_carbon_daily 与 t_station 都没有区域维度），region 只是描述性标签。
+//   按区域分别查重叠的话，换个区域名就能绕过校验塞进重叠因子，历史数字会被悄悄改掉。
 bool factorOverlaps(const QVector<Factor> &existing, const Factor &incoming,
                     int skipFactorId = 0);
+
+// 找出将被新因子「接续」的开区间因子（effect_to 为空、且起点早于新因子起点）。
+// 返回其 factor_id；没有返回 0；存在多个（本不该发生的破损状态）返回 -1。
+//
+// 为什么需要它：排放因子在现实中就是接续发布的 —— 2023 版一出，2022 版自然截止。
+// 种子因子是 [2000-01-01, ∞)，若把它当成普通重叠一律拒绝，就再也发布不了新版本，
+// 3742 出厂即不可用。所以新因子起点晚于开区间因子起点时，不算冲突，而是**接续**：
+// 由 3742 在同一事务里把旧因子闭合到新因子的起点。
+//
+// ⚠ 接续会改变新起点之后所有日期的结果。这是发布新因子的应有之义，
+//   但必须记日志，并且既有报告会在下次查询时被判为 STALE。
+int openEndedPredecessor(const QVector<Factor> &existing, const Factor &incoming,
+                         int skipFactorId = 0);
 
 } // namespace carbon
 } // namespace ecp

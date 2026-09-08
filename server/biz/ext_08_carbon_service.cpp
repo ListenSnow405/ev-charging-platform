@@ -369,8 +369,7 @@ struct DayRow {
 struct RangeTotals {
     QMap<QString, DayRow> byDate;             // QMap 天然按日期字符串升序
     DayRow        sum;
-    QSet<QString> factorVersions;
-    QString       minCutoff;                  // 范围内最保守的数据截止时刻
+    QString       minCutoff;                  // 范围内最保守的数据截止时刻；无行时为空
 };
 
 static int loadRangeTotals(QSqlDatabase &db, int stationId, const QDate &from, const QDate &to,
@@ -410,7 +409,6 @@ static int loadRangeTotals(QSqlDatabase &db, int stationId, const QDate &from, c
         r.unalloc  += q.value(7).toLongLong();
         r.cnt      += q.value(8).toLongLong();
         r.emission += q.value(9).toLongLong();
-        out->factorVersions.insert(q.value(1).toString());
         const QString cut = q.value(10).toString();
         if (out->minCutoff.isEmpty() || cut < out->minCutoff) out->minCutoff = cut;
     }
@@ -440,6 +438,22 @@ static int buildFactorByDate(const QVector<Factor> &factors, const QDate &from, 
         out->insert(date, f.version);
     }
     return ERR_OK;
+}
+
+// 该范围归哪些因子版本管辖。
+//
+// ⚠ 取自逐日因子表，**不是**取自聚合行：某天没有订单就没有行，但那天照样归某个
+//   因子管。按行取的话，一个完全没有数据的范围会得到空列表，而空的 QStringList
+//   join 出来是 **null QString**（不是空串），绑进 NOT NULL 列就是约束失败。
+//   按日取则永远至少有一个版本 —— 因为 ensureRange 已经保证每天都能选到因子。
+static QStringList factorVersionsOf(const QMap<QString, QString> &factorByDate)
+{
+    QSet<QString> versions;
+    for (auto it = factorByDate.constBegin(); it != factorByDate.constEnd(); ++it)
+        versions.insert(it.value());
+    QStringList list = versions.values();
+    list.sort();                              // QSet 无序，排序后结果才可复现
+    return list;
 }
 
 // -----------------------------------------------------------------------------
@@ -619,8 +633,7 @@ static int handleCarbonMetric(const Request &req, QJsonObject &out)
     totals["intensityGPerKwh"] = intensityGPerKwh(sum.emission, sum.total);
     totals["completeness"]     = completenessPct(sum.total, sum.unalloc);
 
-    QStringList versions = agg.factorVersions.values();
-    versions.sort();                          // QSet 无序，排序后响应才可复现
+    const QStringList versions = factorVersionsOf(factorByDate);
 
     out["list"]          = list;
     out["totals"]        = totals;
@@ -770,8 +783,10 @@ static int handleReportGen(const Request &req, QJsonObject &out)
     const int lrc = loadRangeTotals(db, stationId, from, to, factorByDate, &agg);
     if (lrc != ERR_OK) return lrc;
 
-    QStringList versions = agg.factorVersions.values();
-    versions.sort();
+    const QStringList versions = factorVersionsOf(factorByDate);
+    // 范围内一行都没有时，agg.minCutoff 是 null QString。截止时刻此时就是本次请求的
+    // 起始时刻 —— 没有更早的数据来约束它。
+    const QString reportCutoff = agg.minCutoff.isEmpty() ? cutoffTime : agg.minCutoff;
 
     const QString fromText = from.toString(QLatin1String(DATE_FMT));
     const QString toText   = to.toString(QLatin1String(DATE_FMT));
@@ -815,7 +830,7 @@ static int handleReportGen(const Request &req, QJsonObject &out)
     ins.addBindValue(versions.join(QLatin1Char('/')));
     ins.addBindValue(QString::fromLatin1(ALGO_VERSION()));
     ins.addBindValue(QStringLiteral("FIXED_RANGE"));   // 模块 05 未落地，固定时段口径
-    ins.addBindValue(agg.minCutoff);
+    ins.addBindValue(reportCutoff);
     ins.addBindValue(nowText());
     // req_id 为空时存 NULL：UNIQUE 列里多行空串会互相冲突，NULL 则彼此不冲突
     ins.addBindValue(reqId.isEmpty() ? QVariant(QMetaType(QMetaType::QString)) : QVariant(reqId));
@@ -1295,12 +1310,44 @@ static int handleFactorSet(const Request &req, QJsonObject &out)
     incoming.effectTo   = effectTo;
     incoming.gPerKwh    = gPerKwh;
     incoming.source     = source;
-    if (factorOverlaps(existing, incoming)) {
+
+    // 「接续发布」：起点早于新因子的开区间因子不算冲突，而是要被闭合到新因子起点。
+    // 种子因子是 [2000-01-01, 无穷)，不这样处理就永远发布不了第二版（见头文件说明）。
+    const int superseded = openEndedPredecessor(existing, incoming);
+    if (superseded < 0) {
+        LOG_E(QStringLiteral("存在多个开区间因子，因子表已处于破损状态，拒绝写入"));
+        return ERR_CARBON_FACTOR_OVERLAP;
+    }
+    QVector<Factor> rivals;                      // 接续对象不参与重叠判定
+    for (const Factor &f : existing)
+        if (f.factorId != superseded) rivals.append(f);
+
+    if (factorOverlaps(rivals, incoming)) {
         LOG_W(QStringLiteral("因子 %1/%2 [%3, %4) %5")
                   .arg(region, version, effectFrom,
-                       effectTo.isEmpty() ? QStringLiteral("∞") : effectTo,
+                       effectTo.isEmpty() ? QStringLiteral("无穷") : effectTo,
                        errMsgExt(ERR_CARBON_FACTOR_OVERLAP)));
         return ERR_CARBON_FACTOR_OVERLAP;
+    }
+
+    // 闭合旧因子与写入新因子必须同进同出：只做一半会留下一段空档期或一段重叠区间，
+    // 而这两种状态都会让 pickFactor 的结果说不清楚。
+    if (!db.transaction()) {
+        LOG_E(QStringLiteral("开启事务失败: %1").arg(db.lastError().text()));
+        return ERR_INTERNAL;
+    }
+    if (superseded > 0) {
+        QSqlQuery close(db);
+        close.prepare(QStringLiteral(
+            "UPDATE t_carbon_factor SET effect_to = ?"
+            " WHERE factor_id = ? AND effect_to IS NULL"));
+        close.addBindValue(effectFrom);
+        close.addBindValue(superseded);
+        if (!close.exec()) {
+            LOG_E(QStringLiteral("闭合旧因子 %1 失败: %2").arg(superseded).arg(close.lastError().text()));
+            db.rollback();
+            return ERR_INTERNAL;
+        }
     }
 
     QSqlQuery ins(db);
@@ -1318,17 +1365,28 @@ static int handleFactorSet(const Request &req, QJsonObject &out)
     ins.addBindValue(nowText());
     if (!ins.exec()) {
         LOG_E(QStringLiteral("写入排放因子失败: %1").arg(ins.lastError().text()));
+        db.rollback();
+        return ERR_INTERNAL;
+    }
+    const int factorId = ins.lastInsertId().toInt();
+    if (!db.commit()) {
+        LOG_E(QStringLiteral("提交排放因子失败: %1").arg(db.lastError().text()));
+        db.rollback();
         return ERR_INTERNAL;
     }
 
-    const int factorId = ins.lastInsertId().toInt();
-    out["factorId"] = factorId;
-    out["created"]  = true;
-    LOG_I(QStringLiteral("新增排放因子 %1/%2 = %3 g/度，生效 [%4, %5)，factorId=%6。"
-                         "受影响日期将在下次 3740 查询时自动重算，旧版本行保留")
+    out["factorId"]           = factorId;
+    out["created"]            = true;
+    out["supersededFactorId"] = superseded;      // 0 表示没有接续任何因子
+    LOG_I(QStringLiteral("新增排放因子 %1/%2 = %3 g/度，生效 [%4, %5)，factorId=%6")
               .arg(region, version).arg(gPerKwh)
-              .arg(effectFrom, effectTo.isEmpty() ? QStringLiteral("∞") : effectTo)
+              .arg(effectFrom, effectTo.isEmpty() ? QStringLiteral("无穷") : effectTo)
               .arg(factorId));
+    if (superseded > 0)
+        LOG_W(QStringLiteral("因子 %1 已被接续，生效止闭合到 %2。"
+                             "该时刻之后所有日期将改用新因子重算，"
+                             "覆盖这些日期的既有报告会在下次查询时置为 STALE")
+                  .arg(superseded).arg(effectFrom));
     return ERR_OK;
 }
 

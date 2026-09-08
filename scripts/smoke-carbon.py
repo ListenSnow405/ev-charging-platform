@@ -12,6 +12,9 @@
 
     --db PATH   额外做一次「服务端数字 vs SQLite 直算」对拍（只读打开）
 
+⚠ --mutating 会写 t_carbon_factor / t_carbon_report 并落导出文件；新增因子时
+  演示因子的开区间会被**接续闭合**（裁决 D9）。请在库副本上跑，或接受这些改动。
+
 退出码：0 = 全过，1 = 有断言失败
 """
 
@@ -247,12 +250,27 @@ def validate_factor_set_guards(client, token, existing):
     print(f"[PASS] 3742 入参校验：{len(bad)} 种非法入参全部被拒")
 
     # 与演示因子 [2000-01-01, ∞) 相交 → 6702
+    # 起点早于演示因子起点且区间与之相交 → 真重叠（起点更晚会被当成合法接续）
     response = client.request(CMD_EXT_FACTOR_SET, token, {
         "region": demo["region"], "version": "overlap-probe", "source": "重叠探针",
-        "factorGPerKwh": 500, "effectFrom": "2026-01-01 00:00:00"})
+        "factorGPerKwh": 500, "effectFrom": "1990-01-01 00:00:00",
+        "effectTo": "2010-01-01 00:00:00"})
     require(response["code"] == ERR_CARBON_FACTOR_OVERLAP, CMD_EXT_FACTOR_SET,
             f"生效区间重叠 → ERR_CARBON_FACTOR_OVERLAP({ERR_CARBON_FACTOR_OVERLAP})", response["code"])
     print(f"[PASS] 3742 重叠拒绝：与演示因子相交 → {ERR_CARBON_FACTOR_OVERLAP}")
+
+    # 换个区域名不能成为绕过重叠校验的后门 —— 本系统只有一条全局因子时间线，
+    # pickFactor 不看 region。放行的话历史数字会被悄悄改掉（实测 581 → 999）。
+    # 起点必须早于演示因子起点，否则会被当成合法的「接续发布」而不是重叠。
+    # 这里要验的是：换个区域名不能绕过重叠校验。
+    response = client.request(CMD_EXT_FACTOR_SET, token, {
+        "region": "另一个电网", "version": "cross-region-probe", "source": "跨区域重叠探针",
+        "factorGPerKwh": 999, "effectFrom": "1990-01-01 00:00:00",
+        "effectTo": "2010-01-01 00:00:00"})
+    require(response["code"] == ERR_CARBON_FACTOR_OVERLAP, CMD_EXT_FACTOR_SET,
+            f"跨区域时间重叠 → ERR_CARBON_FACTOR_OVERLAP({ERR_CARBON_FACTOR_OVERLAP})",
+            response["code"])
+    print(f"[PASS] 3742 跨区域重叠：换区域名也被拒 → {ERR_CARBON_FACTOR_OVERLAP}")
 
     # 原样重提演示因子 → 幂等命中，不新建
     data = expect_ok(client.request(CMD_EXT_FACTOR_SET, token, {
@@ -277,6 +295,13 @@ def validate_factor_set_write(client, token, existing):
     data = expect_ok(client.request(CMD_EXT_FACTOR_SET, token, payload), CMD_EXT_FACTOR_SET)
     require(data["created"] is True, CMD_EXT_FACTOR_SET, "首次写入 created == True", data["created"])
     print(f"[PASS] 3742 新增因子：factorId={data['factorId']}")
+
+    # 演示因子是 [2000-01-01, 无穷)，新因子起点更晚 → 自动接续，把它闭合到新起点。
+    # 不这样处理的话，出厂状态下第二个因子永远发布不进去（裁决 D9）。
+    require(data.get("supersededFactorId", 0) > 0, CMD_EXT_FACTOR_SET,
+            "新因子接续了既有开区间因子", data)
+    print(f"[PASS] 3742 接续发布：旧开区间因子 {data['supersededFactorId']} 已闭合到 "
+          f"{payload['effectFrom'][:10]}")
 
     again = expect_ok(client.request(CMD_EXT_FACTOR_SET, token, payload), CMD_EXT_FACTOR_SET)
     require(again["created"] is False and again["factorId"] == data["factorId"],
@@ -366,6 +391,19 @@ def validate_report_write(client, token, date_from, date_to):
                 f"报告快照 {key} == 3740 当前汇总 {metric['totals'][key]}", row[key])
     print("[PASS] 报告快照与 3740 当前汇总逐格一致")
 
+    # 空范围也要能生成并导出报告：这条曾经是 1099（factor_version 绑成了 NULL）
+    empty = expect_ok(client.request(CMD_EXT_REPORT_GEN, token,
+                                     {"scope": "ALL", "stationId": 0,
+                                      "dateFrom": "2030-01-01", "dateTo": "2030-01-03",
+                                      "reqId": "smoke-empty-range"}), CMD_EXT_REPORT_GEN)
+    require(empty["status"] == "READY", CMD_EXT_REPORT_GEN, "空范围报告生成成功", empty)
+    rows = expect_ok(client.request(CMD_EXT_REPORT_LIST, token, {}), CMD_EXT_REPORT_LIST)["list"]
+    erow = next(r for r in rows if r["reportId"] == empty["reportId"])
+    require(bool(erow["factorVersion"]) and bool(erow["cutoffTime"]), CMD_EXT_REPORT_LIST,
+            "空范围报告的因子版本与截止时刻非空", erow)
+    require(erow["totalKwhX100"] == 0, CMD_EXT_REPORT_LIST, "空范围报告总量为 0", erow)
+    print("[PASS] 3743 空范围：报告可生成，因子版本与截止时刻均已落库")
+
     for fmt, marker in (("csv", "指标,数值,单位"), ("html", "<!doctype html>")):
         exp = expect_ok(client.request(CMD_EXT_REPORT_EXPORT, token,
                                        {"reportId": report_id, "format": fmt}),
@@ -394,7 +432,13 @@ def validate_empty_range(client, token):
             "总量为 0 时 completeness == -1（不适用），不得伪装成 100", data["completeness"])
     require(totals["intensityGPerKwh"] == -1, CMD_EXT_CARBON_METRIC,
             "总量为 0 时强度 == -1", totals["intensityGPerKwh"])
-    print("[PASS] 空日期范围：返回空列表、完整度与强度均为 -1 不适用")
+    # 没有数据 ≠ 没有因子：该范围照样归某个因子管辖，必须报得出来。
+    # 这里为空说明因子版本是按聚合行取的，而不是按日取的 —— 那条路会让
+    # 3743 往 NOT NULL 列里绑 null（空 QStringList 的 join 是 null 而非空串）。
+    require(bool(data["factorVersion"]), CMD_EXT_CARBON_METRIC,
+            "无数据时仍报出管辖因子版本", repr(data["factorVersion"]))
+    print(f"[PASS] 空日期范围：空列表、完整度与强度均为 -1，仍报出因子 "
+          f"{data['factorVersion']!r}")
 
 
 def validate_idempotent(client, token, date_from, date_to):

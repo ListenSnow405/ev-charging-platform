@@ -227,7 +227,11 @@ bool factorOverlaps(const QVector<Factor> &existing, const Factor &incoming, int
 
     for (const Factor &f : existing) {
         if (f.factorId == skipFactorId) continue;
-        if (f.region != incoming.region) continue;               // 区间只在同区域内比较
+        // ⚠ 跨区域也要比。本系统只有**一条全局因子时间线**：t_carbon_daily 没有区域列，
+        //   t_station 也没有，pickFactor() 因此不看 region —— region 纯粹是因子上的
+        //   描述性标签。若只在同区域内查重叠，换个区域名就能塞进一个时间上重叠的因子，
+        //   pickFactor 会按 effect_from 倒序取到其中一个，历史数字被悄悄改掉且无人察觉。
+        //   （2026-09-08 实测：加一个「华东电网」因子，强度从 581 变成 999。）
         const QDateTime ef = QDateTime::fromString(f.effectFrom, QLatin1String(TIME_FMT));
         if (!ef.isValid()) continue;
         const QDateTime et = f.effectTo.isEmpty()
@@ -240,6 +244,25 @@ bool factorOverlaps(const QVector<Factor> &existing, const Factor &incoming, int
         if (!leftOk && !rightOk) return true;
     }
     return false;
+}
+
+int openEndedPredecessor(const QVector<Factor> &existing, const Factor &incoming,
+                         int skipFactorId)
+{
+    const QDateTime nf = QDateTime::fromString(incoming.effectFrom, QLatin1String(TIME_FMT));
+    if (!nf.isValid()) return 0;
+
+    int found = 0;
+    for (const Factor &f : existing) {
+        if (f.factorId == skipFactorId) continue;
+        if (!f.enabled) continue;
+        if (!f.effectTo.isEmpty()) continue;                     // 只看开区间因子
+        const QDateTime ef = QDateTime::fromString(f.effectFrom, QLatin1String(TIME_FMT));
+        if (!ef.isValid() || ef >= nf) continue;                 // 起点必须严格早于新因子
+        if (found != 0) return -1;                               // 多个开区间 = 破损状态
+        found = f.factorId;
+    }
+    return found;
 }
 
 } // namespace carbon
