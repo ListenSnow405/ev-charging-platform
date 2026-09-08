@@ -224,14 +224,58 @@ Ext08CarbonPage::Ext08CarbonPage(NetClient *net, QWidget *parent)
         });
         return timer;
     };
-    m_metricTimer    = makeTimer(&m_metricSeq,    &m_metricState, &m_metricError);
-    m_factorTimer    = makeTimer(&m_factorSeq,    &m_factorState, &m_factorError);
-    m_aggregateTimer = makeTimer(&m_aggregateSeq, nullptr, nullptr);
-    m_factorSetTimer = makeTimer(&m_factorSetSeq, nullptr, nullptr);
-    m_stationTimer   = makeTimer(&m_stationSeq,   nullptr, nullptr);
+    m_metricTimer  = makeTimer(&m_metricSeq,  &m_metricState, &m_metricError);
+    m_factorTimer  = makeTimer(&m_factorSeq,  &m_factorState, &m_factorError);
+    m_stationTimer = makeTimer(&m_stationSeq, nullptr, nullptr);
     m_reportListTimer   = makeTimer(&m_reportListSeq,   nullptr, nullptr);
-    m_reportGenTimer    = makeTimer(&m_reportGenSeq,    nullptr, nullptr);
-    m_reportExportTimer = makeTimer(&m_reportExportSeq, nullptr, nullptr);
+
+    m_aggregateTimer = new QTimer(this);
+    m_aggregateTimer->setSingleShot(true);
+    connect(m_aggregateTimer, &QTimer::timeout, this, [this] {
+        if (m_aggregateSeq < 0) return;
+        m_aggregateSeq = -1;
+        m_aggregateButton->setEnabled(true);
+        m_actionNote = QStringLiteral(
+            "重算响应超时；服务端可能已完成。该操作可安全重新执行，请按需重试。");
+        updateStatusLabel();
+    });
+
+    m_factorSetTimer = new QTimer(this);
+    m_factorSetTimer->setSingleShot(true);
+    connect(m_factorSetTimer, &QTimer::timeout, this, [this] {
+        if (m_factorSetSeq < 0) return;
+        m_factorSetSeq = -1;
+        m_addFactorButton->setEnabled(true);
+        m_actionNote = QStringLiteral(
+            "新增因子响应超时，操作结果未知；请核对刷新后的因子列表再决定是否重试。");
+        updateStatusLabel();
+        requestFactorList();
+    });
+
+    m_reportGenTimer = new QTimer(this);
+    m_reportGenTimer->setSingleShot(true);
+    connect(m_reportGenTimer, &QTimer::timeout, this, [this] {
+        if (m_reportGenSeq < 0) return;
+        m_reportGenSeq = -1;
+        m_genReportButton->setEnabled(true);
+        m_reportGenOutcomeUnknown = true;
+        m_actionNote = QStringLiteral(
+            "生成报告响应超时，操作结果未知；服务端可能已经生成。"
+            "再次操作时将使用同一幂等键核对，避免重复版本。");
+        updateStatusLabel();
+    });
+
+    m_reportExportTimer = new QTimer(this);
+    m_reportExportTimer->setSingleShot(true);
+    connect(m_reportExportTimer, &QTimer::timeout, this, [this] {
+        if (m_reportExportSeq < 0) return;
+        m_reportExportSeq = -1;
+        m_exportCsvButton->setEnabled(true);
+        m_exportHtmlButton->setEnabled(true);
+        m_actionNote = QStringLiteral(
+            "导出响应超时，导出结果未知；可再次导出当前报告及相同格式。");
+        updateStatusLabel();
+    });
 
     connect(m_net, &NetClient::response, this, &Ext08CarbonPage::handleResponse);
 
@@ -581,25 +625,49 @@ void Ext08CarbonPage::requestReportList()
 
 void Ext08CarbonPage::requestReportGen()
 {
-    if (m_dateTo->date() < m_dateFrom->date()) return;
-    const int stationId = m_stationBox->currentData().toInt();
+    const bool retryUnknownRequest = m_reportGenOutcomeUnknown;
+    QJsonObject requestData;
+    if (retryUnknownRequest) {
+        const auto answer = QMessageBox::question(
+            this,
+            QStringLiteral("核对上一次报告生成"),
+            QStringLiteral(
+                "上一次生成报告的响应超时，服务端可能已经生成成功。\n\n"
+                "为避免重复生成报告版本，本次只能使用上一次相同的 reqId 重试并核对结果。\n\n"
+                "是否重试上一次请求？"),
+            QMessageBox::Yes | QMessageBox::No,
+            QMessageBox::No);
+        if (answer != QMessageBox::Yes) return;
+        requestData = m_pendingReportGenData;
+    } else {
+        if (m_dateTo->date() < m_dateFrom->date()) return;
+        const int stationId = m_stationBox->currentData().toInt();
+        requestData = QJsonObject{
+            { QStringLiteral("scope"),     stationId == 0 ? QStringLiteral("ALL")
+                                                          : QStringLiteral("STATION") },
+            { QStringLiteral("stationId"), stationId },
+            { QStringLiteral("dateFrom"),  m_dateFrom->date().toString(QLatin1String(DATE_FMT)) },
+            { QStringLiteral("dateTo"),    m_dateTo->date().toString(QLatin1String(DATE_FMT)) },
+            { QStringLiteral("reqId"),     QUuid::createUuid().toString(QUuid::WithoutBraces) }
+        };
+        m_pendingReportGenData = requestData;
+    }
 
     m_genReportButton->setEnabled(false);
-    m_actionNote = QStringLiteral("正在生成报告…");
+    m_actionNote = retryUnknownRequest ? QStringLiteral("正在使用原幂等键核对上一次报告生成…")
+                                       : QStringLiteral("正在生成报告…");
     updateStatusLabel();
 
-    const int seq = m_net->send(ecp::CMD_EXT_REPORT_GEN, QJsonObject{
-        { QStringLiteral("scope"),     stationId == 0 ? QStringLiteral("ALL")
-                                                      : QStringLiteral("STATION") },
-        { QStringLiteral("stationId"), stationId },
-        { QStringLiteral("dateFrom"),  m_dateFrom->date().toString(QLatin1String(DATE_FMT)) },
-        { QStringLiteral("dateTo"),    m_dateTo->date().toString(QLatin1String(DATE_FMT)) },
-        // 幂等键（00 第 4.6 节）：重发不会多生成一个版本。每次点击换一个新的，
-        // 因为「再点一次」的本意就是要一份新版本；防的是同一次点击被重复投递。
-        { QStringLiteral("reqId"),     QUuid::createUuid().toString(QUuid::WithoutBraces) } });
+    const int seq = m_net->send(ecp::CMD_EXT_REPORT_GEN, requestData);
     if (seq < 0) {
         m_genReportButton->setEnabled(true);
-        m_actionNote = QStringLiteral("生成报告请求发送失败，请检查网络连接");
+        if (retryUnknownRequest) {
+            m_actionNote = QStringLiteral(
+                "重试请求发送失败；上一次操作结果仍未知，请检查网络连接。");
+        } else {
+            m_pendingReportGenData = QJsonObject();
+            m_actionNote = QStringLiteral("生成报告请求发送失败，请检查网络连接");
+        }
         updateStatusLabel();
         return;
     }
@@ -741,6 +809,9 @@ void Ext08CarbonPage::handleResponse(int cmd, int seq, int code, const QString &
     if (cmd == ecp::CMD_EXT_REPORT_GEN && seq == m_reportGenSeq) {
         m_reportGenTimer->stop();
         m_reportGenSeq = -1;
+        m_reportGenOutcomeUnknown = false;
+        m_pendingReportGenData = QJsonObject();
+        m_genReportButton->setEnabled(true);
         handleReportGenResponse(code, msg, data);
         return;
     }

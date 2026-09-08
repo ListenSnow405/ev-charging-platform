@@ -183,6 +183,9 @@ private:
 
     // 收到 6703 后记住用户本来要导的格式，确认过期后原样重发（带 allowStale）
     QString m_pendingExportFormat;
+    // 3743 响应丢失时保留完整请求（含 reqId）；人工确认后的重试必须原样复用。
+    QJsonObject m_pendingReportGenData;
+    bool m_reportGenOutcomeUnknown = false;
     // 刚生成的报告号：列表刷新后要选中它，否则用户紧接着点「导出」导的是上一份
     int m_selectReportId = -1;
 };
