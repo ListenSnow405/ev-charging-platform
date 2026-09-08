@@ -30,7 +30,8 @@ enum CmdExt {
     CMD_EXT_REPORT_GEN       = 3743,   // 生成不可变报告版本
     CMD_EXT_REPORT_EXPORT    = 3744,   // 导出 CSV / 可打印 HTML，返回文件路径
     CMD_EXT_CARBON_AGGREGATE = 3745,   // 显式重算日聚合（替代未落地的 B1 定时任务）
-    CMD_EXT_REPORT_LIST      = 3746    // 报告列表，含 STALE 状态
+    CMD_EXT_REPORT_LIST      = 3746,   // 报告列表，含 STALE 状态
+    CMD_EXT_FACTOR_DELETE    = 3747    // 撤销排放因子版本（恢复时间线；被引用则改为停用）
 };
 
 } // namespace ecp

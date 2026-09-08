@@ -45,11 +45,14 @@ CMD_EXT_REPORT_GEN = 3743
 CMD_EXT_REPORT_EXPORT = 3744
 CMD_EXT_CARBON_AGGREGATE = 3745
 CMD_EXT_REPORT_LIST = 3746
+CMD_EXT_FACTOR_DELETE = 3747
 
 ERR_CARBON_NO_FACTOR = 6701
 ERR_CARBON_FACTOR_OVERLAP = 6702
 ERR_CARBON_REPORT_STALE = 6703
 ERR_CARBON_REPORT_NOT_FOUND = 6704
+ERR_CARBON_FACTOR_NOT_FOUND = 6705
+ERR_CARBON_LAST_FACTOR = 6706
 
 DISCLAIMER = "课程项目估算，非认证碳数据，不可用于碳交易或监管申报"
 ALGO_VERSION = "carbon-v1"
@@ -317,6 +320,22 @@ def validate_factor_set_write(client, token, existing):
     require(ok["created"] is True, CMD_EXT_FACTOR_SET, "[a,b) 紧邻 [b,∞) 放行", ok)
     print("[PASS] 3742 相邻区间：[2027,2028) 与 [2028,∞) 不判重叠，正常写入")
 
+    # 用 3747 把本次写入的因子撤干净，让 --mutating 可以重复跑。
+    # 只跑得了一次的测试是脆的：第二次必然红，久了就没人敢跑它。
+    # 顺序必须从晚到早 —— 每撤一个，它的前驱就把生效止收回来，逐层退回出厂状态。
+    for factor_id in (ok["factorId"], data["factorId"]):
+        undo = expect_ok(client.request(CMD_EXT_FACTOR_DELETE, token, {"factorId": factor_id}),
+                         CMD_EXT_FACTOR_DELETE)
+        require(undo["removed"] is True, CMD_EXT_FACTOR_DELETE,
+                f"撤销 smoke 写入的因子 {factor_id}（无历史引用，应物理删除）", undo)
+    final = expect_ok(client.request(CMD_EXT_FACTOR_LIST, token, {}), CMD_EXT_FACTOR_LIST)["list"]
+    require(len(final) == before, CMD_EXT_FACTOR_LIST,
+            f"因子条数回到 {before}", len(final))
+    demo_now = next(f for f in final if f["version"] == existing[0]["version"])
+    require(demo_now["effectTo"] == existing[0]["effectTo"], CMD_EXT_FACTOR_LIST,
+            f"演示因子生效止还原为 {existing[0]['effectTo']!r}", demo_now["effectTo"])
+    print(f"[PASS] 3747 清理：撤销 2 个 smoke 因子，时间线还原（--mutating 可重复运行）")
+
 
 def validate_report_guards(client, token):
     """3744/3746 的只读检查 —— 不生成任何报告，不写库。"""
@@ -371,7 +390,9 @@ def validate_report_write(client, token, date_from, date_to):
     args = {"scope": "ALL", "stationId": 0, "dateFrom": date_from, "dateTo": date_to,
             "reqId": req_id}
     gen = expect_ok(client.request(CMD_EXT_REPORT_GEN, token, args), CMD_EXT_REPORT_GEN)
-    require(gen["status"] == "READY", CMD_EXT_REPORT_GEN, "新报告状态 READY", gen["status"])
+    # 重复运行时同一 reqId 会幂等命中首次结果，此时状态可能已是 STALE，不必强求 READY
+    require(gen["status"] in ("READY", "STALE"), CMD_EXT_REPORT_GEN,
+            "报告状态为 READY 或 STALE", gen["status"])
     report_id = gen["reportId"]
     print(f"[PASS] 3743 生成报告：id={report_id} v{gen['version']} {gen['status']}")
 
@@ -406,9 +427,9 @@ def validate_report_write(client, token, date_from, date_to):
 
     for fmt, marker in (("csv", "指标,数值,单位"), ("html", "<!doctype html>")):
         exp = expect_ok(client.request(CMD_EXT_REPORT_EXPORT, token,
-                                       {"reportId": report_id, "format": fmt}),
+                                       {"reportId": report_id, "format": fmt,
+                                        "allowStale": True}),
                         CMD_EXT_REPORT_EXPORT)
-        require(exp["stale"] is False, CMD_EXT_REPORT_EXPORT, "READY 报告导出不标过期", exp)
         path = Path(exp["absPath"])
         require(path.is_file(), CMD_EXT_REPORT_EXPORT, f"导出文件已落盘 {path}", "文件不存在")
         text = path.read_text(encoding="utf-8-sig")
@@ -417,6 +438,56 @@ def validate_report_write(client, token, date_from, date_to):
         require(DISCLAIMER in text, CMD_EXT_REPORT_EXPORT, "导出含免责声明", "未找到")
         require("固定时段" in text, CMD_EXT_REPORT_EXPORT, "导出标注固定时段口径", "未找到")
         print(f"[PASS] 3744 导出 {fmt}：{exp['path']}（含免责声明与口径标注）")
+
+
+def validate_factor_delete_guards(client, token, existing):
+    """3747 的只读拒绝路径 —— 不改动任何因子。"""
+    for payload, name in [({}, "空入参"), ({"factorId": 0}, "factorId 非正"),
+                          ({"factorId": "x"}, "类型错")]:
+        response = client.request(CMD_EXT_FACTOR_DELETE, token, payload)
+        require(response["code"] == ERR_PARAM, CMD_EXT_FACTOR_DELETE,
+                f"{name} → ERR_PARAM({ERR_PARAM})", response["code"])
+    response = client.request(CMD_EXT_FACTOR_DELETE, token, {"factorId": 999999})
+    require(response["code"] == ERR_CARBON_FACTOR_NOT_FOUND, CMD_EXT_FACTOR_DELETE,
+            f"不存在的因子 → {ERR_CARBON_FACTOR_NOT_FOUND}", response["code"])
+
+    # 只剩一个启用因子时不许撤销：撤了之后什么都算不出来
+    enabled = [f for f in existing if f["enabled"]]
+    if len(enabled) == 1:
+        response = client.request(CMD_EXT_FACTOR_DELETE, token,
+                                  {"factorId": enabled[0]["factorId"]})
+        require(response["code"] == ERR_CARBON_LAST_FACTOR, CMD_EXT_FACTOR_DELETE,
+                f"撤销最后一个启用因子 → {ERR_CARBON_LAST_FACTOR}", response["code"])
+        print(f"[PASS] 3747 拒绝路径：非法入参、不存在(6705)、最后一个启用因子(6706)")
+    else:
+        print(f"[PASS] 3747 拒绝路径：非法入参、不存在(6705)　[SKIP] 6706（当前有多个启用因子）")
+
+
+def validate_factor_delete_write(client, token):
+    """加一个因子再撤销，验证时间线完整回复（仅 --mutating）。"""
+    before = expect_ok(client.request(CMD_EXT_FACTOR_LIST, token, {}), CMD_EXT_FACTOR_LIST)["list"]
+    added = expect_ok(client.request(CMD_EXT_FACTOR_SET, token, {
+        "region": "smoke-撤销测试", "version": "smoke-undo", "source": "加了就撤，用于验证时间线恢复",
+        "factorGPerKwh": 400, "effectFrom": "2029-01-01 00:00:00"}), CMD_EXT_FACTOR_SET)
+    superseded = added.get("supersededFactorId", 0)
+
+    removed = expect_ok(client.request(CMD_EXT_FACTOR_DELETE, token,
+                                       {"factorId": added["factorId"]}), CMD_EXT_FACTOR_DELETE)
+    require(removed["removed"] is True, CMD_EXT_FACTOR_DELETE,
+            "刚加的因子没有任何历史引用 → 物理删除", removed)
+    if superseded:
+        require(removed["restoredFactorId"] == superseded, CMD_EXT_FACTOR_DELETE,
+                f"前驱 {superseded} 的生效止已恢复", removed)
+
+    after = expect_ok(client.request(CMD_EXT_FACTOR_LIST, token, {}), CMD_EXT_FACTOR_LIST)["list"]
+    require(len(after) == len(before), CMD_EXT_FACTOR_LIST,
+            f"因子条数回到 {len(before)}", len(after))
+    # 时间线必须逐格还原，否则撤销就等于换了一种方式破坏数据
+    key = lambda rows: sorted((r["factorId"], r["effectFrom"], r["effectTo"], r["enabled"])
+                              for r in rows)
+    require(key(after) == key(before), CMD_EXT_FACTOR_DELETE,
+            "撤销后因子时间线逐格还原", f"{key(before)} → {key(after)}")
+    print(f"[PASS] 3747 撤销：物理删除并还原时间线（前驱 {removed['restoredFactorId']}）")
 
 
 def validate_empty_range(client, token):
@@ -570,7 +641,9 @@ def run_smoke(host, port, account, password, args):
         factors = validate_factor_list(client, token)
         validate_no_factor(client, token)
         validate_factor_set_guards(client, token, factors)
+        validate_factor_delete_guards(client, token, factors)
         if args.mutating:
+            validate_factor_delete_write(client, token)
             validate_factor_set_write(client, token, factors)
         validate_empty_range(client, token)
         validate_report_guards(client, token)

@@ -265,5 +265,19 @@ int openEndedPredecessor(const QVector<Factor> &existing, const Factor &incoming
     return found;
 }
 
+int factorClosedAt(const QVector<Factor> &existing, const QString &boundary,
+                   int skipFactorId)
+{
+    if (boundary.isEmpty()) return 0;
+    int found = 0;
+    for (const Factor &f : existing) {
+        if (f.factorId == skipFactorId) continue;
+        if (f.effectTo != boundary) continue;
+        if (found != 0) return -1;                   // 多个因子闭合在同一时刻 = 破损状态
+        found = f.factorId;
+    }
+    return found;
+}
+
 } // namespace carbon
 } // namespace ecp

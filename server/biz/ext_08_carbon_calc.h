@@ -134,5 +134,12 @@ bool factorOverlaps(const QVector<Factor> &existing, const Factor &incoming,
 int openEndedPredecessor(const QVector<Factor> &existing, const Factor &incoming,
                          int skipFactorId = 0);
 
+// 找出生效止**正好等于** boundary 的那个因子 —— 也就是当初被接续、生效止被闭合到
+// 这个时刻的前驱。撤销一个因子时要把它的生效止还回去，否则时间线上会留一个洞，
+// 洞里的日期查询会得到 6701（该时段无有效排放因子）。
+// 返回 factor_id；没有返回 0；有多个（破损状态）返回 -1。
+int factorClosedAt(const QVector<Factor> &existing, const QString &boundary,
+                   int skipFactorId = 0);
+
 } // namespace carbon
 } // namespace ecp

@@ -284,6 +284,36 @@ int main()
            QStringLiteral("存在多个开区间因子 → -1，调用方须拒绝写入"));
     }
 
+    out << "\n[7c] 因子撤销：找出要恢复生效止的前驱\n";
+    {
+        QVector<Factor> line;
+        Factor a; a.factorId = 20; a.version = QStringLiteral("v1");
+        a.effectFrom = QStringLiteral("2000-01-01 00:00:00");
+        a.effectTo   = QStringLiteral("2026-09-01 00:00:00");   // 当初被 v2 接续闭合在这里
+        line.append(a);
+        Factor b; b.factorId = 21; b.version = QStringLiteral("v2");
+        b.effectFrom = QStringLiteral("2026-09-01 00:00:00");
+        b.effectTo   = QString();
+        line.append(b);
+
+        // 撤销 v2 时，要把生效止「正好闭合在 v2 起点」的那个前驱找出来
+        eq(factorClosedAt(line, b.effectFrom, b.factorId), 20,
+           QStringLiteral("撤销 v2 → 找到前驱 v1 恢复其生效止"));
+        // 撤销 v1（最早的一个）时没有前驱可恢复
+        eq(factorClosedAt(line, a.effectFrom, a.factorId), 0,
+           QStringLiteral("撤销最早的因子 → 没有前驱"));
+        eq(factorClosedAt(line, QString(), 0), 0, QStringLiteral("边界为空 → 无前驱"));
+        eq(factorClosedAt(line, QStringLiteral("2099-01-01 00:00:00"), 0), 0,
+           QStringLiteral("没有因子闭合在该时刻 → 0"));
+
+        // 两个因子闭合在同一时刻 = 破损状态，必须报 -1 让调用方拒绝
+        QVector<Factor> broken = line;
+        Factor dup = a; dup.factorId = 22; dup.version = QStringLiteral("v1b");
+        broken.append(dup);
+        eq(factorClosedAt(broken, b.effectFrom, b.factorId), -1,
+           QStringLiteral("多个因子闭合在同一时刻 → -1"));
+    }
+
     out << "\n[8] 因子边界必须对齐自然日（裁决 D6）\n";
     check(isDayAlignedBoundary(QStringLiteral("2026-01-01 00:00:00")),
           QStringLiteral("00:00:00 → 合法"));
