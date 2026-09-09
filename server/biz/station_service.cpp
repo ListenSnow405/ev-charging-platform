@@ -37,6 +37,23 @@ static bool coordinate(const QJsonValue &value, double minimum, double maximum,
     return std::isfinite(out) && out >= minimum && out <= maximum;
 }
 
+static bool nearbySort(const QJsonObject &data, int &sortBy)
+{
+    const QJsonValue value = data.value("sortBy");
+    if (value.isUndefined()) {
+        sortBy = 0;
+        return true;
+    }
+    if (!value.isDouble()) return false;
+    const double number = value.toDouble();
+    if (!std::isfinite(number) || std::floor(number) != number
+        || (number != 0.0 && number != 1.0)) {
+        return false;
+    }
+    sortBy = static_cast<int>(number);
+    return true;
+}
+
 static void rollback(QSqlDatabase &db)
 {
     if (!db.rollback())
@@ -71,6 +88,8 @@ static int handleNearby(const Request &req, QJsonObject &out)
     }
     const QJsonValue keywordValue = req.data.value("keyword");
     if (!keywordValue.isString()) return ERR_PARAM;
+    int sortBy = 0;
+    if (!nearbySort(req.data, sortBy)) return ERR_PARAM;
     const QString pattern = QStringLiteral("%") + keywordValue.toString() + QStringLiteral("%");
 
     QSqlDatabase db = threadDb();
@@ -84,9 +103,15 @@ static int handleNearby(const Request &req, QJsonObject &out)
         "SELECT s.station_id, s.name, s.address, s.lng, s.lat, s.price,"
         " COUNT(p.pile_id) AS pile_total,"
         " COALESCE(SUM(CASE WHEN p.status = ? AND p.online = 1 THEN 1 ELSE 0 END), 0) AS pile_idle"
+        ", f.forecast_id, f.congestion, f.idle_pile"
         " FROM t_station s LEFT JOIN t_pile p ON p.station_id = s.station_id"
+        " LEFT JOIN t_load_forecast f ON f.forecast_id = ("
+        " SELECT latest.forecast_id FROM t_load_forecast latest"
+        " WHERE latest.station_id = s.station_id AND latest.horizon = 1"
+        " ORDER BY latest.create_time DESC, latest.forecast_id DESC LIMIT 1)"
         " WHERE s.status = 0 AND (s.name LIKE ? OR s.address LIKE ?)"
-        " GROUP BY s.station_id, s.name, s.address, s.lng, s.lat, s.price"));
+        " GROUP BY s.station_id, s.name, s.address, s.lng, s.lat, s.price,"
+        " f.forecast_id, f.congestion, f.idle_pile"));
     query.addBindValue(PILE_IDLE);
     query.addBindValue(pattern);
     query.addBindValue(pattern);
@@ -95,12 +120,20 @@ static int handleNearby(const Request &req, QJsonObject &out)
         return ERR_INTERNAL;
     }
 
-    struct NearbyStation { qint64 stationId; qint64 distance; QJsonObject json; };
+    struct NearbyStation {
+        qint64 stationId;
+        qint64 distance;
+        bool hasForecast;
+        double congestion;
+        QJsonObject json;
+    };
     std::vector<NearbyStation> stations;
     while (query.next()) {
         const qint64 stationId = query.value("station_id").toLongLong();
         const qint64 distance = distanceMetres(lng, lat, query.value("lng").toDouble(),
                                                query.value("lat").toDouble());
+        const bool hasForecast = !query.value("forecast_id").isNull();
+        const double congestion = hasForecast ? query.value("congestion").toDouble() : -1.0;
         QJsonObject item;
         item["stationId"] = stationId;
         item["name"] = query.value("name").toString();
@@ -109,10 +142,18 @@ static int handleNearby(const Request &req, QJsonObject &out)
         item["pileTotal"] = query.value("pile_total").toLongLong();
         item["pileIdle"] = query.value("pile_idle").toLongLong();
         item["distance"] = distance;
-        stations.push_back({stationId, distance, item});
+        item["congestion"] = congestion;
+        item["idleForecast"] = hasForecast ? query.value("idle_pile").toLongLong() : -1;
+        stations.push_back({stationId, distance, hasForecast, congestion, item});
     }
-    std::sort(stations.begin(), stations.end(), [](const NearbyStation &left,
-                                                    const NearbyStation &right) {
+    std::sort(stations.begin(), stations.end(), [sortBy](const NearbyStation &left,
+                                                          const NearbyStation &right) {
+        if (sortBy == 1 && left.hasForecast != right.hasForecast)
+            return left.hasForecast > right.hasForecast;
+        if (sortBy == 1 && left.hasForecast && right.hasForecast
+            && left.congestion != right.congestion) {
+            return left.congestion < right.congestion;
+        }
         if (left.distance != right.distance) return left.distance < right.distance;
         return left.stationId < right.stationId;
     });
