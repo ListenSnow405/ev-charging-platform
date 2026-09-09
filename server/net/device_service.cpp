@@ -15,6 +15,7 @@
 #include "net/dispatcher.h"
 #include "net/device_registry.h"
 #include "dao/db.h"
+#include "biz/order_flow_service.h"
 
 namespace ecp {
 
@@ -111,6 +112,7 @@ static int handleDevReport(const Request &req, QJsonObject &out)
     report.kwhX100 = static_cast<qint64>(req.data.value("kwh").toDouble() * 100.0 + 0.5);
     report.power   = req.data.value("power").toDouble();
     DeviceRegistry::instance().updateReport(pileCode, report);
+    pushChargingProgress(pileCode, report.kwhX100);
     return ERR_OK;
 }
 
