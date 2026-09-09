@@ -11,6 +11,7 @@
 #include "logger.h"
 #include "time_util.h"
 #include "net/dispatcher.h"
+#include "net/device_registry.h"
 #include "dao/db.h"
 
 namespace ecp {
@@ -40,24 +41,36 @@ static int handleOrderStart(const Request &req, QJsonObject &out)
     if (!positiveInteger(req.data.value("orderId"), orderId)) return ERR_PARAM;
 
     QSqlDatabase db = threadDb();
-    if (!db.isOpen()) return ERR_INTERNAL;
+    if (!db.isOpen()) {
+        LOG_E(QStringLiteral("开始充电获取数据库连接失败: %1").arg(db.lastError().text()));
+        return ERR_INTERNAL;
+    }
 
     QSqlQuery begin(db);
     begin.prepare(QStringLiteral("BEGIN IMMEDIATE"));
-    if (!begin.exec()) return ERR_INTERNAL;
+    if (!begin.exec()) {
+        LOG_E(QStringLiteral("开启开始充电立即事务失败: %1").arg(begin.lastError().text()));
+        return ERR_INTERNAL;
+    }
 
     QSqlQuery query(db);
     query.prepare(QStringLiteral(
-        "SELECT o.status, o.pile_id, p.status AS pile_status, p.online"
+        "SELECT o.status, o.pile_id, p.status AS pile_status, p.pile_code"
         " FROM t_order o JOIN t_pile p ON p.pile_id = o.pile_id"
         " WHERE o.order_id = ? AND o.user_id = ?"));
     query.addBindValue(orderId);
     query.addBindValue(req.session.id);
     if (!query.exec()) {
+        LOG_E(QStringLiteral("开始充电查询订单失败: %1").arg(query.lastError().text()));
         rollback(db);
         return ERR_INTERNAL;
     }
     if (!query.next()) {
+        if (query.lastError().isValid()) {
+            LOG_E(QStringLiteral("开始充电读取订单失败: %1").arg(query.lastError().text()));
+            rollback(db);
+            return ERR_INTERNAL;
+        }
         rollback(db);
         return ERR_ORDER_NOT_FOUND;
     }
@@ -69,16 +82,18 @@ static int handleOrderStart(const Request &req, QJsonObject &out)
         rollback(db);
         return ERR_PILE_FAULT;
     }
-    if (query.value("pile_status").toInt() == PILE_IN_USE) {
+    if (query.value("pile_status").toInt() != PILE_IDLE) {
         rollback(db);
         return ERR_PILE_BUSY;
     }
-    if (query.value("online").toInt() != 1) {
+    const QString pileCode = query.value("pile_code").toString();
+    if (!DeviceRegistry::instance().isOnline(pileCode)) {
         rollback(db);
         return ERR_PILE_OFFLINE;
     }
 
     const qint64 pileId = query.value("pile_id").toLongLong();
+    query.finish();
     const QString now = nowStr();
 
     QSqlQuery updateOrder(db);
@@ -90,28 +105,52 @@ static int handleOrderStart(const Request &req, QJsonObject &out)
     updateOrder.addBindValue(orderId);
     updateOrder.addBindValue(req.session.id);
     updateOrder.addBindValue(ORDER_RESERVED);
-    if (!updateOrder.exec() || updateOrder.numRowsAffected() != 1) {
+    if (!updateOrder.exec()) {
+        LOG_E(QStringLiteral("开始充电更新订单失败: %1").arg(updateOrder.lastError().text()));
+        rollback(db);
+        return ERR_INTERNAL;
+    }
+    if (updateOrder.numRowsAffected() != 1) {
         rollback(db);
         return ERR_ORDER_STATUS;
     }
 
     QSqlQuery updatePile(db);
     updatePile.prepare(QStringLiteral(
-        "UPDATE t_pile SET status = ?, last_heartbeat = ? WHERE pile_id = ?"));
+        "UPDATE t_pile SET status = ? WHERE pile_id = ? AND status = ?"));
     updatePile.addBindValue(PILE_IN_USE);
-    updatePile.addBindValue(now);
     updatePile.addBindValue(pileId);
+    updatePile.addBindValue(PILE_IDLE);
     if (!updatePile.exec()) {
+        LOG_E(QStringLiteral("开始充电更新电桩失败: %1").arg(updatePile.lastError().text()));
         rollback(db);
         return ERR_INTERNAL;
     }
 
-    if (!db.commit()) {
+    if (updatePile.numRowsAffected() != 1) {
         rollback(db);
+        return ERR_PILE_BUSY;
+    }
+
+    // [说明书] 1.4 开始充电：数据库更新成功后、提交前由 L1 下发 9005。
+    if (!startCharging(pileCode)) {
+        LOG_W(QStringLiteral("开始充电指令入队失败: pileCode=%1").arg(pileCode));
+        rollback(db);
+        return ERR_PILE_OFFLINE;
+    }
+
+    if (!db.commit()) {
+        LOG_E(QStringLiteral("提交开始充电事务失败: %1，尝试下发9006补偿: pileCode=%2")
+                  .arg(db.lastError().text(), pileCode));
+        rollback(db);
+        if (!stopCharging(pileCode))
+            LOG_E(QStringLiteral("开始充电提交失败后的9006补偿入队失败: pileCode=%1").arg(pileCode));
         return ERR_INTERNAL;
     }
 
     out["startTime"] = now;
+    LOG_I(QStringLiteral("用户开始充电成功: userId=%1 orderId=%2 pileCode=%3")
+              .arg(req.session.id).arg(orderId).arg(pileCode));
     return ERR_OK;
 }
 
