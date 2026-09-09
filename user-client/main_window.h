@@ -15,7 +15,12 @@
 #include <QTimer>
 #include <QJsonArray>
 #include <QJsonObject>
+#include <QHash>
+#include <QPair>
 #include "net_client.h"
+
+class QNetworkAccessManager;
+class QNetworkReply;
 
 class MainWindow : public QWidget
 {
@@ -43,6 +48,7 @@ private:
     QWidget *makeMinePage();
 
     void requestNearbyStations();
+    void sendNearbyStationsRequest(const QString &keyword);
     void requestStationPiles(qint64 stationId);
     void requestChargeUnfinishedOrder();
     void requestChargeOrders();
@@ -71,6 +77,8 @@ private:
     QString balanceText() const;
 
     NetClient   *m_net = nullptr;
+    QNetworkAccessManager *m_mapNetwork = nullptr;
+    QNetworkReply *m_pendingGeocodeReply = nullptr;
     QTabWidget  *m_tabs = nullptr;
     QLabel      *m_status = nullptr;
     QLabel      *m_avatar = nullptr;
@@ -130,7 +138,9 @@ private:
     qint64       m_chargeOrderId = -1;
     bool         m_suppressChargeUnfinishedPrompt = false;
     QString      m_selectedNearbyStationName;
+    QString      m_nearbyLocationText;
     QString      m_mapKey;
+    QHash<QString, QPair<double, double>> m_nearbyGeocodeCache;
     double       m_mapDefaultLat = 22.5470;
     double       m_mapDefaultLng = 114.0650;
     QJsonObject  m_chargeOrder;

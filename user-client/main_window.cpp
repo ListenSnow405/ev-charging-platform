@@ -13,9 +13,14 @@
 #include <QHBoxLayout>
 #include <QFileDialog>
 #include <QInputDialog>
+#include <QIcon>
+#include <QJsonDocument>
 #include <QLabel>
 #include <QLineEdit>
 #include <QMessageBox>
+#include <QNetworkAccessManager>
+#include <QNetworkReply>
+#include <QNetworkRequest>
 #include <QSettings>
 #include <QPushButton>
 #include <QHeaderView>
@@ -234,17 +239,38 @@ MainWindow::MainWindow(NetClient *net, QWidget *parent)
         "QPushButton#Danger { background: #fee2e2; color: #b91c1c; border: none; }"
         "QPushButton#Danger:hover { background: #fecaca; }"
         "QTabWidget::pane { border: none; }"
-        "QTabBar::tab { background: #ffffff; border: 1px solid #d1d5db; padding: 10px 12px; min-width: 80px; }"
-        "QTabBar::tab:selected { background: #2563eb; color: #ffffff; border-color: #2563eb; }"));
+        "QTabWidget::pane { border: none; }"
+        "QTabBar { background: transparent; expanding: true; }"
+        "QTabBar::tab {"
+        " background: transparent;"
+        " border: none;"
+        " color: #6b7280;"
+        " font-size: 13px;"
+        " min-width: 88px;"
+        " min-height: 58px;"
+        " padding: 5px 8px;"
+        "}"
+        "QTabBar::tab:hover { color: #2563eb; }"
+        "QTabBar::tab:selected {"
+        " background: transparent;"
+        " color: #2563eb;"
+        " border: none;"
+        "}"));
 
     m_tabs = new QTabWidget(this);
+    m_tabs->setTabPosition(QTabWidget::South);
     m_tabs->addTab(makeNearbyPage(), QStringLiteral("附近电桩"));
     m_tabs->addTab(makeNavPage(), QStringLiteral("导航"));
     m_tabs->addTab(makeChargePage(), QStringLiteral("充电"));
     m_tabs->addTab(makeMinePage(), QStringLiteral("我的"));
+    m_tabs->setIconSize(QSize(20, 20));
+    m_tabs->setTabIcon(0, QIcon(QStringLiteral(":/icons/nearby.svg")));
+    m_tabs->setTabIcon(1, QIcon(QStringLiteral(":/icons/navigation.svg")));
+    m_tabs->setTabIcon(2, QIcon(QStringLiteral(":/icons/charge.svg")));
+    m_tabs->setTabIcon(3, QIcon(QStringLiteral(":/icons/profile.svg")));
 
     auto *lay = new QVBoxLayout(this);
-    lay->setContentsMargins(0, 0, 0, 0);
+    lay->setContentsMargins(0, 0, 0, 18);
     lay->addWidget(m_tabs);
 
     connect(m_net, &NetClient::response, this, &MainWindow::onNetResponse);
@@ -830,7 +856,113 @@ void MainWindow::requestNearbyStations()
     m_mapDefaultLat = cfg.value(QStringLiteral("map/default_lat"), 22.5470).toDouble();
     m_mapDefaultLng = cfg.value(QStringLiteral("map/default_lng"), 114.0650).toDouble();
 
-    const QString keyword = m_nearbySearch ? m_nearbySearch->text().trimmed() : QString();
+    const QString locationText = m_nearbySearch ? m_nearbySearch->text().trimmed() : QString();
+    if (m_pendingGeocodeReply) {
+        m_pendingGeocodeReply->abort();
+        m_pendingGeocodeReply = nullptr;
+    }
+
+    if (locationText.isEmpty()) {
+        m_nearbyLocationText = QStringLiteral("默认位置");
+        sendNearbyStationsRequest(QString());
+        return;
+    }
+
+    const auto cachedLocation = m_nearbyGeocodeCache.constFind(locationText);
+    if (cachedLocation != m_nearbyGeocodeCache.constEnd()) {
+        m_mapDefaultLat = cachedLocation.value().first;
+        m_mapDefaultLng = cachedLocation.value().second;
+        m_nearbyLocationText = locationText;
+        m_nearbyStatus->setText(QStringLiteral("已使用地址定位结果，正在加载附近站点..."));
+        m_nearbyStatus->setStyleSheet(QStringLiteral("color:#6b7280;"));
+        sendNearbyStationsRequest(QString());
+        return;
+    }
+
+    if (m_mapKey.isEmpty()) {
+        m_nearbyLocationText.clear();
+        m_nearbyStatus->setText(QStringLiteral("未配置腾讯地图 Key，已按站点名或地址关键词查询。"));
+        m_nearbyStatus->setStyleSheet(QStringLiteral("color:#b45309;"));
+        sendNearbyStationsRequest(locationText);
+        return;
+    }
+
+    if (!m_mapNetwork) {
+        m_mapNetwork = new QNetworkAccessManager(this);
+    }
+
+    QUrl geocodeUrl(QStringLiteral("https://apis.map.qq.com/ws/geocoder/v1/"));
+    QUrlQuery geocodeQuery;
+    geocodeQuery.addQueryItem(QStringLiteral("address"), locationText);
+    geocodeQuery.addQueryItem(QStringLiteral("key"), m_mapKey);
+    geocodeUrl.setQuery(geocodeQuery);
+
+    QNetworkRequest geocodeRequest(geocodeUrl);
+    geocodeRequest.setHeader(QNetworkRequest::UserAgentHeader,
+                             QStringLiteral("ecp-user/1.0"));
+    m_nearbyStatus->setText(QStringLiteral("正在解析地址..."));
+    m_nearbyStatus->setStyleSheet(QStringLiteral("color:#6b7280;"));
+
+    QNetworkReply *reply = m_mapNetwork->get(geocodeRequest);
+    m_pendingGeocodeReply = reply;
+    connect(reply, &QNetworkReply::finished, this, [this, reply, locationText] {
+        if (reply != m_pendingGeocodeReply) {
+            reply->deleteLater();
+            return;
+        }
+        m_pendingGeocodeReply = nullptr;
+
+        const QByteArray body = reply->readAll();
+        const QNetworkReply::NetworkError networkError = reply->error();
+        const QJsonDocument document = QJsonDocument::fromJson(body);
+        const QJsonObject root = document.isObject() ? document.object() : QJsonObject();
+        const int apiStatus = root.value(QStringLiteral("status")).toInt(-1);
+        const QJsonObject result = root.value(QStringLiteral("result")).toObject();
+        const QJsonObject location = result.value(QStringLiteral("location")).toObject();
+
+        const bool validLocation = networkError == QNetworkReply::NoError
+            && apiStatus == 0
+            && location.contains(QStringLiteral("lat"))
+            && location.contains(QStringLiteral("lng"));
+        if (!validLocation) {
+            m_nearbyLocationText.clear();
+            if (m_nearbyStatus) {
+                m_nearbyStatus->setText(QStringLiteral(
+                    "地址解析失败，已按站点名或地址关键词查询。"));
+                m_nearbyStatus->setStyleSheet(QStringLiteral("color:#b45309;"));
+            }
+            sendNearbyStationsRequest(locationText);
+            reply->deleteLater();
+            return;
+        }
+
+        const double lat = location.value(QStringLiteral("lat")).toDouble();
+        const double lng = location.value(QStringLiteral("lng")).toDouble();
+        if (lat < -90.0 || lat > 90.0 || lng < -180.0 || lng > 180.0) {
+            m_nearbyLocationText.clear();
+            if (m_nearbyStatus) {
+                m_nearbyStatus->setText(QStringLiteral(
+                    "地址解析返回了无效坐标，已按站点名或地址关键词查询。"));
+                m_nearbyStatus->setStyleSheet(QStringLiteral("color:#b45309;"));
+            }
+            sendNearbyStationsRequest(locationText);
+            reply->deleteLater();
+            return;
+        }
+
+        m_mapDefaultLat = lat;
+        m_mapDefaultLng = lng;
+        m_nearbyLocationText = locationText;
+        m_nearbyGeocodeCache.insert(locationText, qMakePair(lat, lng));
+        sendNearbyStationsRequest(QString());
+        reply->deleteLater();
+    });
+}
+
+void MainWindow::sendNearbyStationsRequest(const QString &keyword)
+{
+    if (!m_nearbyStatus) return;
+
     const int sortBy = m_nearbySort && m_nearbySort->currentIndex() == 1 ? 1 : 0;
     QJsonObject req{
         {QStringLiteral("lng"), m_mapDefaultLng},
@@ -923,9 +1055,13 @@ void MainWindow::renderNearbyStations()
         m_selectedNearbyStationName = selectedName;
     }
 
-    m_nearbySummary->setText(QStringLiteral("当前位置：%1, %2 · 已找到 %3 个站点")
-                             .arg(m_mapDefaultLat, 0, 'f', 4)
-                             .arg(m_mapDefaultLng, 0, 'f', 4)
+    const QString locationLabel = m_nearbyLocationText.isEmpty()
+        ? QStringLiteral("关键词查询")
+        : m_nearbyLocationText;
+    m_nearbySummary->setText(QStringLiteral("定位地址：%1 · 坐标：%2, %3 · 已找到 %4 个站点")
+                             .arg(locationLabel)
+                             .arg(m_mapDefaultLat, 0, 'f', 6)
+                             .arg(m_mapDefaultLng, 0, 'f', 6)
                              .arg(stations.size()));
 
     if (stations.isEmpty()) {
@@ -1687,4 +1823,3 @@ void MainWindow::logout()
     emit logoutRequested();
     close();
 }
-

@@ -26,3 +26,4 @@ INCLUDEPATH += $$PWD
 
 SOURCES += main.cpp net_client.cpp login_window.cpp main_window.cpp
 HEADERS +=          net_client.h   login_window.h   main_window.h
+RESOURCES += resources.qrc
