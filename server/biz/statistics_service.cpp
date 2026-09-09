@@ -156,12 +156,97 @@ static int handlePileStatus(const Request &req, QJsonObject &out)
     return ERR_OK;
 }
 
+static int handleLoadForecast(const Request &req, QJsonObject &out)
+{
+    if (req.session.role != ROLE_ADMIN) return ERR_NO_PERMISSION;
+
+    const QJsonValue stationIdValue = req.data.value("stationId");
+    const QJsonValue horizonValue = req.data.value("horizon");
+    if (!stationIdValue.isDouble() || !horizonValue.isDouble()) return ERR_PARAM;
+
+    const qint64 stationId = stationIdValue.toInteger(-1);
+    const qint64 horizon = horizonValue.toInteger(-1);
+    if (stationId < 0 || (horizon != 1 && horizon != 6 && horizon != 24))
+        return ERR_PARAM;
+
+    QSqlDatabase db = threadDb();
+    if (!db.isOpen()) {
+        LOG_E(QStringLiteral("负荷预测获取数据库连接失败: %1").arg(db.lastError().text()));
+        return ERR_INTERNAL;
+    }
+
+    if (stationId > 0) {
+        QSqlQuery station(db);
+        station.prepare(QStringLiteral("SELECT 1 FROM t_station WHERE station_id = ?"));
+        station.addBindValue(stationId);
+        if (!station.exec()) {
+            LOG_E(QStringLiteral("确认负荷预测站点存在失败: %1")
+                      .arg(station.lastError().text()));
+            return ERR_INTERNAL;
+        }
+        if (!station.next()) return ERR_STATION_NOT_FOUND;
+    }
+
+    QJsonArray list;
+    out["list"] = list;
+
+    QSqlQuery latest(db);
+    latest.prepare(QStringLiteral(
+        "SELECT model_version, create_time FROM t_load_forecast"
+        " ORDER BY create_time DESC, forecast_id DESC LIMIT 1"));
+    if (!latest.exec()) {
+        LOG_E(QStringLiteral("查询最新负荷预测批次失败: %1").arg(latest.lastError().text()));
+        return ERR_INTERNAL;
+    }
+    if (!latest.next()) return ERR_OK;
+
+    const QString modelVersion = latest.value("model_version").toString();
+    const QString createTime = latest.value("create_time").toString();
+
+    QSqlQuery query(db);
+    query.prepare(QStringLiteral(
+        "SELECT f.station_id, s.name AS station_name, f.horizon, f.predict_time,"
+        " f.load_kw, f.idle_pile, f.is_peak, f.congestion, f.model_version"
+        " FROM t_load_forecast f"
+        " JOIN t_station s ON s.station_id = f.station_id"
+        " WHERE f.model_version = ? AND f.create_time = ? AND f.horizon = ?"
+        " AND (? = 0 OR f.station_id = ?)"
+        " ORDER BY f.station_id ASC, f.predict_time ASC, f.forecast_id ASC"));
+    query.addBindValue(modelVersion);
+    query.addBindValue(createTime);
+    query.addBindValue(horizon);
+    query.addBindValue(stationId);
+    query.addBindValue(stationId);
+    if (!query.exec()) {
+        LOG_E(QStringLiteral("查询负荷预测失败: %1").arg(query.lastError().text()));
+        return ERR_INTERNAL;
+    }
+
+    while (query.next()) {
+        QJsonObject item;
+        item["stationId"] = query.value("station_id").toLongLong();
+        item["stationName"] = query.value("station_name").toString();
+        item["horizon"] = query.value("horizon").toInt();
+        item["predictTime"] = query.value("predict_time").toString();
+        item["loadKw"] = query.value("load_kw").toDouble();
+        item["idlePile"] = query.value("idle_pile").toLongLong();
+        item["isPeak"] = query.value("is_peak").toInt();
+        item["congestion"] = query.value("congestion").toDouble();
+        item["modelVersion"] = query.value("model_version").toString();
+        list.append(item);
+    }
+    out["list"] = list;
+    return ERR_OK;
+}
+
 void registerStatisticsService()
 {
     Dispatcher::instance().registerHandler(CMD_STAT_REVENUE, handleRevenue);
     Dispatcher::instance().registerHandler(CMD_STAT_REVENUE_TREND, handleRevenueTrend);
     Dispatcher::instance().registerHandler(CMD_STAT_PILE_STATUS, handlePileStatus);
-    LOG_I(QStringLiteral("统计服务已注册: 2301 营收概览 / 2302 营收趋势 / 2303 电桩状态分布"));
+    Dispatcher::instance().registerHandler(CMD_STAT_LOAD_FORECAST, handleLoadForecast);
+    LOG_I(QStringLiteral("统计服务已注册: 2301 营收概览 / 2302 营收趋势 / "
+                         "2303 电桩状态分布 / 2305 站点负荷预测"));
 }
 
 } // namespace ecp

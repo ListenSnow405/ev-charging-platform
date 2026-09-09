@@ -2,8 +2,9 @@
 //  server/biz/pile_service.cpp  —  电桩服务　归属 L2
 //
 //  [说明书] 1.4 用户端查看站内电桩、管理端分页查询电桩。
-//  2112 远程重启依赖 L1 的设备连接映射与指令发送接口，接口就绪前不注册。
+//  2112 远程重启通过 L1 的设备连接映射与指令发送接口下发 9003。
 // -----------------------------------------------------------------------------
+#include <cmath>
 #include <limits>
 
 #include <QJsonArray>
@@ -14,7 +15,9 @@
 
 #include "protocol.h"
 #include "logger.h"
+#include "time_util.h"
 #include "net/dispatcher.h"
+#include "net/device_registry.h"
 #include "dao/db.h"
 
 namespace ecp {
@@ -24,6 +27,25 @@ static bool positiveInteger(const QJsonValue &value, qint64 &out)
     if (!value.isDouble()) return false;
     out = value.toInteger(-1);
     return out > 0;
+}
+
+static bool strictPositiveInteger(const QJsonValue &value, qint64 &out)
+{
+    if (!value.isDouble()) return false;
+    const double number = value.toDouble();
+    if (!std::isfinite(number) || number <= 0.0
+        || std::floor(number) != number
+        || number >= static_cast<double>(std::numeric_limits<qint64>::max())) {
+        return false;
+    }
+    out = static_cast<qint64>(number);
+    return out > 0;
+}
+
+static void rollback(QSqlDatabase &db)
+{
+    if (!db.rollback())
+        LOG_E(QStringLiteral("远程重启事务回滚失败: %1").arg(db.lastError().text()));
 }
 
 static bool optionalStationId(const QJsonObject &data, qint64 &out)
@@ -183,12 +205,121 @@ static int handlePileList(const Request &req, QJsonObject &out)
     return ERR_OK;
 }
 
+static int handlePileReboot(const Request &req, QJsonObject &out)
+{
+    Q_UNUSED(out);
+    if (req.session.role != ROLE_ADMIN) return ERR_NO_PERMISSION;
+
+    qint64 pileId = 0;
+    if (!strictPositiveInteger(req.data.value("pileId"), pileId)) return ERR_PARAM;
+
+    QSqlDatabase db = threadDb();
+    if (!db.isOpen()) {
+        LOG_E(QStringLiteral("远程重启获取数据库连接失败: %1").arg(db.lastError().text()));
+        return ERR_INTERNAL;
+    }
+
+    QSqlQuery begin(db);
+    begin.prepare(QStringLiteral("BEGIN IMMEDIATE"));
+    if (!begin.exec()) {
+        LOG_E(QStringLiteral("开启远程重启事务失败: %1").arg(begin.lastError().text()));
+        return ERR_INTERNAL;
+    }
+
+    QSqlQuery pile(db);
+    pile.prepare(QStringLiteral(
+        "SELECT pile_id, pile_code, status FROM t_pile WHERE pile_id = ?"));
+    pile.addBindValue(pileId);
+    if (!pile.exec()) {
+        LOG_E(QStringLiteral("查询远程重启电桩失败: %1").arg(pile.lastError().text()));
+        rollback(db);
+        return ERR_INTERNAL;
+    }
+    if (!pile.next()) {
+        rollback(db);
+        return ERR_PILE_NOT_FOUND;
+    }
+    const QString pileCode = pile.value("pile_code").toString();
+    const int status = pile.value("status").toInt();
+    Q_UNUSED(status);
+
+    if (!DeviceRegistry::instance().isOnline(pileCode)) {
+        rollback(db);
+        return ERR_PILE_OFFLINE;
+    }
+
+    QSqlQuery admin(db);
+    admin.prepare(QStringLiteral("SELECT account FROM t_admin WHERE admin_id = ?"));
+    admin.addBindValue(req.session.id);
+    if (!admin.exec()) {
+        LOG_E(QStringLiteral("查询远程重启管理员失败: %1").arg(admin.lastError().text()));
+        rollback(db);
+        return ERR_INTERNAL;
+    }
+    if (!admin.next()) {
+        LOG_E(QStringLiteral("远程重启会话管理员不存在: %1").arg(req.session.id));
+        rollback(db);
+        return ERR_INTERNAL;
+    }
+    const QString operatorAccount = admin.value("account").toString();
+    const QString now = nowStr();
+    const QString detail = QStringLiteral("远程重启电桩 %1").arg(pileCode);
+
+    QSqlQuery pileLog(db);
+    pileLog.prepare(QStringLiteral(
+        "INSERT INTO t_pile_log(pile_id, event, old_status, new_status, operator, detail, create_time)"
+        " VALUES(?, ?, NULL, NULL, ?, ?, ?)"));
+    pileLog.addBindValue(pileId);
+    pileLog.addBindValue(3);
+    pileLog.addBindValue(operatorAccount);
+    pileLog.addBindValue(detail);
+    pileLog.addBindValue(now);
+    if (!pileLog.exec() || pileLog.numRowsAffected() != 1) {
+        LOG_E(QStringLiteral("写入远程重启电桩日志失败: %1").arg(pileLog.lastError().text()));
+        rollback(db);
+        return ERR_INTERNAL;
+    }
+
+    QSqlQuery adminLog(db);
+    adminLog.prepare(QStringLiteral(
+        "INSERT INTO t_admin_oplog(admin_id, action, target, detail, create_time)"
+        " VALUES(?, ?, ?, ?, ?)"));
+    adminLog.addBindValue(req.session.id);
+    adminLog.addBindValue(QStringLiteral("REBOOT_PILE"));
+    adminLog.addBindValue(QString::number(pileId));
+    adminLog.addBindValue(detail);
+    adminLog.addBindValue(now);
+    if (!adminLog.exec() || adminLog.numRowsAffected() != 1) {
+        LOG_E(QStringLiteral("写入远程重启管理员日志失败: %1").arg(adminLog.lastError().text()));
+        rollback(db);
+        return ERR_INTERNAL;
+    }
+
+    if (!pushToDevice(CMD_DEV_REBOOT, pileCode)) {
+        LOG_W(QStringLiteral("远程重启下发失败，电桩离线: %1").arg(pileCode));
+        rollback(db);
+        return ERR_PILE_OFFLINE;
+    }
+
+    if (!db.commit()) {
+        LOG_E(QStringLiteral("提交远程重启事务失败，9003可能已下发: %1")
+                  .arg(db.lastError().text()));
+        rollback(db);
+        return ERR_INTERNAL;
+    }
+
+    LOG_I(QStringLiteral("管理员远程重启电桩成功: adminId=%1 pileId=%2 pileCode=%3")
+              .arg(req.session.id).arg(pileId).arg(pileCode));
+    return ERR_OK;
+}
+
 void registerPileService()
 {
     Dispatcher::instance().registerHandler(CMD_STATION_PILES, handleStationPiles);
     Dispatcher::instance().registerHandler(CMD_PILE_LIST, handlePileList);
+    Dispatcher::instance().registerHandler(CMD_PILE_REBOOT, handlePileReboot);
     LOG_I(QStringLiteral("电桩服务已注册: 1102 站内电桩详情 / 2111 管理端电桩列表；"
-                         "2112 等待 L1 设备指令发送接口"));
+                         "2112 远程重启"));
 }
 
 } // namespace ecp

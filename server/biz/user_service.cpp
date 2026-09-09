@@ -89,6 +89,8 @@ static int handleLogin(const Request &req, QJsonObject &out)
 
 static int handleUserInfo(const Request &req, QJsonObject &out)
 {
+    if (req.session.role != ROLE_USER) return ERR_NO_PERMISSION;
+
     QSqlDatabase db = threadDb();
     if (!db.isOpen()) return ERR_INTERNAL;
 
@@ -105,6 +107,8 @@ static int handleUserInfo(const Request &req, QJsonObject &out)
 
 static int handleSetNickname(const Request &req, QJsonObject &out)
 {
+    if (req.session.role != ROLE_USER) return ERR_NO_PERMISSION;
+
     Q_UNUSED(out);
 
     const QJsonValue value = req.data.value("nickname");
@@ -133,6 +137,8 @@ static int handleSetNickname(const Request &req, QJsonObject &out)
 
 static int handleSetAvatar(const Request &req, QJsonObject &out)
 {
+    if (req.session.role != ROLE_USER) return ERR_NO_PERMISSION;
+
     Q_UNUSED(out);
 
     const QJsonValue value = req.data.value("avatarPath");
