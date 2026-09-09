@@ -3,6 +3,8 @@
 //
 //  [说明书] 1.4 预约 -> 开始充电 -> 结束计费 -> 结算
 // -----------------------------------------------------------------------------
+#include <limits>
+
 #include <QJsonObject>
 #include <QSqlError>
 #include <QSqlQuery>
@@ -27,11 +29,6 @@ static void rollback(QSqlDatabase &db)
 {
     if (!db.rollback())
         LOG_E(QStringLiteral("订单流程事务回滚失败: %1").arg(db.lastError().text()));
-}
-
-static qint64 chargeAmount(qint64 price, qint64 kwhX100)
-{
-    return (price * kwhX100 + 50) / 100;
 }
 
 static int handleOrderStart(const Request &req, QJsonObject &out)
@@ -161,24 +158,36 @@ static int handleOrderStop(const Request &req, QJsonObject &out)
     if (!positiveInteger(req.data.value("orderId"), orderId)) return ERR_PARAM;
 
     QSqlDatabase db = threadDb();
-    if (!db.isOpen()) return ERR_INTERNAL;
+    if (!db.isOpen()) {
+        LOG_E(QStringLiteral("结束充电获取数据库连接失败: %1").arg(db.lastError().text()));
+        return ERR_INTERNAL;
+    }
 
     QSqlQuery begin(db);
     begin.prepare(QStringLiteral("BEGIN IMMEDIATE"));
-    if (!begin.exec()) return ERR_INTERNAL;
+    if (!begin.exec()) {
+        LOG_E(QStringLiteral("开启结束充电立即事务失败: %1").arg(begin.lastError().text()));
+        return ERR_INTERNAL;
+    }
 
     QSqlQuery query(db);
     query.prepare(QStringLiteral(
-        "SELECT o.status, o.pile_id, o.price, o.start_time, p.power"
+        "SELECT o.status, o.pile_id, o.price, o.start_time, p.pile_code, p.status AS pile_status"
         " FROM t_order o JOIN t_pile p ON p.pile_id = o.pile_id"
         " WHERE o.order_id = ? AND o.user_id = ?"));
     query.addBindValue(orderId);
     query.addBindValue(req.session.id);
     if (!query.exec()) {
+        LOG_E(QStringLiteral("结束充电查询订单失败: %1").arg(query.lastError().text()));
         rollback(db);
         return ERR_INTERNAL;
     }
     if (!query.next()) {
+        if (query.lastError().isValid()) {
+            LOG_E(QStringLiteral("结束充电读取订单失败: %1").arg(query.lastError().text()));
+            rollback(db);
+            return ERR_INTERNAL;
+        }
         rollback(db);
         return ERR_ORDER_NOT_FOUND;
     }
@@ -187,14 +196,40 @@ static int handleOrderStop(const Request &req, QJsonObject &out)
         return ERR_ORDER_STATUS;
     }
 
+    const QString pileCode = query.value("pile_code").toString();
+    DeviceReport report;
+    if (!DeviceRegistry::instance().isOnline(pileCode)
+        || !DeviceRegistry::instance().lastReport(pileCode, report)) {
+        rollback(db);
+        return ERR_PILE_OFFLINE;
+    }
+
+    bool priceOk = false;
+    const qint64 price = query.value("price").toLongLong(&priceOk);
+    const qint64 kwhX100 = report.kwhX100;
+    if (!priceOk || price <= 0 || kwhX100 < 0
+        || kwhX100 > std::numeric_limits<qint64>::max() / price) {
+        LOG_E(QStringLiteral("结束充电价格或累计电量异常/乘法溢出: orderId=%1 price=%2 kwhX100=%3")
+                  .arg(orderId).arg(price).arg(kwhX100));
+        rollback(db);
+        return ERR_INTERNAL;
+    }
+    // [说明书] 1.4 计费；协议 v1.3：金额为整数分，不足一分向下取整。
+    const qint64 amount = price * kwhX100 / 100;
+
     const QString startTime = query.value("start_time").toString();
+    const QDateTime start = fromStr(startTime);
     const QString now = nowStr();
-    qint64 seconds = secondsBetween(startTime, now);
-    if (seconds <= 0) seconds = 1;
-    qint64 kwhX100 = static_cast<qint64>(query.value("power").toDouble() * seconds * 100.0 / 3600.0 + 0.5);
-    if (kwhX100 <= 0) kwhX100 = 1;
-    const qint64 amount = chargeAmount(query.value("price").toLongLong(), kwhX100);
+    const qint64 seconds = secondsBetween(startTime, now);
+    if (!start.isValid() || toStr(start) != startTime || seconds < 0) {
+        LOG_E(QStringLiteral("结束充电开始时间非法或晚于结束时间: orderId=%1 startTime=%2 endTime=%3")
+                  .arg(orderId).arg(startTime, now));
+        rollback(db);
+        return ERR_INTERNAL;
+    }
     const qint64 pileId = query.value("pile_id").toLongLong();
+    const int pileStatus = query.value("pile_status").toInt();
+    query.finish();
 
     QSqlQuery updateOrder(db);
     updateOrder.prepare(QStringLiteral(
@@ -207,7 +242,12 @@ static int handleOrderStop(const Request &req, QJsonObject &out)
     updateOrder.addBindValue(orderId);
     updateOrder.addBindValue(req.session.id);
     updateOrder.addBindValue(ORDER_CHARGING);
-    if (!updateOrder.exec() || updateOrder.numRowsAffected() != 1) {
+    if (!updateOrder.exec()) {
+        LOG_E(QStringLiteral("结束充电更新订单失败: %1").arg(updateOrder.lastError().text()));
+        rollback(db);
+        return ERR_INTERNAL;
+    }
+    if (updateOrder.numRowsAffected() != 1) {
         rollback(db);
         return ERR_ORDER_STATUS;
     }
@@ -215,17 +255,33 @@ static int handleOrderStop(const Request &req, QJsonObject &out)
     QSqlQuery updatePile(db);
     updatePile.prepare(QStringLiteral(
         "UPDATE t_pile SET status = ?, charge_count = charge_count + 1,"
-        " charge_duration = charge_duration + ?, last_heartbeat = ? WHERE pile_id = ?"));
-    updatePile.addBindValue(PILE_IDLE);
+        " charge_duration = charge_duration + ? WHERE pile_id = ?"));
+    updatePile.addBindValue(pileStatus == PILE_FAULT ? PILE_FAULT : PILE_IDLE);
     updatePile.addBindValue(seconds);
-    updatePile.addBindValue(now);
     updatePile.addBindValue(pileId);
     if (!updatePile.exec()) {
+        LOG_E(QStringLiteral("结束充电更新电桩失败: %1").arg(updatePile.lastError().text()));
         rollback(db);
         return ERR_INTERNAL;
     }
 
+    if (updatePile.numRowsAffected() != 1) {
+        LOG_E(QStringLiteral("结束充电更新电桩影响行数异常: pileId=%1 rows=%2")
+                  .arg(pileId).arg(updatePile.numRowsAffected()));
+        rollback(db);
+        return ERR_INTERNAL;
+    }
+
+    if (!stopCharging(pileCode)) {
+        LOG_W(QStringLiteral("结束充电指令入队失败: pileCode=%1").arg(pileCode));
+        rollback(db);
+        return ERR_PILE_OFFLINE;
+    }
+
+    // 9006 与数据库无法跨进程原子提交；失败后不能发9005补偿，会清零设备电量。
     if (!db.commit()) {
+        LOG_E(QStringLiteral("9006已入队但结束充电事务提交失败: %1，设备停止无法原子回退: pileCode=%2")
+                  .arg(db.lastError().text(), pileCode));
         rollback(db);
         return ERR_INTERNAL;
     }
@@ -233,6 +289,8 @@ static int handleOrderStop(const Request &req, QJsonObject &out)
     out["endTime"] = now;
     out["kwh"] = kwhX100 / 100.0;
     out["amount"] = amount;
+    LOG_I(QStringLiteral("用户结束充电成功: userId=%1 orderId=%2 pileCode=%3 kwhX100=%4 amount=%5")
+              .arg(req.session.id).arg(orderId).arg(pileCode).arg(kwhX100).arg(amount));
     return ERR_OK;
 }
 
