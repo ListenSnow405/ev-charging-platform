@@ -18,7 +18,7 @@
 LoginWindow::LoginWindow(QWidget *parent) : QWidget(parent)
 {
     setWindowTitle(QStringLiteral("充电用户端"));
-    resize(430, 620);
+    resize(420, 780);
     setMinimumSize(390, 560);
     setStyleSheet(QStringLiteral(
         "QWidget { background: #f5f7fb; color: #111827; }"
@@ -93,26 +93,44 @@ LoginWindow::LoginWindow(QWidget *parent) : QWidget(parent)
 
     m_net = new NetClient(this);
 
-    QString host = QStringLiteral("127.0.0.1");
-    quint16 port = 9527;
+    m_serverHost = QStringLiteral("127.0.0.1");
+    m_serverPort = 9527;
     const QString cfgPath = ecp::resPath(QStringLiteral("config/app.ini"));
     if (QFileInfo::exists(cfgPath)) {
         QSettings cfg(cfgPath, QSettings::IniFormat);
-        host = cfg.value(QStringLiteral("server/host"), host).toString();
-        port = static_cast<quint16>(cfg.value(QStringLiteral("server/port"), port).toUInt());
+        m_serverHost = cfg.value(QStringLiteral("server/host"), m_serverHost).toString();
+        m_serverPort = static_cast<quint16>(
+            cfg.value(QStringLiteral("server/port"), m_serverPort).toUInt());
     }
 
+    m_reconnectTimer = new QTimer(this);
+    m_reconnectTimer->setInterval(1500);
+    connect(m_reconnectTimer, &QTimer::timeout, this, [this] {
+        if (!m_net || m_net->isConnected()) {
+            m_reconnectTimer->stop();
+            return;
+        }
+        m_status->setText(QStringLiteral("正在尝试重新连接服务器..."));
+        m_net->connectToServer(m_serverHost, m_serverPort);
+    });
+
     connect(m_net, &NetClient::connected, this, [this] {
+        m_reconnectTimer->stop();
         m_status->setText(QStringLiteral("已连接服务器，可以登录"));
         m_btn->setEnabled(true);
     });
     connect(m_net, &NetClient::disconnected, this, [this] {
+        m_net->setToken(QString());
         m_status->setText(QStringLiteral("与服务器断开连接"));
         m_btn->setEnabled(true);
+        m_reconnectTimer->start();
     });
     connect(m_net, &NetClient::errorText, this, [this](const QString &s) {
         m_status->setText(s);
         m_btn->setEnabled(true);
+        if (!m_net->isConnected()) {
+            m_reconnectTimer->start();
+        }
     });
     connect(m_net, &NetClient::response, this,
             [this](int cmd, int, int code, const QString &msg, const QJsonObject &data) {
@@ -161,7 +179,8 @@ LoginWindow::LoginWindow(QWidget *parent) : QWidget(parent)
     connect(m_phone, &QLineEdit::returnPressed, this, &LoginWindow::onLogin);
 
     m_btn->setEnabled(false);
-    m_net->connectToServer(host, port);
+    m_net->connectToServer(m_serverHost, m_serverPort);
+    m_reconnectTimer->start();
 }
 
 void LoginWindow::onLogin()
@@ -170,6 +189,12 @@ void LoginWindow::onLogin()
     const QRegularExpression re(QStringLiteral("^[0-9]{11}$"));
     if (!re.match(phone).hasMatch()) {
         m_status->setText(ecp::errMsg(ecp::ERR_PHONE_FORMAT));
+        return;
+    }
+
+    if (!m_net || !m_net->isConnected()) {
+        m_status->setText(QStringLiteral("尚未连接到服务器，正在重试连接..."));
+        m_reconnectTimer->start();
         return;
     }
 

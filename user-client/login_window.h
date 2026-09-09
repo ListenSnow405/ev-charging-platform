@@ -7,6 +7,7 @@
 #include <QLineEdit>
 #include <QPushButton>
 #include <QLabel>
+#include <QTimer>
 #include "net_client.h"
 
 class LoginWindow : public QWidget
@@ -21,4 +22,7 @@ private:
     QLineEdit   *m_phone = nullptr;
     QPushButton *m_btn = nullptr;
     QLabel      *m_status = nullptr;
+    QTimer      *m_reconnectTimer = nullptr;
+    QString      m_serverHost;
+    quint16      m_serverPort = 9527;
 };

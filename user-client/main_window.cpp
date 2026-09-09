@@ -223,7 +223,7 @@ MainWindow::MainWindow(NetClient *net, QWidget *parent)
     : QWidget(parent), m_net(net)
 {
     setWindowTitle(QStringLiteral("充电用户端"));
-    resize(430, 780);
+    resize(420, 780);
     setMinimumSize(390, 680);
     setStyleSheet(QStringLiteral(
         "QWidget { background: #f5f7fb; color: #111827; }"
@@ -413,6 +413,22 @@ QWidget *MainWindow::makeNearbyPage()
     m_nearbyPileTable->horizontalHeader()->setStretchLastSection(true);
     m_nearbyPileTable->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
     m_nearbyPileTable->verticalHeader()->setVisible(false);
+    connect(m_nearbyPileTable, &QTableWidget::cellClicked, this, [this](int row, int) {
+        if (row < 0 || row >= m_nearbyPiles.size()) return;
+        const QJsonObject pile = m_nearbyPiles.at(row).toObject();
+        const int status = pile.value(QStringLiteral("status")).toInt(-1);
+        if (status == ecp::PILE_IN_USE) {
+            m_nearbyPileTable->clearSelection();
+            QMessageBox::information(this, QStringLiteral("提示"),
+                                     QStringLiteral("该充电桩正在使用中，暂时无法预约。"));
+            return;
+        }
+        if (status == ecp::PILE_FAULT) {
+            m_nearbyPileTable->clearSelection();
+            QMessageBox::warning(this, QStringLiteral("提示"),
+                                 QStringLiteral("该充电桩存在故障，暂时无法预约。"));
+        }
+    });
 
     detailLay->addWidget(m_nearbyDetailTitle);
     detailLay->addWidget(m_nearbyDetailMeta);
@@ -668,6 +684,23 @@ QWidget *MainWindow::makeChargePage()
     connect(m_chargePileTable, &QTableWidget::cellClicked, this, [this](int row, int) {
         if (row < 0 || row >= m_nearbyPiles.size()) return;
         const QJsonObject pile = m_nearbyPiles.at(row).toObject();
+        const int status = pile.value(QStringLiteral("status")).toInt(-1);
+        if (status == ecp::PILE_IN_USE) {
+            m_selectedChargePileId = -1;
+            m_chargePileTable->clearSelection();
+            updateChargeSummary();
+            QMessageBox::information(this, QStringLiteral("提示"),
+                                     QStringLiteral("该充电桩正在使用中，暂时无法预约。"));
+            return;
+        }
+        if (status == ecp::PILE_FAULT) {
+            m_selectedChargePileId = -1;
+            m_chargePileTable->clearSelection();
+            updateChargeSummary();
+            QMessageBox::warning(this, QStringLiteral("提示"),
+                                 QStringLiteral("该充电桩存在故障，暂时无法预约。"));
+            return;
+        }
         m_selectedChargePileId = pile.value(QStringLiteral("pileId")).toVariant().toLongLong();
         updateChargeSummary();
     });
@@ -1182,8 +1215,8 @@ void MainWindow::renderStationPiles()
                                  : QStringLiteral("慢充");
         QString status = QStringLiteral("未知");
         switch (pile.value(QStringLiteral("status")).toInt()) {
-        case 0: status = QStringLiteral("空闲"); break;
-        case 1: status = QStringLiteral("在用"); break;
+        case 0: status = QStringLiteral("在用"); break;
+        case 1: status = QStringLiteral("空闲"); break;
         case 2: status = QStringLiteral("故障"); break;
         default: break;
         }
@@ -1257,7 +1290,6 @@ void MainWindow::renderChargePiles()
 
         auto *btn = new QPushButton(QStringLiteral("预约"), m_chargePileTable);
         btn->setObjectName(QStringLiteral("Primary"));
-        btn->setEnabled(m_chargeOrder.isEmpty() && pile.value(QStringLiteral("status")).toInt() == 1);
         connect(btn, &QPushButton::clicked, this, [this, pileId] {
             m_selectedChargePileId = pileId;
             reserveChargePile(pileId);
@@ -1347,6 +1379,33 @@ void MainWindow::reserveChargePile(qint64 pileId)
         QMessageBox::information(this, QStringLiteral("提示"), QStringLiteral("请先选择一个电桩"));
         return;
     }
+
+    for (const QJsonValue &value : m_nearbyPiles) {
+        const QJsonObject pile = value.toObject();
+        if (pile.value(QStringLiteral("pileId")).toVariant().toLongLong() != pileId) {
+            continue;
+        }
+
+        const int status = pile.value(QStringLiteral("status")).toInt(-1);
+        if (status == ecp::PILE_IN_USE) {
+            m_selectedChargePileId = -1;
+            if (m_chargePileTable) m_chargePileTable->clearSelection();
+            updateChargeSummary();
+            QMessageBox::information(this, QStringLiteral("提示"),
+                                     QStringLiteral("该充电桩正在使用中，暂时无法预约。"));
+            return;
+        }
+        if (status == ecp::PILE_FAULT) {
+            m_selectedChargePileId = -1;
+            if (m_chargePileTable) m_chargePileTable->clearSelection();
+            updateChargeSummary();
+            QMessageBox::warning(this, QStringLiteral("提示"),
+                                 QStringLiteral("该充电桩存在故障，暂时无法预约。"));
+            return;
+        }
+        break;
+    }
+
     if (!m_net || !m_net->isConnected()) {
         setStatus(QStringLiteral("未连接到服务器"), true);
         return;
@@ -1784,6 +1843,9 @@ void MainWindow::onNetResponse(int cmd, int seq, int code, const QString &msg, c
 void MainWindow::onNetDisconnected()
 {
     setStatus(QStringLiteral("与服务器断开连接"), true);
+    if (m_net) m_net->setToken(QString());
+    emit logoutRequested();
+    close();
 }
 
 void MainWindow::refreshProfile()
