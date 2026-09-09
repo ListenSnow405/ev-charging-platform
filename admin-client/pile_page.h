@@ -54,6 +54,11 @@ private:
                                       const QJsonObject &data);
     void handlePileListResponse(int code, const QString &msg,
                                 const QJsonObject &data);
+    // [说明书] 1.4 远程重启：2112 → 服务端查在线设备 → 9003 下发设备
+    void requestPileReboot();
+    void handlePileRebootResponse(int code, const QString &msg);
+    const PileData *selectedPile() const;
+    void updateRebootButton();
     void refreshTable();
     void resetFilters();
     void updatePaginationControls();
@@ -73,6 +78,7 @@ private:
     QLabel       *m_pageLabel = nullptr;
     QTimer       *m_stationOptionsTimer = nullptr;
     QTimer       *m_pileListTimer = nullptr;
+    QTimer       *m_pileRebootTimer = nullptr;
     QVector<PileData> m_piles;
 
     static constexpr int PAGE_SIZE = 20;
@@ -91,4 +97,8 @@ private:
     QSet<qint64> m_pendingStationOptionIds;
     int m_stationOptionsSeq = -1;
     int m_pileListSeq = -1;
+    int m_pileRebootSeq = -1;
+    // 重启请求发出后表格可能被刷新，响应回来时选中行未必还是当初那台桩，
+    // 因此把编号在发起时就留下来，用于成功/失败提示。
+    QString m_pendingRebootCode;
 };
