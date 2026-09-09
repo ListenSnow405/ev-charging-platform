@@ -15,6 +15,8 @@ include(../common/common.pri)
 # [说明书] 1.4 一键导航：调用腾讯地图 Web API（QWebEngineView 加载）。
 # QtWebEngine 不在 qt6-base-dev 里，需 sudo apt install qt6-webengine-dev。
 # 未安装时仍可编译出空壳，导航页会提示如何安装（见 docs/conventions.md 第 5 节）。
+# 注意：编译期有模块 ≠ 运行期能用，辅助进程 QtWebEngineProcess 由
+# libqt6webenginecore6-bin 单独提供，缺失时另见 webengine_env.h 的运行期兜底。
 qtHaveModule(webenginewidgets) {
     QT      += webenginewidgets
     DEFINES += HAVE_WEBENGINE
@@ -24,6 +26,6 @@ qtHaveModule(webenginewidgets) {
 
 INCLUDEPATH += $$PWD
 
-SOURCES += main.cpp net_client.cpp login_window.cpp main_window.cpp
-HEADERS +=          net_client.h   login_window.h   main_window.h
+SOURCES += main.cpp net_client.cpp login_window.cpp main_window.cpp webengine_env.cpp
+HEADERS +=          net_client.h   login_window.h   main_window.h   webengine_env.h
 RESOURCES += resources.qrc

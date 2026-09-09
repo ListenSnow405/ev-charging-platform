@@ -3,6 +3,7 @@
 #include "app_path.h"
 #include "protocol.h"
 #include "time_util.h"
+#include "webengine_env.h"
 
 #include <algorithm>
 #include <QAbstractItemView>
@@ -510,64 +511,81 @@ QWidget *MainWindow::makeNavPage()
     panelLay->addWidget(status);
 
 #ifdef HAVE_WEBENGINE
-    auto *view = new QWebEngineView(w);
-    view->settings()->setAttribute(QWebEngineSettings::JavascriptEnabled, true);
-    view->settings()->setAttribute(QWebEngineSettings::LocalContentCanAccessRemoteUrls, true);
-    view->settings()->setAttribute(QWebEngineSettings::LocalContentCanAccessFileUrls, false);
+    // 编译期链接了 WebEngine，还要确认运行期辅助进程在：
+    // 缺 QtWebEngineProcess 时 new QWebEngineView 会 qFatal 中止整个进程。
+    if (ecp::webEngineAvailable()) {
+        auto *view = new QWebEngineView(w);
+        view->settings()->setAttribute(QWebEngineSettings::JavascriptEnabled, true);
+        view->settings()->setAttribute(QWebEngineSettings::LocalContentCanAccessRemoteUrls, true);
+        view->settings()->setAttribute(QWebEngineSettings::LocalContentCanAccessFileUrls, false);
 
-    const QString cfgPath = ecp::resPath(QStringLiteral("config/app.ini"));
-    QSettings cfg(cfgPath, QSettings::IniFormat);
-    const QString key = cfg.value(QStringLiteral("map/key")).toString().trimmed();
-    const double defaultLat = cfg.value(QStringLiteral("map/default_lat"), 22.5470).toDouble();
-    const double defaultLng = cfg.value(QStringLiteral("map/default_lng"), 114.0650).toDouble();
+        const QString cfgPath = ecp::resPath(QStringLiteral("config/app.ini"));
+        QSettings cfg(cfgPath, QSettings::IniFormat);
+        const QString key = cfg.value(QStringLiteral("map/key")).toString().trimmed();
+        const double defaultLat = cfg.value(QStringLiteral("map/default_lat"), 22.5470).toDouble();
+        const double defaultLng = cfg.value(QStringLiteral("map/default_lng"), 114.0650).toDouble();
 
-    auto loadPreview = [view, status, key, defaultLat, defaultLng]() {
-        if (key.isEmpty()) {
-            view->setHtml(QStringLiteral(
-                "<html><body style='font-family:sans-serif;padding:20px;color:#111827'>"
-                "<h3>地图未配置</h3>"
-                "<p>请先在 config/app.ini 填写 <code>[map] key</code>。</p>"
-                "<p style='color:#6b7280'>导航页会在这里加载腾讯地图。</p>"
-                "</body></html>"));
-            status->setText(QStringLiteral("未检测到地图 Key，请先配置 config/app.ini 的 [map] key。"));
-            return;
-        }
-        view->setHtml(buildNavPreviewHtml(key, defaultLat, defaultLng),
-                      QUrl(QStringLiteral("https://map.qq.com/")));
-        status->setText(QStringLiteral("地图预览已加载。"));
-    };
+        auto loadPreview = [view, status, key, defaultLat, defaultLng]() {
+            if (key.isEmpty()) {
+                view->setHtml(QStringLiteral(
+                    "<html><body style='font-family:sans-serif;padding:20px;color:#111827'>"
+                    "<h3>地图未配置</h3>"
+                    "<p>请先在 config/app.ini 填写 <code>[map] key</code>。</p>"
+                    "<p style='color:#6b7280'>导航页会在这里加载腾讯地图。</p>"
+                    "</body></html>"));
+                status->setText(QStringLiteral("未检测到地图 Key，请先配置 config/app.ini 的 [map] key。"));
+                return;
+            }
+            view->setHtml(buildNavPreviewHtml(key, defaultLat, defaultLng),
+                          QUrl(QStringLiteral("https://map.qq.com/")));
+            status->setText(QStringLiteral("地图预览已加载。"));
+        };
 
-    auto loadRoute = [view, status, key, defaultLat, defaultLng, driveBtn, destEdit]() {
-        const QString destination = destEdit->text().trimmed();
-        if (destination.isEmpty()) {
-            status->setText(QStringLiteral("请先输入目的地。"));
-            return;
-        }
-        const QString mode = driveBtn->isChecked() ? QStringLiteral("drive")
-                                                    : QStringLiteral("walk");
-        if (key.isEmpty()) {
-            status->setText(QStringLiteral("未检测到地图 Key，请先配置 config/app.ini 的 [map] key。"));
-            return;
-        }
-        view->load(buildRoutePlanUrl(mode, defaultLat, defaultLng, destination));
-        status->setText(QStringLiteral("已打开路线规划。"));
-    };
+        auto loadRoute = [view, status, key, defaultLat, defaultLng, driveBtn, destEdit]() {
+            const QString destination = destEdit->text().trimmed();
+            if (destination.isEmpty()) {
+                status->setText(QStringLiteral("请先输入目的地。"));
+                return;
+            }
+            const QString mode = driveBtn->isChecked() ? QStringLiteral("drive")
+                                                        : QStringLiteral("walk");
+            if (key.isEmpty()) {
+                status->setText(QStringLiteral("未检测到地图 Key，请先配置 config/app.ini 的 [map] key。"));
+                return;
+            }
+            view->load(buildRoutePlanUrl(mode, defaultLat, defaultLng, destination));
+            status->setText(QStringLiteral("已打开路线规划。"));
+        };
 
-    connect(previewBtn, &QPushButton::clicked, this, loadPreview);
-    connect(routeBtn, &QPushButton::clicked, this, loadRoute);
-    connect(resetBtn, &QPushButton::clicked, this, loadPreview);
-    connect(driveBtn, &QPushButton::clicked, this, [status] { status->setText(QStringLiteral("当前模式：驾车")); });
-    connect(walkBtn, &QPushButton::clicked, this, [status] { status->setText(QStringLiteral("当前模式：步行")); });
+        connect(previewBtn, &QPushButton::clicked, this, loadPreview);
+        connect(routeBtn, &QPushButton::clicked, this, loadRoute);
+        connect(resetBtn, &QPushButton::clicked, this, loadPreview);
+        connect(driveBtn, &QPushButton::clicked, this, [status] { status->setText(QStringLiteral("当前模式：驾车")); });
+        connect(walkBtn, &QPushButton::clicked, this, [status] { status->setText(QStringLiteral("当前模式：步行")); });
 
-    lay->addWidget(panel, 0);
-    lay->addWidget(view, 1);
-    loadPreview();
+        lay->addWidget(panel, 0);
+        lay->addWidget(view, 1);
+        loadPreview();
+        return w;
+    }
+    const QString tip = QStringLiteral(
+        "未找到 QtWebEngineProcess 辅助进程，导航页以占位说明替代。\n"
+        "安装后重启本程序即可恢复：sudo apt install libqt6webenginecore6-bin");
 #else
-    panelLay->addWidget(new QLabel(QStringLiteral("QtWebEngineWidgets 未安装，导航页仅显示占位说明。"), panel));
-    lay->addWidget(panel, 0);
-    lay->addWidget(makePlaceholder(QStringLiteral("一键导航"),
-                                   QStringLiteral("QtWebEngineWidgets 未安装时显示占位页。后续接入腾讯地图路线规划。")), 1);
+    const QString tip = QStringLiteral(
+        "QtWebEngineWidgets 未安装，导航页以占位说明替代。\n"
+        "安装后重新编译即可恢复：sudo apt install qt6-webengine-dev qt6-webengine-dev-tools");
 #endif
+    // 占位分支下这些控件无处可去，禁用掉，避免点了没反应。
+    previewBtn->setEnabled(false);
+    routeBtn->setEnabled(false);
+    resetBtn->setEnabled(false);
+    driveBtn->setEnabled(false);
+    walkBtn->setEnabled(false);
+    destEdit->setEnabled(false);
+    status->setText(tip);
+    lay->addWidget(panel, 0);
+    lay->addWidget(makePlaceholder(QStringLiteral("一键导航"), tip), 1);
     return w;
 }
 

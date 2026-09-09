@@ -19,6 +19,10 @@
 
 1. **QtWebEngine 需单独安装**（约 400MB，`bash scripts/check-env.sh L4` 会给出命令）。
    `.pro` 用 `qtHaveModule(webenginewidgets)` 守卫，未装也能编译。
+   **编译期有模块 ≠ 运行期能用**：辅助进程 `QtWebEngineProcess` 由 `libqt6webenginecore6-bin`
+   单独提供，缺它时 `new QWebEngineView` 直接 `qFatal` 中止进程（登录后进主窗口即崩，无法 try/catch）。
+   因此建 WebEngine 控件前一律先过 `ecp::webEngineAvailable()`（`webengine_env.h`），
+   返回 false 就走占位页。缺失时补装：`sudo apt install libqt6webenginecore6-bin`。
 2. **进入充电页前必须先发 1201 查未结算订单**——[说明书] 1.4 明确要求：有未完成订单则弹窗提示
    「您有未完成的充电订单，请先结算」并**强制跳转结算页**。这是硬性业务规则，不能只做提示不做跳转。
 3. **收到 `ERR_TOKEN_INVALID` 必须清空本地 token 并跳转登录页**，不能静默重试——否则会拿着失效 token 死循环。

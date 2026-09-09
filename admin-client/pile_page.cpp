@@ -11,6 +11,7 @@
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QLabel>
+#include <QMessageBox>
 #include <QPushButton>
 #include <QSignalBlocker>
 #include <QTableWidget>
@@ -21,6 +22,7 @@
 namespace {
 
 constexpr int READ_RESPONSE_TIMEOUT_MS = 10000;
+constexpr int WRITE_RESPONSE_TIMEOUT_MS = 10000;
 
 QTableWidgetItem *centeredItem(const QString &text)
 {
@@ -53,6 +55,21 @@ PilePage::PilePage(NetClient *net, QWidget *parent)
         m_requestedStatus = m_currentStatus;
         m_statusLabel->setMessage(QStringLiteral("电桩列表请求超时，请重试"), LoadingStatus::Tone::Error);
         updatePaginationControls();
+    });
+
+    // 写操作单独一个定时器：超时后必须把按钮放回可用，否则一次丢包就再也点不动了
+    m_pileRebootTimer = new QTimer(this);
+    m_pileRebootTimer->setSingleShot(true);
+    connect(m_pileRebootTimer, &QTimer::timeout, this, [this] {
+        if (m_pileRebootSeq < 0) return;
+        m_pileRebootSeq = -1;
+        const QString code = m_pendingRebootCode;
+        m_pendingRebootCode.clear();
+        updateLoadingState();
+        updateRebootButton();
+        m_statusLabel->setMessage(
+            QStringLiteral("电桩 %1 重启指令响应超时，请重试").arg(code),
+            LoadingStatus::Tone::Error);
     });
 
     connect(m_net, &NetClient::response, this, &PilePage::handleResponse);
@@ -96,8 +113,8 @@ void PilePage::setupUi()
 
     m_rebootButton = new QPushButton(QStringLiteral("远程重启"), this);
     m_rebootButton->setObjectName(QStringLiteral("Danger"));
-    m_rebootButton->setEnabled(false);
-    m_rebootButton->setToolTip(QStringLiteral("服务端 2112 尚未接入"));
+    m_rebootButton->setEnabled(false);          // 未选中行时不可点，由 updateRebootButton() 接管
+    m_rebootButton->setToolTip(QStringLiteral("请先在下方列表选中一台电桩"));
     filterLayout->addWidget(m_rebootButton);
     auto *filterCard = new QFrame(this);
     filterCard->setObjectName(QStringLiteral("Card"));
@@ -152,6 +169,9 @@ void PilePage::setupUi()
     connect(m_nextPageButton, &QPushButton::clicked, this, [this] {
         requestPileList(m_currentPage + 1, m_currentStationId, m_currentStatus);
     });
+    connect(m_rebootButton, &QPushButton::clicked, this, &PilePage::requestPileReboot);
+    connect(m_table, &QTableWidget::itemSelectionChanged,
+            this, &PilePage::updateRebootButton);
 }
 
 void PilePage::requestStationOptions()
@@ -265,6 +285,14 @@ void PilePage::handleResponse(int cmd, int seq, int code, const QString &msg,
         m_pileListSeq = -1;
         updateLoadingState();
         handlePileListResponse(code, msg, data);
+        return;
+    }
+    if (cmd == ecp::CMD_PILE_REBOOT) {
+        if (seq != m_pileRebootSeq) return;
+        m_pileRebootTimer->stop();
+        m_pileRebootSeq = -1;
+        updateLoadingState();
+        handlePileRebootResponse(code, msg);
     }
 }
 
@@ -364,6 +392,106 @@ void PilePage::handlePileListResponse(int code, const QString &msg,
     updatePaginationControls();
 }
 
+// -----------------------------------------------------------------------------
+//  [说明书] 1.4 远程重启（模拟向电桩发送重启指令），用于处理死机等异常
+//  链路：管理端 2112 → 服务端校验管理员/查桩/判在线 → 写 t_pile_log + t_admin_oplog
+//        → pushToDevice() 用 9003 推给电桩模拟器
+//  服务端不改电桩状态（t_pile_log 的 old_status/new_status 均为 NULL），
+//  所以这里的成功提示只能说「指令已下发」，不能说「已重启完成」。
+// -----------------------------------------------------------------------------
+const PilePage::PileData *PilePage::selectedPile() const
+{
+    const int row = m_table->currentRow();
+    const QTableWidgetItem *codeItem = row >= 0 ? m_table->item(row, 0) : nullptr;
+    if (!codeItem) return nullptr;
+
+    const qint64 pileId = codeItem->data(Qt::UserRole).toLongLong();
+    for (const PileData &pile : m_piles) {
+        if (pile.pileId == pileId) return &pile;
+    }
+    return nullptr;
+}
+
+void PilePage::updateRebootButton()
+{
+    // 请求在途时一律禁用，避免同一台桩被连点出多条指令
+    const bool busy = m_pileRebootSeq >= 0 || m_pileListSeq >= 0;
+    const PileData *pile = selectedPile();
+
+    m_rebootButton->setEnabled(!busy && pile != nullptr);
+    if (busy) {
+        m_rebootButton->setToolTip(QStringLiteral("请求处理中，请稍候"));
+    } else if (!pile) {
+        m_rebootButton->setToolTip(QStringLiteral("请先在下方列表选中一台电桩"));
+    } else {
+        m_rebootButton->setToolTip(
+            QStringLiteral("向电桩 %1 下发远程重启指令").arg(pile->code));
+    }
+}
+
+void PilePage::requestPileReboot()
+{
+    const PileData *pile = selectedPile();
+    if (!pile) {
+        QMessageBox::information(this, QStringLiteral("远程重启"),
+                                 QStringLiteral("请先选择一台电桩"));
+        return;
+    }
+
+    const QString code = pile->code;
+    const qint64 pileId = pile->pileId;
+    const auto answer = QMessageBox::question(
+        this, QStringLiteral("确认远程重启"),
+        QStringLiteral("确定要重启电桩 %1 吗？\n重启期间该桩将短暂不可用。").arg(code),
+        QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+    if (answer != QMessageBox::Yes) return;
+
+    const int seq = m_net->send(ecp::CMD_PILE_REBOOT, QJsonObject{
+        { QStringLiteral("pileId"), pileId }
+    });
+    if (seq < 0) {
+        m_pileRebootTimer->stop();
+        m_pileRebootSeq = -1;
+        m_pendingRebootCode.clear();
+        updateLoadingState();
+        updateRebootButton();
+        QMessageBox::warning(this, QStringLiteral("远程重启失败"),
+                             QStringLiteral("请求发送失败，请检查网络连接"));
+        return;
+    }
+
+    m_pileRebootSeq = seq;
+    m_pendingRebootCode = code;
+    updateLoadingState();
+    updateRebootButton();
+    m_pileRebootTimer->start(WRITE_RESPONSE_TIMEOUT_MS);
+    m_statusLabel->setMessage(QStringLiteral("正在向电桩 %1 下发重启指令…").arg(code),
+                              LoadingStatus::Tone::Loading);
+}
+
+void PilePage::handlePileRebootResponse(int code, const QString &msg)
+{
+    const QString pileCode = m_pendingRebootCode;
+    m_pendingRebootCode.clear();
+
+    if (code != ecp::ERR_OK) {
+        // 3005 电桩离线是最常见的一种失败，服务端已给出可读文案，直接透传
+        m_statusLabel->setMessage(
+            QStringLiteral("电桩 %1 重启失败：%2").arg(pileCode, msg),
+            LoadingStatus::Tone::Error);
+        QMessageBox::warning(this, QStringLiteral("远程重启失败"), msg);
+        updateRebootButton();
+        return;
+    }
+
+    m_statusLabel->setMessage(QStringLiteral("电桩 %1 重启指令已下发").arg(pileCode),
+                              LoadingStatus::Tone::Success);
+    QMessageBox::information(this, QStringLiteral("操作成功"),
+                             QStringLiteral("已向电桩 %1 下发重启指令").arg(pileCode));
+    // 刷新列表：设备重启后会重新上报状态，顺带把操作前后的差异带回界面
+    requestPileList(m_currentPage, m_currentStationId, m_currentStatus);
+}
+
 void PilePage::refreshTable()
 {
     m_table->setRowCount(0);
@@ -382,6 +510,7 @@ void PilePage::refreshTable()
     }
 
     m_table->clearSelection();
+    updateRebootButton();
 }
 
 void PilePage::resetFilters()
@@ -436,5 +565,9 @@ QString PilePage::durationText(qint64 seconds)
 
 void PilePage::updateLoadingState()
 {
-    m_statusLabel->setLoading(m_stationOptionsSeq >= 0 || m_pileListSeq >= 0);
+    m_statusLabel->setLoading(m_stationOptionsSeq >= 0 || m_pileListSeq >= 0
+                              || m_pileRebootSeq >= 0);
+    // 每次 seq 变化都会走到这里，重启按钮的可用性正好取决于同一组 seq，
+    // 挂在此处比在各个请求分支里散着调更不容易漏
+    updateRebootButton();
 }
