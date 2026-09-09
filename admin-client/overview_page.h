@@ -9,6 +9,7 @@
 #include <QWidget>
 
 class NetClient;
+class LoadingStatus;
 class QJsonObject;
 class QLabel;
 class QTableWidget;
@@ -38,6 +39,7 @@ private:
 #endif
 
     void setupUi();
+    void updateLoadingState();
     void refreshOverview();
     void requestRevenue();
     void requestRevenueTrend(int days);
@@ -66,7 +68,7 @@ private:
 #endif
 
     NetClient    *m_net = nullptr;
-    QLabel       *m_statusLabel = nullptr;
+    LoadingStatus *m_statusLabel = nullptr;
     QLabel       *m_todayRevenue = nullptr;
     QLabel       *m_monthRevenue = nullptr;
     QLabel       *m_totalRevenue = nullptr;

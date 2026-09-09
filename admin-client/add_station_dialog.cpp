@@ -3,6 +3,8 @@
 #include <QDialogButtonBox>
 #include <QFormLayout>
 #include <QLineEdit>
+#include <QLabel>
+#include <QFrame>
 #include <QMessageBox>
 #include <QPushButton>
 #include <QRegularExpression>
@@ -13,7 +15,7 @@ AddStationDialog::AddStationDialog(QWidget *parent) : QDialog(parent)
 {
     setWindowTitle(QStringLiteral("新增电站"));
     setModal(true);
-    resize(440, 330);
+    resize(520, 500);
 
     m_name = new QLineEdit(this);
     m_address = new QLineEdit(this);
@@ -31,6 +33,8 @@ AddStationDialog::AddStationDialog(QWidget *parent) : QDialog(parent)
     m_pileCount->setValue(4);
 
     auto *form = new QFormLayout;
+    form->setVerticalSpacing(14);
+    form->setHorizontalSpacing(16);
     form->addRow(QStringLiteral("站名"), m_name);
     form->addRow(QStringLiteral("地址"), m_address);
     form->addRow(QStringLiteral("经度"), m_longitude);
@@ -42,11 +46,26 @@ AddStationDialog::AddStationDialog(QWidget *parent) : QDialog(parent)
         QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
     buttons->button(QDialogButtonBox::Ok)->setText(QStringLiteral("确认新增"));
     buttons->button(QDialogButtonBox::Cancel)->setText(QStringLiteral("取消"));
+    buttons->button(QDialogButtonBox::Ok)->setObjectName(QStringLiteral("Primary"));
+    buttons->button(QDialogButtonBox::Cancel)->setObjectName(QStringLiteral("Secondary"));
     connect(buttons, &QDialogButtonBox::accepted, this, &AddStationDialog::accept);
     connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
 
     auto *layout = new QVBoxLayout(this);
-    layout->addLayout(form);
+    layout->setContentsMargins(24, 24, 24, 24);
+    layout->setSpacing(16);
+    auto *title = new QLabel(QStringLiteral("新增充电站"), this);
+    title->setObjectName(QStringLiteral("PageTitle"));
+    auto *hint = new QLabel(QStringLiteral("填写站点信息，配置充电价格与电桩数量。"), this);
+    hint->setObjectName(QStringLiteral("Muted"));
+    hint->setWordWrap(true);
+    layout->addWidget(title);
+    layout->addWidget(hint);
+    auto *card = new QFrame(this);
+    card->setObjectName(QStringLiteral("Card"));
+    form->setContentsMargins(18, 18, 18, 18);
+    card->setLayout(form);
+    layout->addWidget(card);
     layout->addStretch();
     layout->addWidget(buttons);
 }

@@ -1,5 +1,6 @@
 #include "overview_page.h"
 #include "net_client.h"
+#include "loading_status.h"
 #include "protocol.h"
 #include "time_util.h"
 #include <QAbstractItemView>
@@ -52,6 +53,7 @@ OverviewPage::OverviewPage(NetClient *net, QWidget *parent)
     connect(m_revenueTimer, &QTimer::timeout, this, [this] {
         if (m_revenueSeq < 0) return;
         m_revenueSeq = -1;
+        updateLoadingState();
         m_revenueState = LoadState::Failed;
         m_revenueError = QStringLiteral("请求超时，请重试");
         updateStatusLabel();
@@ -62,6 +64,7 @@ OverviewPage::OverviewPage(NetClient *net, QWidget *parent)
     connect(m_pileStatusTimer, &QTimer::timeout, this, [this] {
         if (m_pileStatusSeq < 0) return;
         m_pileStatusSeq = -1;
+        updateLoadingState();
         m_pileStatusState = LoadState::Failed;
         m_pileStatusError = QStringLiteral("请求超时，请重试");
         updateStatusLabel();
@@ -73,6 +76,7 @@ OverviewPage::OverviewPage(NetClient *net, QWidget *parent)
     connect(m_revenueTrendTimer, &QTimer::timeout, this, [this] {
         if (m_revenueTrendSeq < 0) return;
         m_revenueTrendSeq = -1;
+        updateLoadingState();
         m_revenueTrendState = LoadState::Failed;
         m_revenueTrendError = QStringLiteral("请求超时，请重试");
         updateStatusLabel();
@@ -95,18 +99,15 @@ void OverviewPage::setupUi()
 
     auto *titleLayout = new QHBoxLayout;
     auto *title = new QLabel(QStringLiteral("数据总览"), this);
-    QFont titleFont = title->font();
-    titleFont.setPointSize(18);
-    titleFont.setBold(true);
-    title->setFont(titleFont);
+    title->setObjectName(QStringLiteral("PageTitle"));
     titleLayout->addWidget(title);
     titleLayout->addStretch();
     auto *refreshButton = new QPushButton(QStringLiteral("刷新"), this);
+    refreshButton->setObjectName(QStringLiteral("Primary"));
     titleLayout->addWidget(refreshButton);
     pageLayout->addLayout(titleLayout);
 
-    m_statusLabel = new QLabel(QStringLiteral("准备加载数据总览"), this);
-    m_statusLabel->setStyleSheet(QStringLiteral("color:#667085"));
+    m_statusLabel = new LoadingStatus(QStringLiteral("准备加载数据总览"), this);
     m_statusLabel->setWordWrap(true);
     pageLayout->addWidget(m_statusLabel);
 
@@ -174,7 +175,7 @@ void OverviewPage::setupUi()
         "请执行：sudo apt install libqt6charts6-dev\n"
         "然后重新 qmake6 && make（详见 docs/conventions.md 第 5 节）"), trendGroup);
     warn->setWordWrap(true);
-    warn->setStyleSheet(QStringLiteral("color:#a33;border:1px dashed #a33;padding:16px"));
+    warn->setObjectName(QStringLiteral("WarningBox"));
     trendLayout->addWidget(warn);
     trendLayout->addStretch();
     sevenDaysButton->setEnabled(false);
@@ -184,7 +185,7 @@ void OverviewPage::setupUi()
     auto *statusGroup = new QGroupBox(QStringLiteral("电桩状态"), this);
     auto *statusLayout = new QVBoxLayout(statusGroup);
     m_pileTotal = new QLabel(QStringLiteral("电桩总数：—"), statusGroup);
-    m_pileTotal->setStyleSheet(QStringLiteral("color:#666"));
+    m_pileTotal->setObjectName(QStringLiteral("Muted"));
     statusLayout->addWidget(m_pileTotal);
 
     m_pileStatusTable = new QTableWidget(3, 3, statusGroup);
@@ -194,6 +195,9 @@ void OverviewPage::setupUi()
     m_pileStatusTable->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
     m_pileStatusTable->verticalHeader()->setVisible(false);
     m_pileStatusTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    m_pileStatusTable->setMouseTracking(true);
+    m_pileStatusTable->setShowGrid(false);
+    m_pileStatusTable->verticalHeader()->setDefaultSectionSize(40);
     m_pileStatusTable->setSelectionMode(QAbstractItemView::NoSelection);
     m_pileStatusTable->setAlternatingRowColors(true);
     statusLayout->addWidget(m_pileStatusTable);
@@ -223,12 +227,14 @@ void OverviewPage::requestRevenue()
     if (seq < 0) {
         m_revenueTimer->stop();
         m_revenueSeq = -1;
+        updateLoadingState();
         m_revenueState = LoadState::Failed;
         m_revenueError = QStringLiteral("请求发送失败，请检查网络连接");
         updateStatusLabel();
         return;
     }
     m_revenueSeq = seq;
+    updateLoadingState();
     m_revenueTimer->start(READ_RESPONSE_TIMEOUT_MS);
 }
 
@@ -244,12 +250,14 @@ void OverviewPage::requestRevenueTrend(int days)
     if (seq < 0) {
         m_revenueTrendTimer->stop();
         m_revenueTrendSeq = -1;
+        updateLoadingState();
         m_revenueTrendState = LoadState::Failed;
         m_revenueTrendError = QStringLiteral("请求发送失败，请检查网络连接");
         updateStatusLabel();
         return;
     }
     m_revenueTrendSeq = seq;
+    updateLoadingState();
     m_revenueTrendTimer->start(READ_RESPONSE_TIMEOUT_MS);
 #else
     Q_UNUSED(days);
@@ -265,12 +273,14 @@ void OverviewPage::requestPileStatus()
     if (seq < 0) {
         m_pileStatusTimer->stop();
         m_pileStatusSeq = -1;
+        updateLoadingState();
         m_pileStatusState = LoadState::Failed;
         m_pileStatusError = QStringLiteral("请求发送失败，请检查网络连接");
         updateStatusLabel();
         return;
     }
     m_pileStatusSeq = seq;
+    updateLoadingState();
     m_pileStatusTimer->start(READ_RESPONSE_TIMEOUT_MS);
 }
 
@@ -281,6 +291,7 @@ void OverviewPage::handleResponse(int cmd, int seq, int code, const QString &msg
         if (seq != m_revenueSeq) return;
         m_revenueTimer->stop();
         m_revenueSeq = -1;
+        updateLoadingState();
         handleRevenueResponse(code, msg, data);
         return;
     }
@@ -289,6 +300,7 @@ void OverviewPage::handleResponse(int cmd, int seq, int code, const QString &msg
         if (seq != m_revenueTrendSeq) return;
         m_revenueTrendTimer->stop();
         m_revenueTrendSeq = -1;
+        updateLoadingState();
         handleRevenueTrendResponse(code, msg, data);
         return;
     }
@@ -297,6 +309,7 @@ void OverviewPage::handleResponse(int cmd, int seq, int code, const QString &msg
         if (seq != m_pileStatusSeq) return;
         m_pileStatusTimer->stop();
         m_pileStatusSeq = -1;
+        updateLoadingState();
         handlePileStatusResponse(code, msg, data);
     }
 }
@@ -371,7 +384,10 @@ void OverviewPage::updateStatusLabel()
     if (loading) errors.prepend(QStringLiteral("正在加载数据总览…"));
 
     if (!errors.isEmpty()) {
-        m_statusLabel->setText(errors.join(QStringLiteral("　")));
+        m_statusLabel->setMessage(errors.join(QStringLiteral("　")),
+            m_revenueState == LoadState::Failed || m_pileStatusState == LoadState::Failed
+                || m_revenueTrendState == LoadState::Failed
+            ? LoadingStatus::Tone::Error : LoadingStatus::Tone::Loading);
         return;
     }
 
@@ -382,28 +398,25 @@ void OverviewPage::updateStatusLabel()
 #else
     const bool trendReady = true;
 #endif
-    m_statusLabel->setText(revenueReady && pileStatusReady && trendReady
+    m_statusLabel->setMessage(revenueReady && pileStatusReady && trendReady
         ? QStringLiteral("数据总览已更新")
-        : QStringLiteral("准备加载数据总览"));
+        : QStringLiteral("准备加载数据总览"),
+        revenueReady && pileStatusReady && trendReady
+            ? LoadingStatus::Tone::Success : LoadingStatus::Tone::Neutral);
 }
 
 QWidget *OverviewPage::createMetricCard(const QString &title, QLabel *&valueLabel)
 {
     auto *card = new QFrame(this);
     card->setFrameShape(QFrame::StyledPanel);
-    card->setStyleSheet(QStringLiteral(
-        "QFrame { background:#f7f9fc; border:1px solid #dfe5ec; border-radius:6px; }"
-        "QLabel { border:none; }"));
+    card->setObjectName(QStringLiteral("Card"));
     auto *layout = new QVBoxLayout(card);
     layout->setContentsMargins(18, 14, 18, 14);
 
     auto *titleLabel = new QLabel(title, card);
-    titleLabel->setStyleSheet(QStringLiteral("color:#667085"));
+    titleLabel->setObjectName(QStringLiteral("MetricTitle"));
     valueLabel = new QLabel(QStringLiteral("—"), card);
-    QFont valueFont = valueLabel->font();
-    valueFont.setPointSize(18);
-    valueFont.setBold(true);
-    valueLabel->setFont(valueFont);
+    valueLabel->setObjectName(QStringLiteral("MetricValue"));
 
     layout->addWidget(titleLabel);
     layout->addWidget(valueLabel);
@@ -497,3 +510,8 @@ void OverviewPage::renderRevenueTrend(const QVector<RevenueTrendPoint> &points, 
     m_revenueAxisY->setRange(0, yMax);
 }
 #endif
+
+void OverviewPage::updateLoadingState()
+{
+    m_statusLabel->setLoading(m_revenueSeq >= 0 || m_revenueTrendSeq >= 0 || m_pileStatusSeq >= 0);
+}

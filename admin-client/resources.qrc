@@ -1,0 +1,5 @@
+<RCC>
+    <qresource prefix="/admin">
+        <file>admin_theme.qss</file>
+    </qresource>
+</RCC>

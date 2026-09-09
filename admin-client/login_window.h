@@ -12,6 +12,7 @@
 #include "net_client.h"
 
 class QTimer;
+class LoadingStatus;
 
 class LoginWindow : public QWidget
 {
@@ -31,7 +32,7 @@ private:
     QLineEdit   *m_account = nullptr;
     QLineEdit   *m_password = nullptr;
     QPushButton *m_btn = nullptr;
-    QLabel      *m_status = nullptr;
+    LoadingStatus *m_status = nullptr;
     QTimer      *m_reconnectTimer = nullptr;
     QTimer      *m_loginResponseTimer = nullptr;
     QString      m_host = QStringLiteral("127.0.0.1");

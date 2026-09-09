@@ -1,10 +1,12 @@
 #include "station_page.h"
 #include "add_station_dialog.h"
 #include "net_client.h"
+#include "loading_status.h"
 #include "protocol.h"
 #include <QAbstractItemView>
 #include <QDialog>
 #include <QFont>
+#include <QFrame>
 #include <QHeaderView>
 #include <QHBoxLayout>
 #include <QJsonArray>
@@ -40,8 +42,9 @@ StationPage::StationPage(NetClient *net, QWidget *parent)
     connect(m_stationListTimer, &QTimer::timeout, this, [this] {
         if (m_stationListSeq < 0) return;
         m_stationListSeq = -1;
+        updateLoadingState();
         m_requestedPage = m_currentPage;
-        m_statusLabel->setText(QStringLiteral("电站列表请求超时，请重试"));
+        m_statusLabel->setMessage(QStringLiteral("电站列表请求超时，请重试"), LoadingStatus::Tone::Error);
         updatePaginationControls();
     });
 
@@ -50,11 +53,12 @@ StationPage::StationPage(NetClient *net, QWidget *parent)
     connect(m_stationAddTimer, &QTimer::timeout, this, [this] {
         if (m_stationAddSeq < 0) return;
         m_stationAddSeq = -1;
+        updateLoadingState();
         m_stationAddOutcomeUnknown = true;
         m_addButton->setEnabled(true);
-        m_statusLabel->setText(
+        m_statusLabel->setMessage(
             QStringLiteral("新增电站“%1”响应超时，操作结果未知；请先刷新并核对，避免重复新增")
-                .arg(m_pendingAddStationName));
+                .arg(m_pendingAddStationName), LoadingStatus::Tone::Error);
     });
 
     m_stationDetailTimer = new QTimer(this);
@@ -62,10 +66,11 @@ StationPage::StationPage(NetClient *net, QWidget *parent)
     connect(m_stationDetailTimer, &QTimer::timeout, this, [this] {
         if (m_stationDetailSeq < 0) return;
         m_stationDetailSeq = -1;
+        updateLoadingState();
         m_pendingDetailStationId = 0;
         m_pendingDetailStationName.clear();
         m_pendingDetailStationAddress.clear();
-        m_statusLabel->setText(QStringLiteral("电站详情请求超时，请重试"));
+        m_statusLabel->setMessage(QStringLiteral("电站详情请求超时，请重试"), LoadingStatus::Tone::Error);
     });
 
     connect(m_net, &NetClient::response, this, &StationPage::handleResponse);
@@ -80,24 +85,22 @@ void StationPage::setupUi()
 
     auto *toolbar = new QHBoxLayout;
     auto *title = new QLabel(QStringLiteral("充电站管理"), this);
-    QFont titleFont = title->font();
-    titleFont.setPointSize(18);
-    titleFont.setBold(true);
-    title->setFont(titleFont);
+    title->setObjectName(QStringLiteral("PageTitle"));
     toolbar->addWidget(title);
     toolbar->addStretch();
 
     m_detailsButton = new QPushButton(QStringLiteral("查看详情"), this);
     m_detailsButton->setEnabled(false);
     auto *refreshButton = new QPushButton(QStringLiteral("刷新"), this);
+    refreshButton->setObjectName(QStringLiteral("Secondary"));
     m_addButton = new QPushButton(QStringLiteral("新增电站"), this);
+    m_addButton->setObjectName(QStringLiteral("Primary"));
     toolbar->addWidget(m_detailsButton);
     toolbar->addWidget(refreshButton);
     toolbar->addWidget(m_addButton);
     pageLayout->addLayout(toolbar);
 
-    m_statusLabel = new QLabel(QStringLiteral("准备加载电站列表"), this);
-    m_statusLabel->setStyleSheet(QStringLiteral("color:#667085"));
+    m_statusLabel = new LoadingStatus(QStringLiteral("准备加载电站列表"), this);
     pageLayout->addWidget(m_statusLabel);
 
     m_table = new QTableWidget(0, 7, this);
@@ -107,6 +110,9 @@ void StationPage::setupUi()
         QStringLiteral("在线率")
     });
     m_table->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    m_table->setMouseTracking(true);
+    m_table->setShowGrid(false);
+    m_table->verticalHeader()->setDefaultSectionSize(40);
     m_table->setSelectionBehavior(QAbstractItemView::SelectRows);
     m_table->setSelectionMode(QAbstractItemView::SingleSelection);
     m_table->setAlternatingRowColors(true);
@@ -118,9 +124,11 @@ void StationPage::setupUi()
 
     auto *pagination = new QHBoxLayout;
     m_previousPageButton = new QPushButton(QStringLiteral("上一页"), this);
+    m_previousPageButton->setObjectName(QStringLiteral("Secondary"));
     m_pageLabel = new QLabel(this);
     m_pageLabel->setAlignment(Qt::AlignCenter);
     m_nextPageButton = new QPushButton(QStringLiteral("下一页"), this);
+    m_nextPageButton->setObjectName(QStringLiteral("Secondary"));
     pagination->addStretch();
     pagination->addWidget(m_previousPageButton);
     pagination->addWidget(m_pageLabel);
@@ -152,19 +160,21 @@ void StationPage::requestStationList(int page)
 {
     if (page < 1) return;
 
-    m_statusLabel->setText(QStringLiteral("正在加载电站列表…"));
+    m_statusLabel->setMessage(QStringLiteral("正在加载电站列表…"), LoadingStatus::Tone::Loading);
     const int seq = m_net->send(ecp::CMD_STATION_LIST, QJsonObject{
         { QStringLiteral("page"), page },
         { QStringLiteral("size"), PAGE_SIZE }
     });
     if (seq < 0) {
         m_stationListSeq = -1;
+        updateLoadingState();
         m_requestedPage = m_currentPage;
-        m_statusLabel->setText(QStringLiteral("电站列表请求发送失败，请检查网络连接"));
+        m_statusLabel->setMessage(QStringLiteral("电站列表请求发送失败，请检查网络连接"), LoadingStatus::Tone::Error);
         updatePaginationControls();
         return;
     }
     m_stationListSeq = seq;
+    updateLoadingState();
     m_requestedPage = page;
     m_stationListTimer->start(READ_RESPONSE_TIMEOUT_MS);
     updatePaginationControls();
@@ -189,11 +199,12 @@ void StationPage::requestStationDetail(int row)
     }
 
     m_stationDetailSeq = seq;
+    updateLoadingState();
     m_pendingDetailStationId = station.stationId;
     m_pendingDetailStationName = station.name;
     m_pendingDetailStationAddress = station.address;
     m_stationDetailTimer->start(READ_RESPONSE_TIMEOUT_MS);
-    m_statusLabel->setText(QStringLiteral("正在加载“%1”的电桩详情…").arg(station.name));
+    m_statusLabel->setMessage(QStringLiteral("正在加载“%1”的电桩详情…").arg(station.name), LoadingStatus::Tone::Loading);
 }
 
 void StationPage::addStation()
@@ -224,17 +235,19 @@ void StationPage::addStation()
     if (seq < 0) {
         m_stationAddTimer->stop();
         m_stationAddSeq = -1;
+        updateLoadingState();
         QMessageBox::warning(this, QStringLiteral("新增电站失败"),
                              QStringLiteral("请求发送失败，请检查网络连接"));
         return;
     }
 
     m_stationAddSeq = seq;
+    updateLoadingState();
     m_pendingAddStationName = input.name;
     m_stationAddOutcomeUnknown = false;
     m_stationAddTimer->start(WRITE_RESPONSE_TIMEOUT_MS);
     m_addButton->setEnabled(false);
-    m_statusLabel->setText(QStringLiteral("正在新增电站…"));
+    m_statusLabel->setMessage(QStringLiteral("正在新增电站…"), LoadingStatus::Tone::Loading);
 }
 
 void StationPage::handleResponse(int cmd, int seq, int code, const QString &msg,
@@ -244,6 +257,7 @@ void StationPage::handleResponse(int cmd, int seq, int code, const QString &msg,
         if (seq != m_stationListSeq) return;
         m_stationListTimer->stop();
         m_stationListSeq = -1;
+        updateLoadingState();
         handleStationListResponse(code, msg, data);
         return;
     }
@@ -251,6 +265,7 @@ void StationPage::handleResponse(int cmd, int seq, int code, const QString &msg,
         if (seq != m_stationAddSeq) return;
         m_stationAddTimer->stop();
         m_stationAddSeq = -1;
+        updateLoadingState();
         m_stationAddOutcomeUnknown = false;
         m_addButton->setEnabled(true);
         handleStationAddResponse(code, msg, data);
@@ -261,6 +276,7 @@ void StationPage::handleResponse(int cmd, int seq, int code, const QString &msg,
         if (seq != m_stationDetailSeq) return;
         m_stationDetailTimer->stop();
         m_stationDetailSeq = -1;
+        updateLoadingState();
         handleStationDetailResponse(code, msg, data);
     }
 }
@@ -270,7 +286,7 @@ void StationPage::handleStationListResponse(int code, const QString &msg,
 {
     if (code != ecp::ERR_OK) {
         m_requestedPage = m_currentPage;
-        m_statusLabel->setText(QStringLiteral("电站列表加载失败：%1").arg(msg));
+        m_statusLabel->setMessage(QStringLiteral("电站列表加载失败：%1").arg(msg), LoadingStatus::Tone::Error);
         updatePaginationControls();
         return;
     }
@@ -280,7 +296,7 @@ void StationPage::handleStationListResponse(int code, const QString &msg,
     const qint64 total = totalValue.toInteger(-1);
     if (!totalValue.isDouble() || total < 0 || !listValue.isArray()) {
         m_requestedPage = m_currentPage;
-        m_statusLabel->setText(QStringLiteral("电站列表加载失败：服务器响应格式异常"));
+        m_statusLabel->setMessage(QStringLiteral("电站列表加载失败：服务器响应格式异常"), LoadingStatus::Tone::Error);
         updatePaginationControls();
         return;
     }
@@ -311,8 +327,8 @@ void StationPage::handleStationListResponse(int code, const QString &msg,
     m_table->clearSelection();
     m_detailsButton->setEnabled(false);
 
-    m_statusLabel->setText(QStringLiteral("已加载 %1 个电站，共 %2 个")
-                               .arg(m_stations.size()).arg(total));
+    m_statusLabel->setMessage(QStringLiteral("已加载 %1 个电站，共 %2 个")
+                               .arg(m_stations.size()).arg(total), total == 0 ? LoadingStatus::Tone::Neutral : LoadingStatus::Tone::Success);
     updatePaginationControls();
 }
 
@@ -320,14 +336,14 @@ void StationPage::handleStationAddResponse(int code, const QString &msg,
                                            const QJsonObject &data)
 {
     if (code != ecp::ERR_OK) {
-        m_statusLabel->setText(QStringLiteral("新增电站失败：%1").arg(msg));
+        m_statusLabel->setMessage(QStringLiteral("新增电站失败：%1").arg(msg), LoadingStatus::Tone::Error);
         QMessageBox::warning(this, QStringLiteral("新增电站失败"), msg);
         return;
     }
 
     const qint64 stationId = data.value(QStringLiteral("stationId")).toInteger();
     if (stationId <= 0) {
-        m_statusLabel->setText(QStringLiteral("新增电站响应异常：缺少有效电站 ID"));
+        m_statusLabel->setMessage(QStringLiteral("新增电站响应异常：缺少有效电站 ID"), LoadingStatus::Tone::Error);
         QMessageBox::warning(this, QStringLiteral("新增电站失败"),
                              QStringLiteral("服务器响应缺少有效电站 ID"));
         requestStationList(m_currentPage);
@@ -343,7 +359,7 @@ void StationPage::handleStationDetailResponse(int code, const QString &msg,
                                               const QJsonObject &data)
 {
     if (code != ecp::ERR_OK) {
-        m_statusLabel->setText(QStringLiteral("电桩详情加载失败：%1").arg(msg));
+        m_statusLabel->setMessage(QStringLiteral("电桩详情加载失败：%1").arg(msg), LoadingStatus::Tone::Error);
         QMessageBox::warning(this, QStringLiteral("查看详情失败"), msg);
         return;
     }
@@ -362,8 +378,8 @@ void StationPage::handleStationDetailResponse(int code, const QString &msg,
         });
     }
 
-    m_statusLabel->setText(QStringLiteral("已加载“%1”的 %2 个电桩")
-                               .arg(m_pendingDetailStationName).arg(piles.size()));
+    m_statusLabel->setMessage(QStringLiteral("已加载“%1”的 %2 个电桩")
+                               .arg(m_pendingDetailStationName).arg(piles.size()), LoadingStatus::Tone::Success);
     showStationDetailDialog(piles);
 }
 
@@ -421,6 +437,10 @@ void StationPage::showStationDetailDialog(const QVector<PileData> &piles)
         QStringLiteral("功率（kW）"), QStringLiteral("状态")
     });
     table->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    table->setMouseTracking(true);
+    table->setShowGrid(false);
+    table->verticalHeader()->setDefaultSectionSize(40);
+    table->setAlternatingRowColors(true);
     table->setSelectionBehavior(QAbstractItemView::SelectRows);
     table->setSelectionMode(QAbstractItemView::SingleSelection);
     table->verticalHeader()->setVisible(false);
@@ -460,4 +480,9 @@ QString StationPage::statusText(int status)
     case ecp::PILE_FAULT:  return QStringLiteral("故障");
     default:               return QStringLiteral("未知");
     }
+}
+
+void StationPage::updateLoadingState()
+{
+    m_statusLabel->setLoading(m_stationListSeq >= 0 || m_stationAddSeq >= 0 || m_stationDetailSeq >= 0);
 }

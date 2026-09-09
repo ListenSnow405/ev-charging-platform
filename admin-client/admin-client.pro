@@ -30,3 +30,7 @@ SOURCES += main.cpp net_client.cpp login_window.cpp main_window.cpp overview_pag
 HEADERS +=          net_client.h   login_window.h   main_window.h   overview_page.h \
                    station_page.h add_station_dialog.h pile_page.h user_page.h order_page.h \
                    forecast_page.h ext_08_carbon_page.h
+
+SOURCES += loading_status.cpp
+HEADERS += loading_status.h
+RESOURCES += resources.qrc

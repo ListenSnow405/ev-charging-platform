@@ -7,6 +7,8 @@
 #include <QSettings>
 #include <QFileInfo>
 #include <QTimer>
+#include <QFrame>
+#include "loading_status.h"
 
 namespace {
 
@@ -19,23 +21,49 @@ constexpr int LOGIN_RESPONSE_TIMEOUT_MS = 10000;
 LoginWindow::LoginWindow(QWidget *parent) : QWidget(parent)
 {
     setWindowTitle(QStringLiteral("充电桩运营管理后台 · 登录"));
-    resize(380, 240);
+    resize(720, 640);
+    setMinimumSize(560, 580);
 
-    m_account  = new QLineEdit(QStringLiteral("admin"), this);
-    m_password = new QLineEdit(QStringLiteral("123456"), this);
+    auto *card = new QFrame(this);
+    card->setObjectName(QStringLiteral("LoginCard"));
+    card->setFixedWidth(480);
+    auto *cardLayout = new QVBoxLayout(card);
+    cardLayout->setContentsMargins(32, 32, 32, 32);
+    cardLayout->setSpacing(14);
+    auto *title = new QLabel(QStringLiteral("充电桩运营管理后台"), card);
+    title->setObjectName(QStringLiteral("LoginTitle"));
+    auto *subtitle = new QLabel(QStringLiteral("统一管理电站、设备与运营数据"), card);
+    subtitle->setObjectName(QStringLiteral("Muted"));
+    cardLayout->addWidget(title);
+    cardLayout->addWidget(subtitle);
+    cardLayout->addSpacing(12);
+
+    m_account  = new QLineEdit(QStringLiteral("admin"), card);
+    m_password = new QLineEdit(QStringLiteral("123456"), card);
+    m_account->setPlaceholderText(QStringLiteral("请输入管理员账号"));
+    m_password->setPlaceholderText(QStringLiteral("请输入密码"));
+    m_account->setAccessibleName(QStringLiteral("管理员账号"));
+    m_password->setAccessibleName(QStringLiteral("密码"));
     m_password->setEchoMode(QLineEdit::Password);
-    m_btn      = new QPushButton(QStringLiteral("登录"), this);
-    m_status   = new QLabel(QStringLiteral("正在连接服务器…"), this);
-    m_status->setWordWrap(true);
-    m_status->setStyleSheet(QStringLiteral("color:#888"));
+    m_btn      = new QPushButton(QStringLiteral("登录"), card);
+    m_btn->setObjectName(QStringLiteral("Primary"));
+    m_btn->setMinimumHeight(28);
+    m_status   = new LoadingStatus(QStringLiteral("正在连接服务器…"), card);
+    m_status->setMinimumHeight(48);
 
     auto *form = new QFormLayout;
+    form->setRowWrapPolicy(QFormLayout::WrapAllRows);
+    form->setVerticalSpacing(10);
     form->addRow(QStringLiteral("账号"), m_account);
     form->addRow(QStringLiteral("密码"), m_password);
+    cardLayout->addLayout(form);
+    cardLayout->addSpacing(6);
+    cardLayout->addWidget(m_btn);
+    cardLayout->addWidget(m_status);
     auto *lay = new QVBoxLayout(this);
-    lay->addLayout(form);
-    lay->addWidget(m_btn);
-    lay->addWidget(m_status);
+    lay->setContentsMargins(24, 24, 24, 24);
+    lay->addStretch();
+    lay->addWidget(card, 0, Qt::AlignHCenter);
     lay->addStretch();
 
     m_net = new NetClient(this);
@@ -49,8 +77,8 @@ LoginWindow::LoginWindow(QWidget *parent) : QWidget(parent)
         if (m_loginSeq < 0) return;
         m_loginSeq = -1;
         m_btn->setEnabled(true);
-        m_status->setText(
-            QStringLiteral("登录请求超时，服务器未及时响应，请重试"));
+        m_status->setMessage(
+            QStringLiteral("登录请求超时，服务器未及时响应，请重试"), LoadingStatus::Tone::Error);
     });
 
     const QString cfgPath = ecp::resPath(QStringLiteral("config/app.ini"));
@@ -68,10 +96,10 @@ LoginWindow::LoginWindow(QWidget *parent) : QWidget(parent)
         m_reconnectAttempts = 0;
         m_btn->setEnabled(m_loginSeq < 0);
         if (isVisible()) {
-            m_status->setText(m_reloginReason.isEmpty()
+            m_status->setMessage(m_reloginReason.isEmpty()
                 ? QStringLiteral("已连接服务器")
                 : QStringLiteral("%1\n已重新连接服务器，可以重新登录")
-                      .arg(m_reloginReason));
+                      .arg(m_reloginReason), LoadingStatus::Tone::Success);
         }
         m_net->send(0);                       // 探针，确认链路
     });
@@ -90,7 +118,7 @@ LoginWindow::LoginWindow(QWidget *parent) : QWidget(parent)
         if (!isVisible()) return;
         if (m_net->isConnected() || !m_reconnectActive) {
             if (m_loginSeq < 0 && !m_net->isConnected()) m_btn->setEnabled(true);
-            m_status->setText(s);
+            m_status->setMessage(s, LoadingStatus::Tone::Error);
             return;
         }
 
@@ -98,14 +126,14 @@ LoginWindow::LoginWindow(QWidget *parent) : QWidget(parent)
             m_reconnectActive = false;
             m_reconnectExhausted = true;
             m_btn->setEnabled(true);
-            m_status->setText(QStringLiteral(
+            m_status->setMessage(QStringLiteral(
                 "%1\n自动重连未成功，请确认服务端已启动后点击登录重试")
-                                  .arg(m_reconnectContext));
+                                  .arg(m_reconnectContext), LoadingStatus::Tone::Error);
             return;
         }
 
-        m_status->setText(QStringLiteral("%1\n连接失败，2 秒后自动重试")
-                              .arg(m_reconnectContext));
+        m_status->setMessage(QStringLiteral("%1\n连接失败，2 秒后自动重试")
+                              .arg(m_reconnectContext), LoadingStatus::Tone::Error);
         m_reconnectTimer->start(RECONNECT_DELAY_MS);
     });
     connect(m_net, &NetClient::response, this,
@@ -113,10 +141,10 @@ LoginWindow::LoginWindow(QWidget *parent) : QWidget(parent)
                    const QJsonObject &data) {
         if (cmd == 0 && code == ecp::ERR_OK) {
             if (isVisible()) {
-                m_status->setText(m_reloginReason.isEmpty()
+                m_status->setMessage(m_reloginReason.isEmpty()
                     ? QStringLiteral("链路正常，可以登录")
                     : QStringLiteral("%1\n链路正常，可以重新登录")
-                          .arg(m_reloginReason));
+                          .arg(m_reloginReason), LoadingStatus::Tone::Success);
             }
             return;
         }
@@ -126,13 +154,13 @@ LoginWindow::LoginWindow(QWidget *parent) : QWidget(parent)
         m_loginSeq = -1;
         m_btn->setEnabled(true);
         if (code != ecp::ERR_OK) {
-            m_status->setText(msg);
+            m_status->setMessage(msg, LoadingStatus::Tone::Error);
             return;
         }
 
         const QString token = data.value(QStringLiteral("token")).toString();
         if (token.isEmpty()) {
-            m_status->setText(QStringLiteral("登录响应异常：服务端未返回 token，请稍后重试"));
+            m_status->setMessage(QStringLiteral("登录响应异常：服务端未返回 token，请稍后重试"), LoadingStatus::Tone::Error);
             return;
         }
 
@@ -146,6 +174,7 @@ LoginWindow::LoginWindow(QWidget *parent) : QWidget(parent)
         hide();
     });
     connect(m_btn, &QPushButton::clicked, this, &LoginWindow::onLogin);
+    connect(m_password, &QLineEdit::returnPressed, m_btn, &QPushButton::click);
 
     beginReconnect(QStringLiteral("正在连接服务器…"));
 }
@@ -161,7 +190,7 @@ void LoginWindow::onLogin()
 
     m_reloginReason.clear();
     m_btn->setEnabled(false);
-    m_status->setText(QStringLiteral("发起登录…"));
+    m_status->setMessage(QStringLiteral("发起登录…"), LoadingStatus::Tone::Loading);
     const int seq = m_net->send(ecp::CMD_ADMIN_LOGIN, QJsonObject{
         {"account",  m_account->text()},
         // 协议约定发送明文密码，由服务端执行 SHA-256 后与数据库摘要比对。
@@ -170,7 +199,7 @@ void LoginWindow::onLogin()
     if (seq < 0) {
         m_loginSeq = -1;
         m_btn->setEnabled(true);
-        m_status->setText(QStringLiteral("登录请求发送失败，请检查服务器连接"));
+        m_status->setMessage(QStringLiteral("登录请求发送失败，请检查服务器连接"), LoadingStatus::Tone::Error);
         return;
     }
     m_loginSeq = seq;
@@ -196,7 +225,7 @@ void LoginWindow::handleReloginRequested(const QString &reason)
                            .arg(m_reloginReason));
         return;
     }
-    m_status->setText(m_reloginReason);
+    m_status->setMessage(m_reloginReason, LoadingStatus::Tone::Error);
 }
 
 void LoginWindow::beginReconnect(const QString &context)
@@ -208,7 +237,7 @@ void LoginWindow::beginReconnect(const QString &context)
     m_reconnectActive = true;
     m_reconnectExhausted = false;
     m_btn->setEnabled(false);
-    m_status->setText(context);
+    m_status->setMessage(context, LoadingStatus::Tone::Loading);
     m_reconnectTimer->start(0);
 }
 
@@ -219,16 +248,16 @@ void LoginWindow::attemptReconnect()
         m_reconnectActive = false;
         m_reconnectExhausted = true;
         m_btn->setEnabled(true);
-        m_status->setText(QStringLiteral(
+        m_status->setMessage(QStringLiteral(
             "%1\n自动重连未成功，请确认服务端已启动后点击登录重试")
-                              .arg(m_reconnectContext));
+                              .arg(m_reconnectContext), LoadingStatus::Tone::Error);
         return;
     }
 
     ++m_reconnectAttempts;
-    m_status->setText(QStringLiteral("%1\n正在自动重连（%2/%3）…")
+    m_status->setMessage(QStringLiteral("%1\n正在自动重连（%2/%3）…")
                           .arg(m_reconnectContext)
                           .arg(m_reconnectAttempts)
-                          .arg(MAX_RECONNECT_ATTEMPTS));
+                          .arg(MAX_RECONNECT_ATTEMPTS), LoadingStatus::Tone::Loading);
     m_net->connectToServer(m_host, m_port);
 }

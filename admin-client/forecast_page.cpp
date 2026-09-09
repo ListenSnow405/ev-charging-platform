@@ -1,5 +1,6 @@
 #include "forecast_page.h"
 #include "net_client.h"
+#include "loading_status.h"
 #include "protocol.h"
 #include <QAbstractItemView>
 #include <QButtonGroup>
@@ -53,7 +54,8 @@ ForecastPage::ForecastPage(NetClient *net, QWidget *parent)
     connect(m_forecastTimer, &QTimer::timeout, this, [this] {
         if (m_forecastSeq < 0) return;
         m_forecastSeq = -1;
-        m_statusLabel->setText(QStringLiteral("预测请求超时，请重试"));
+        updateLoadingState();
+        m_statusLabel->setMessage(QStringLiteral("预测请求超时，请重试"), LoadingStatus::Tone::Error);
     });
 
     connect(m_net, &NetClient::response, this, &ForecastPage::handleResponse);
@@ -68,10 +70,7 @@ void ForecastPage::setupUi()
     pageLayout->setSpacing(12);
 
     auto *title = new QLabel(QStringLiteral("负荷预测与预警"), this);
-    QFont titleFont = title->font();
-    titleFont.setPointSize(18);
-    titleFont.setBold(true);
-    title->setFont(titleFont);
+    title->setObjectName(QStringLiteral("PageTitle"));
     pageLayout->addWidget(title);
 
     auto *filterLayout = new QHBoxLayout;
@@ -98,12 +97,16 @@ void ForecastPage::setupUi()
             [this](int horizon) { m_selectedHorizon = horizon; });
 
     auto *refreshButton = new QPushButton(QStringLiteral("刷新"), this);
+    refreshButton->setObjectName(QStringLiteral("Primary"));
     filterLayout->addWidget(refreshButton);
     filterLayout->addStretch();
-    pageLayout->addLayout(filterLayout);
+    auto *filterCard = new QFrame(this);
+    filterCard->setObjectName(QStringLiteral("Card"));
+    filterLayout->setContentsMargins(16, 14, 16, 14);
+    filterCard->setLayout(filterLayout);
+    pageLayout->addWidget(filterCard);
 
-    m_statusLabel = new QLabel(QStringLiteral("准备加载预测数据"), this);
-    m_statusLabel->setStyleSheet(QStringLiteral("color:#667085"));
+    m_statusLabel = new LoadingStatus(QStringLiteral("准备加载预测数据"), this);
     m_statusLabel->setWordWrap(true);
     pageLayout->addWidget(m_statusLabel);
 
@@ -128,6 +131,9 @@ void ForecastPage::setupUi()
         QStringLiteral("模型版本")
     });
     m_table->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    m_table->setMouseTracking(true);
+    m_table->setShowGrid(false);
+    m_table->verticalHeader()->setDefaultSectionSize(40);
     m_table->setSelectionBehavior(QAbstractItemView::SelectRows);
     m_table->setSelectionMode(QAbstractItemView::SingleSelection);
     m_table->setAlternatingRowColors(true);
@@ -145,6 +151,7 @@ void ForecastPage::requestStationList()
 {
     m_stationListTimer->stop();
     m_stationListSeq = -1;
+    updateLoadingState();
     m_stationListPage = 0;
     m_stationListTotal = 0;
     m_stationListSelectedId = m_stationFilter->currentData().toLongLong();
@@ -166,6 +173,7 @@ void ForecastPage::requestStationListPage(int page)
         return;
     }
     m_stationListSeq = seq;
+    updateLoadingState();
     m_stationListPage = page;
     m_stationListTimer->start(READ_RESPONSE_TIMEOUT_MS);
 }
@@ -174,6 +182,7 @@ void ForecastPage::abortStationListLoad(const QString &message)
 {
     m_stationListTimer->stop();
     m_stationListSeq = -1;
+    updateLoadingState();
     m_stationListPage = 0;
     m_stationListTotal = 0;
     m_pendingStationOptions.clear();
@@ -203,7 +212,7 @@ void ForecastPage::commitStationOptions()
 
 void ForecastPage::requestForecast()
 {
-    m_statusLabel->setText(QStringLiteral("正在加载预测数据…"));
+    m_statusLabel->setMessage(QStringLiteral("正在加载预测数据…"), LoadingStatus::Tone::Loading);
     const int seq = m_net->send(ecp::CMD_STAT_LOAD_FORECAST, QJsonObject{
         { QStringLiteral("stationId"), m_stationFilter->currentData().toLongLong() },
         { QStringLiteral("horizon"), m_selectedHorizon }
@@ -211,10 +220,12 @@ void ForecastPage::requestForecast()
     if (seq < 0) {
         m_forecastTimer->stop();
         m_forecastSeq = -1;
-        m_statusLabel->setText(QStringLiteral("预测请求发送失败，请检查网络连接"));
+        updateLoadingState();
+        m_statusLabel->setMessage(QStringLiteral("预测请求发送失败，请检查网络连接"), LoadingStatus::Tone::Error);
         return;
     }
     m_forecastSeq = seq;
+    updateLoadingState();
     m_forecastTimer->start(READ_RESPONSE_TIMEOUT_MS);
 }
 
@@ -225,6 +236,7 @@ void ForecastPage::handleResponse(int cmd, int seq, int code, const QString &msg
         if (seq != m_stationListSeq) return;
         m_stationListTimer->stop();
         m_stationListSeq = -1;
+        updateLoadingState();
         handleStationListResponse(code, msg, data);
         return;
     }
@@ -232,6 +244,7 @@ void ForecastPage::handleResponse(int cmd, int seq, int code, const QString &msg
         if (seq != m_forecastSeq) return;
         m_forecastTimer->stop();
         m_forecastSeq = -1;
+        updateLoadingState();
         handleForecastResponse(code, msg, data);
     }
 }
@@ -284,18 +297,18 @@ void ForecastPage::handleForecastResponse(int code, const QString &msg,
 {
     if (code == ecp::ERR_NOT_LOGIN || code == ecp::ERR_TOKEN_INVALID) return;
     if (code == ecp::ERR_CMD_UNKNOWN) {
-        m_statusLabel->setText(
-            QStringLiteral("服务端 2305 尚未接入，预测页面已就绪"));
+        m_statusLabel->setMessage(
+            QStringLiteral("服务端 2305 尚未接入，预测页面已就绪"), LoadingStatus::Tone::Warning);
         return;
     }
     if (code != ecp::ERR_OK) {
-        m_statusLabel->setText(msg.isEmpty() ? ecp::errMsg(code) : msg);
+        m_statusLabel->setMessage(msg.isEmpty() ? ecp::errMsg(code) : msg, LoadingStatus::Tone::Error);
         return;
     }
 
     const QJsonValue listValue = data.value(QStringLiteral("list"));
     if (!listValue.isArray()) {
-        m_statusLabel->setText(QStringLiteral("预测数据格式异常：缺少 list 数组"));
+        m_statusLabel->setMessage(QStringLiteral("预测数据格式异常：缺少 list 数组"), LoadingStatus::Tone::Error);
         return;
     }
 
@@ -304,12 +317,12 @@ void ForecastPage::handleForecastResponse(int code, const QString &msg,
     forecasts.reserve(list.size());
     for (const QJsonValue &value : list) {
         if (!value.isObject()) {
-            m_statusLabel->setText(QStringLiteral("预测数据格式异常：列表项不是对象"));
+            m_statusLabel->setMessage(QStringLiteral("预测数据格式异常：列表项不是对象"), LoadingStatus::Tone::Error);
             return;
         }
         ForecastData forecast;
         if (!parseForecastItem(value.toObject(), forecast)) {
-            m_statusLabel->setText(QStringLiteral("预测数据格式异常：字段类型或取值无效"));
+            m_statusLabel->setMessage(QStringLiteral("预测数据格式异常：字段类型或取值无效"), LoadingStatus::Tone::Error);
             return;
         }
         forecasts.append(forecast);
@@ -318,9 +331,9 @@ void ForecastPage::handleForecastResponse(int code, const QString &msg,
     m_forecasts = forecasts;
     refreshTable();
     updateSummary();
-    m_statusLabel->setText(m_forecasts.isEmpty()
+    m_statusLabel->setMessage(m_forecasts.isEmpty()
         ? QStringLiteral("暂无预测数据，请先运行负荷预测")
-        : QStringLiteral("已加载 %1 条预测数据").arg(m_forecasts.size()));
+        : QStringLiteral("已加载 %1 条预测数据").arg(m_forecasts.size()), m_forecasts.isEmpty() ? LoadingStatus::Tone::Neutral : LoadingStatus::Tone::Success);
 }
 
 void ForecastPage::refreshTable()
@@ -390,20 +403,15 @@ QWidget *ForecastPage::createMetricCard(const QString &title, QLabel *&valueLabe
 {
     auto *card = new QFrame(this);
     card->setFrameShape(QFrame::StyledPanel);
-    card->setStyleSheet(QStringLiteral(
-        "QFrame { background:#f7f9fc; border:1px solid #dfe5ec; border-radius:6px; }"
-        "QLabel { border:none; }"));
+    card->setObjectName(QStringLiteral("Card"));
     auto *layout = new QVBoxLayout(card);
     layout->setContentsMargins(18, 14, 18, 14);
 
     auto *titleLabel = new QLabel(title, card);
-    titleLabel->setStyleSheet(QStringLiteral("color:#667085"));
+    titleLabel->setObjectName(QStringLiteral("MetricTitle"));
     valueLabel = new QLabel(title == QStringLiteral("最大预测负荷")
         ? QStringLiteral("—") : QStringLiteral("0"), card);
-    QFont valueFont = valueLabel->font();
-    valueFont.setPointSize(18);
-    valueFont.setBold(true);
-    valueLabel->setFont(valueFont);
+    valueLabel->setObjectName(QStringLiteral("MetricValue"));
 
     layout->addWidget(titleLabel);
     layout->addWidget(valueLabel);
@@ -466,4 +474,9 @@ bool ForecastPage::parseForecastItem(const QJsonObject &item,
     forecast.congestion = parsedCongestion;
     forecast.modelVersion = modelVersion.toString();
     return true;
+}
+
+void ForecastPage::updateLoadingState()
+{
+    m_statusLabel->setLoading(m_stationListSeq >= 0 || m_forecastSeq >= 0);
 }

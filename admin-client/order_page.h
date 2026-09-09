@@ -8,6 +8,7 @@
 #include <QWidget>
 
 class NetClient;
+class LoadingStatus;
 class QCheckBox;
 class QComboBox;
 class QDateEdit;
@@ -40,6 +41,7 @@ private:
     };
 
     void setupUi();
+    void updateLoadingState();
     void requestOrderList(int page, int status, const QString &dateFrom,
                           const QString &dateTo);
     void searchOrders();
@@ -63,7 +65,7 @@ private:
     QTableWidget *m_table = nullptr;
     QPushButton  *m_previousPageButton = nullptr;
     QPushButton  *m_nextPageButton = nullptr;
-    QLabel       *m_statusLabel = nullptr;
+    LoadingStatus *m_statusLabel = nullptr;
     QLabel       *m_pageLabel = nullptr;
     QTimer       *m_orderListTimer = nullptr;
     QVector<OrderData> m_orders;
