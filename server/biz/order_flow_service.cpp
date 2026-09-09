@@ -11,11 +11,14 @@
 #include <QSqlQuery>
 
 #include "protocol.h"
+#include "frame.h"
 #include "logger.h"
 #include "time_util.h"
 #include "net/dispatcher.h"
 #include "net/device_registry.h"
+#include "net/user_registry.h"
 #include "dao/db.h"
+#include "biz/order_flow_service.h"
 
 namespace ecp {
 
@@ -30,6 +33,79 @@ static void rollback(QSqlDatabase &db)
 {
     if (!db.rollback())
         LOG_E(QStringLiteral("订单流程事务回滚失败: %1").arg(db.lastError().text()));
+}
+
+void pushChargingProgress(const QString &pileCode, qint64 kwhX100)
+{
+    if (kwhX100 < 0) {
+        LOG_E(QStringLiteral("实时推送累计电量为负数: pileCode=%1 kwhX100=%2")
+                  .arg(pileCode).arg(kwhX100));
+        return;
+    }
+
+    QSqlDatabase db = threadDb();
+    if (!db.isOpen()) {
+        LOG_E(QStringLiteral("实时推送获取数据库连接失败: %1").arg(db.lastError().text()));
+        return;
+    }
+
+    QSqlQuery query(db);
+    query.prepare(QStringLiteral(
+        "SELECT o.order_id, o.user_id, o.start_time, o.price"
+        " FROM t_order o JOIN t_pile p ON p.pile_id = o.pile_id"
+        " WHERE p.pile_code = ? AND o.status = ?"));
+    query.addBindValue(pileCode);
+    query.addBindValue(ORDER_CHARGING);
+    if (!query.exec()) {
+        LOG_E(QStringLiteral("查询实时推送充电订单失败: %1").arg(query.lastError().text()));
+        return;
+    }
+
+    if (!query.next()) {
+        LOG_I(QStringLiteral("电桩没有充电中订单，不推送实时数据: pileCode=%1").arg(pileCode));
+        return;
+    }
+
+    const qint64 orderId = query.value("order_id").toLongLong();
+    const int userId = query.value("user_id").toInt();
+    const QString startTime = query.value("start_time").toString();
+    bool priceOk = false;
+    const qint64 price = query.value("price").toLongLong(&priceOk);
+    if (query.next()) {
+        LOG_E(QStringLiteral("电桩存在多个充电中订单，拒绝实时推送: pileCode=%1")
+                  .arg(pileCode));
+        return;
+    }
+    if (!priceOk || price <= 0
+        || kwhX100 > std::numeric_limits<qint64>::max() / price) {
+        LOG_E(QStringLiteral("实时推送价格或累计电量异常/乘法溢出: orderId=%1 price=%2 kwhX100=%3")
+                  .arg(orderId).arg(price).arg(kwhX100));
+        return;
+    }
+
+    const QDateTime start = fromStr(startTime);
+    const QString now = nowStr();
+    const qint64 duration = secondsBetween(startTime, now);
+    if (!start.isValid() || toStr(start) != startTime || duration < 0) {
+        LOG_E(QStringLiteral("实时推送开始时间非法或晚于当前时间: orderId=%1 startTime=%2 now=%3")
+                  .arg(orderId).arg(startTime, now));
+        return;
+    }
+
+    const qint64 amount = price * kwhX100 / 100;
+    QJsonObject data;
+    data["orderId"] = orderId;
+    data["kwh"] = kwhX100 / 100.0;
+    data["amount"] = amount;
+    data["duration"] = duration;
+
+    if (!pushToUser(userId, encodeFrame(buildPush(CMD_ORDER_PUSH, data)))) {
+        LOG_W(QStringLiteral("实时充电数据推送失败，用户不在线: userId=%1 orderId=%2")
+                  .arg(userId).arg(orderId));
+        return;
+    }
+    LOG_I(QStringLiteral("实时充电数据推送成功: userId=%1 orderId=%2 pileCode=%3 kwhX100=%4")
+              .arg(userId).arg(orderId).arg(pileCode).arg(kwhX100));
 }
 
 static int handleOrderStart(const Request &req, QJsonObject &out)
