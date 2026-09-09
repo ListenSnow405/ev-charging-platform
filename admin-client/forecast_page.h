@@ -9,6 +9,7 @@
 #include <QWidget>
 
 class NetClient;
+class LoadingStatus;
 class QComboBox;
 class QJsonObject;
 class QLabel;
@@ -41,6 +42,7 @@ private:
     };
 
     void setupUi();
+    void updateLoadingState();
     void requestStationList();
     void requestStationListPage(int page);
     void abortStationListLoad(const QString &message);
@@ -62,7 +64,7 @@ private:
 
     NetClient    *m_net = nullptr;
     QComboBox    *m_stationFilter = nullptr;
-    QLabel       *m_statusLabel = nullptr;
+    LoadingStatus *m_statusLabel = nullptr;
     QLabel       *m_stationCount = nullptr;
     QLabel       *m_warningCount = nullptr;
     QLabel       *m_peakCount = nullptr;

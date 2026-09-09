@@ -18,6 +18,7 @@
 #include <QFont>
 #include <QFormLayout>
 #include <QFrame>
+#include <QGridLayout>
 #include <QGroupBox>
 #include <QHBoxLayout>
 #include <QHeaderView>
@@ -26,6 +27,8 @@
 #include <QLineEdit>
 #include <QMessageBox>
 #include <QPushButton>
+#include <QScrollArea>
+#include <QSizePolicy>
 #include <QSpinBox>
 #include <QStringList>
 #include <QTableWidget>
@@ -309,6 +312,7 @@ QWidget *Ext08CarbonPage::createHeaderBanner()
     layout->setSpacing(4);
 
     auto *disclaimer = new QLabel(QStringLiteral("⚠ %1").arg(disclaimerText()), banner);
+    disclaimer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
     QFont font = disclaimer->font();
     font.setBold(true);
     disclaimer->setFont(font);
@@ -320,10 +324,12 @@ QWidget *Ext08CarbonPage::createHeaderBanner()
     auto *tariff = new QLabel(QStringLiteral(
         "峰平谷采用「固定时段口径」：峰 10:00–15:00、18:00–21:00；谷 23:00–07:00；"
         "其余为平段（左闭右开）。跨午夜订单按真实钟点切分，日归属按结算时刻。"), banner);
+    tariff->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
     tariff->setWordWrap(true);
     layout->addWidget(tariff);
 
     m_provenanceLabel = new QLabel(QStringLiteral("因子版本 —　算法版本 —　数据截止 —"), banner);
+    m_provenanceLabel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
     m_provenanceLabel->setWordWrap(true);
     layout->addWidget(m_provenanceLabel);
     return banner;
@@ -331,16 +337,21 @@ QWidget *Ext08CarbonPage::createHeaderBanner()
 
 void Ext08CarbonPage::setupUi()
 {
-    auto *pageLayout = new QVBoxLayout(this);
+    auto *scroll = new QScrollArea(this);
+    scroll->setWidgetResizable(true);
+    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    scroll->setFrameShape(QFrame::NoFrame);
+    auto *content = new QWidget;
+    content->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+    content->setMinimumSize(0, 0);
+    auto *pageLayout = new QVBoxLayout(content);
     pageLayout->setContentsMargins(24, 20, 24, 20);
     pageLayout->setSpacing(12);
 
     auto *titleLayout = new QHBoxLayout;
     auto *title = new QLabel(QStringLiteral("碳排放报告"), this);
-    QFont titleFont = title->font();
-    titleFont.setPointSize(18);
-    titleFont.setBold(true);
-    title->setFont(titleFont);
+    title->setObjectName(QStringLiteral("PageTitle"));
     titleLayout->addWidget(title);
     titleLayout->addStretch();
     m_aggregateButton = new QPushButton(QStringLiteral("重算所选范围"), this);
@@ -351,8 +362,9 @@ void Ext08CarbonPage::setupUi()
 
     pageLayout->addWidget(createHeaderBanner());
 
-    m_statusLabel = new QLabel(QStringLiteral("准备加载碳排放指标"), this);
+    m_statusLabel = new QLabel(QStringLiteral("准备加载碳排放指标"), content);
     m_statusLabel->setStyleSheet(QStringLiteral("color:#667085"));
+    m_statusLabel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
     m_statusLabel->setWordWrap(true);
     pageLayout->addWidget(m_statusLabel);
 
@@ -362,7 +374,7 @@ void Ext08CarbonPage::setupUi()
     filterLayout->addWidget(new QLabel(QStringLiteral("电站"), this));
     m_stationBox = new QComboBox(this);
     m_stationBox->addItem(QStringLiteral("全部电站"), 0);
-    m_stationBox->setMinimumWidth(160);
+    m_stationBox->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
     filterLayout->addWidget(m_stationBox);
 
     filterLayout->addSpacing(12);
@@ -384,19 +396,23 @@ void Ext08CarbonPage::setupUi()
     pageLayout->addLayout(filterLayout);
 
     // ---- 指标卡 ----
-    auto *metricsLayout = new QHBoxLayout;
+    auto *metricsLayout = new QGridLayout;
     metricsLayout->setSpacing(16);
-    metricsLayout->addWidget(createMetricCard(QStringLiteral("总充电量"), m_totalKwh), 1);
-    metricsLayout->addWidget(createMetricCard(QStringLiteral("估算碳排放"), m_emission), 1);
-    metricsLayout->addWidget(createMetricCard(QStringLiteral("排放强度"), m_intensity), 1);
-    metricsLayout->addWidget(createMetricCard(QStringLiteral("数据完整度"), m_completeness), 1);
+    metricsLayout->addWidget(createMetricCard(QStringLiteral("总充电量"), m_totalKwh), 0, 0);
+    metricsLayout->addWidget(createMetricCard(QStringLiteral("估算碳排放"), m_emission), 0, 1);
+    metricsLayout->addWidget(createMetricCard(QStringLiteral("排放强度"), m_intensity), 1, 0);
+    metricsLayout->addWidget(createMetricCard(QStringLiteral("数据完整度"), m_completeness), 1, 1);
+    metricsLayout->setColumnStretch(0, 1);
+    metricsLayout->setColumnStretch(1, 1);
     pageLayout->addLayout(metricsLayout);
 
-    // ---- 主体：左趋势，右构成 + 因子 ----
-    auto *contentLayout = new QHBoxLayout;
+    // ---- 主体：趋势与构成纵向排列，窄窗口仍保持每块完整可读 ----
+    auto *contentLayout = new QVBoxLayout;
     contentLayout->setSpacing(16);
 
     auto *trendGroup = new QGroupBox(QStringLiteral("每日估算排放趋势"), this);
+    trendGroup->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+    trendGroup->setMinimumWidth(0);
     auto *trendLayout = new QVBoxLayout(trendGroup);
 #ifdef HAVE_CHARTS
     m_trendSeries = new QLineSeries;
@@ -442,12 +458,14 @@ void Ext08CarbonPage::setupUi()
     m_trendTable->setMaximumHeight(160);      // 有图时表格只作明细补充
 #endif
     trendLayout->addWidget(m_trendTable, 1);
-    contentLayout->addWidget(trendGroup, 3);
+    contentLayout->addWidget(trendGroup, 1);
 
     auto *sideLayout = new QVBoxLayout;
     sideLayout->setSpacing(12);
 
     auto *shareGroup = new QGroupBox(QStringLiteral("峰平谷构成"), this);
+    shareGroup->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+    shareGroup->setMinimumWidth(0);
     auto *shareLayout = new QVBoxLayout(shareGroup);
     m_shareTable = new QTableWidget(4, 3, shareGroup);
     m_shareTable->setHorizontalHeaderLabels({ QStringLiteral("时段"), QStringLiteral("电量"),
@@ -461,6 +479,8 @@ void Ext08CarbonPage::setupUi()
     sideLayout->addWidget(shareGroup);
 
     auto *factorGroup = new QGroupBox(QStringLiteral("排放因子版本"), this);
+    factorGroup->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+    factorGroup->setMinimumWidth(0);
     auto *factorLayout = new QVBoxLayout(factorGroup);
     m_factorTable = new QTableWidget(0, 4, factorGroup);
     m_factorTable->setHorizontalHeaderLabels({ QStringLiteral("区域"), QStringLiteral("版本"),
@@ -483,7 +503,7 @@ void Ext08CarbonPage::setupUi()
     factorLayout->addLayout(factorToolbar);
     sideLayout->addWidget(factorGroup, 1);
 
-    contentLayout->addLayout(sideLayout, 2);
+    contentLayout->addLayout(sideLayout, 1);
     pageLayout->addLayout(contentLayout, 1);
 
     // ---- 报告版本 ----
@@ -521,6 +541,11 @@ void Ext08CarbonPage::setupUi()
     reportLayout->addLayout(reportToolbar);
     pageLayout->addWidget(reportGroup);
 
+    scroll->setWidget(content);
+    auto *outerLayout = new QVBoxLayout(this);
+    outerLayout->setContentsMargins(0, 0, 0, 0);
+    outerLayout->addWidget(scroll);
+
     connect(m_queryButton,     &QPushButton::clicked, this, &Ext08CarbonPage::requestMetric);
     connect(m_aggregateButton, &QPushButton::clicked, this, &Ext08CarbonPage::requestAggregate);
     connect(m_addFactorButton, &QPushButton::clicked, this, &Ext08CarbonPage::openFactorDialog);
@@ -536,9 +561,7 @@ QWidget *Ext08CarbonPage::createMetricCard(const QString &title, QLabel *&valueL
 {
     auto *card = new QFrame(this);
     card->setFrameShape(QFrame::StyledPanel);
-    card->setStyleSheet(QStringLiteral(
-        "QFrame { background:#f7f9fc; border:1px solid #dfe5ec; border-radius:6px; }"
-        "QLabel { border:none; }"));
+    card->setObjectName(QStringLiteral("Card"));
     auto *layout = new QVBoxLayout(card);
     layout->setContentsMargins(18, 14, 18, 14);
 

@@ -8,6 +8,7 @@
 #include <QWidget>
 
 class NetClient;
+class LoadingStatus;
 class QJsonObject;
 class QLabel;
 class QLineEdit;
@@ -32,6 +33,7 @@ private:
     };
 
     void setupUi();
+    void updateLoadingState();
     void requestUserList(int page, const QString &phoneLike);
     void searchUsers();
     void handleResponse(int cmd, int seq, int code, const QString &msg,
@@ -54,7 +56,7 @@ private:
     QPushButton  *m_statusButton = nullptr;
     QPushButton  *m_previousPageButton = nullptr;
     QPushButton  *m_nextPageButton = nullptr;
-    QLabel       *m_statusLabel = nullptr;
+    LoadingStatus *m_statusLabel = nullptr;
     QLabel       *m_pageLabel = nullptr;
     QTimer       *m_userListTimer = nullptr;
     QTimer       *m_userStatusTimer = nullptr;

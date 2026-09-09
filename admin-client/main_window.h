@@ -23,6 +23,7 @@ private:
 
     NetClient      *m_net = nullptr;
     QListWidget    *m_nav = nullptr;
+    QListWidget    *m_extensionNav = nullptr;
     QStackedWidget *m_pages = nullptr;
     bool            m_reloginPending = false;
 };

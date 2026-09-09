@@ -1,5 +1,6 @@
 #include "order_page.h"
 #include "net_client.h"
+#include "loading_status.h"
 #include "protocol.h"
 #include "time_util.h"
 #include <QAbstractItemView>
@@ -8,6 +9,7 @@
 #include <QDateEdit>
 #include <QDateTime>
 #include <QFont>
+#include <QFrame>
 #include <QHeaderView>
 #include <QHBoxLayout>
 #include <QJsonArray>
@@ -43,11 +45,12 @@ OrderPage::OrderPage(NetClient *net, QWidget *parent)
     connect(m_orderListTimer, &QTimer::timeout, this, [this] {
         if (m_orderListSeq < 0) return;
         m_orderListSeq = -1;
+        updateLoadingState();
         m_requestedPage = m_currentPage;
         m_requestedStatus = m_currentStatus;
         m_requestedDateFrom = m_currentDateFrom;
         m_requestedDateTo = m_currentDateTo;
-        m_statusLabel->setText(QStringLiteral("订单列表请求超时，请重试"));
+        m_statusLabel->setMessage(QStringLiteral("订单列表请求超时，请重试"), LoadingStatus::Tone::Error);
         updatePaginationControls();
     });
 
@@ -59,13 +62,10 @@ void OrderPage::setupUi()
 {
     auto *pageLayout = new QVBoxLayout(this);
     pageLayout->setContentsMargins(24, 20, 24, 20);
-    pageLayout->setSpacing(16);
+    pageLayout->setSpacing(12);
 
     auto *title = new QLabel(QStringLiteral("订单管理"), this);
-    QFont titleFont = title->font();
-    titleFont.setPointSize(18);
-    titleFont.setBold(true);
-    title->setFont(titleFont);
+    title->setObjectName(QStringLiteral("PageTitle"));
     pageLayout->addWidget(title);
 
     auto *filterLayout = new QHBoxLayout;
@@ -99,14 +99,19 @@ void OrderPage::setupUi()
     filterLayout->addWidget(m_dateTo);
 
     auto *searchButton = new QPushButton(QStringLiteral("查询"), this);
+    searchButton->setObjectName(QStringLiteral("Primary"));
     auto *resetButton = new QPushButton(QStringLiteral("重置"), this);
+    resetButton->setObjectName(QStringLiteral("Secondary"));
     filterLayout->addWidget(searchButton);
     filterLayout->addWidget(resetButton);
     filterLayout->addStretch();
-    pageLayout->addLayout(filterLayout);
+    auto *filterCard = new QFrame(this);
+    filterCard->setObjectName(QStringLiteral("Card"));
+    filterLayout->setContentsMargins(16, 14, 16, 14);
+    filterCard->setLayout(filterLayout);
+    pageLayout->addWidget(filterCard);
 
-    m_statusLabel = new QLabel(QStringLiteral("准备加载订单列表"), this);
-    m_statusLabel->setStyleSheet(QStringLiteral("color:#667085"));
+    m_statusLabel = new LoadingStatus(QStringLiteral("准备加载订单列表"), this);
     pageLayout->addWidget(m_statusLabel);
 
     m_table = new QTableWidget(0, 12, this);
@@ -118,6 +123,9 @@ void OrderPage::setupUi()
         QStringLiteral("结束时间"), QStringLiteral("结算时间")
     });
     m_table->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    m_table->setMouseTracking(true);
+    m_table->setShowGrid(false);
+    m_table->verticalHeader()->setDefaultSectionSize(40);
     m_table->setSelectionBehavior(QAbstractItemView::SelectRows);
     m_table->setSelectionMode(QAbstractItemView::SingleSelection);
     m_table->setAlternatingRowColors(true);
@@ -128,9 +136,11 @@ void OrderPage::setupUi()
 
     auto *pagination = new QHBoxLayout;
     m_previousPageButton = new QPushButton(QStringLiteral("上一页"), this);
+    m_previousPageButton->setObjectName(QStringLiteral("Secondary"));
     m_pageLabel = new QLabel(this);
     m_pageLabel->setAlignment(Qt::AlignCenter);
     m_nextPageButton = new QPushButton(QStringLiteral("下一页"), this);
+    m_nextPageButton->setObjectName(QStringLiteral("Secondary"));
     pagination->addStretch();
     pagination->addWidget(m_previousPageButton);
     pagination->addWidget(m_pageLabel);
@@ -158,7 +168,7 @@ void OrderPage::requestOrderList(int page, int status, const QString &dateFrom,
 {
     if (page < 1) return;
 
-    m_statusLabel->setText(QStringLiteral("正在加载订单…"));
+    m_statusLabel->setMessage(QStringLiteral("正在加载订单…"), LoadingStatus::Tone::Loading);
     const int seq = m_net->send(ecp::CMD_ADMIN_ORDER_LIST, QJsonObject{
         { QStringLiteral("page"), page },
         { QStringLiteral("size"), PAGE_SIZE },
@@ -169,15 +179,17 @@ void OrderPage::requestOrderList(int page, int status, const QString &dateFrom,
     if (seq < 0) {
         m_orderListTimer->stop();
         m_orderListSeq = -1;
+        updateLoadingState();
         m_requestedPage = m_currentPage;
         m_requestedStatus = m_currentStatus;
         m_requestedDateFrom = m_currentDateFrom;
         m_requestedDateTo = m_currentDateTo;
-        m_statusLabel->setText(QStringLiteral("订单列表请求发送失败，请检查网络连接"));
+        m_statusLabel->setMessage(QStringLiteral("订单列表请求发送失败，请检查网络连接"), LoadingStatus::Tone::Error);
         updatePaginationControls();
         return;
     }
     m_orderListSeq = seq;
+    updateLoadingState();
     m_requestedPage = page;
     m_requestedStatus = status;
     m_requestedDateFrom = dateFrom;
@@ -208,6 +220,7 @@ void OrderPage::handleResponse(int cmd, int seq, int code, const QString &msg,
     if (cmd != ecp::CMD_ADMIN_ORDER_LIST || seq != m_orderListSeq) return;
     m_orderListTimer->stop();
     m_orderListSeq = -1;
+    updateLoadingState();
     handleOrderListResponse(code, msg, data);
 }
 
@@ -219,7 +232,7 @@ void OrderPage::handleOrderListResponse(int code, const QString &msg,
         m_requestedStatus = m_currentStatus;
         m_requestedDateFrom = m_currentDateFrom;
         m_requestedDateTo = m_currentDateTo;
-        m_statusLabel->setText(QStringLiteral("订单加载失败：%1").arg(msg));
+        m_statusLabel->setMessage(QStringLiteral("订单加载失败：%1").arg(msg), LoadingStatus::Tone::Error);
         updatePaginationControls();
         return;
     }
@@ -232,7 +245,7 @@ void OrderPage::handleOrderListResponse(int code, const QString &msg,
         m_requestedStatus = m_currentStatus;
         m_requestedDateFrom = m_currentDateFrom;
         m_requestedDateTo = m_currentDateTo;
-        m_statusLabel->setText(QStringLiteral("订单加载失败：服务器响应格式异常"));
+        m_statusLabel->setMessage(QStringLiteral("订单加载失败：服务器响应格式异常"), LoadingStatus::Tone::Error);
         updatePaginationControls();
         return;
     }
@@ -270,8 +283,8 @@ void OrderPage::handleOrderListResponse(int code, const QString &msg,
     m_requestedDateFrom = m_currentDateFrom;
     m_requestedDateTo = m_currentDateTo;
     refreshTable();
-    m_statusLabel->setText(QStringLiteral("已加载 %1 条订单，共 %2 条")
-                               .arg(m_orders.size()).arg(total));
+    m_statusLabel->setMessage(QStringLiteral("已加载 %1 条订单，共 %2 条")
+                               .arg(m_orders.size()).arg(total), total == 0 ? LoadingStatus::Tone::Neutral : LoadingStatus::Tone::Success);
     updatePaginationControls();
 }
 
@@ -339,4 +352,9 @@ QString OrderPage::kwhText(qreal kwh)
 QString OrderPage::timeText(const QString &time)
 {
     return time.isEmpty() ? QStringLiteral("—") : time;
+}
+
+void OrderPage::updateLoadingState()
+{
+    m_statusLabel->setLoading(m_orderListSeq >= 0);
 }

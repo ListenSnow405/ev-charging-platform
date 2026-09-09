@@ -8,14 +8,21 @@
 #include "ext_08_carbon_page.h"
 #include "error_code.h"
 #include <QHBoxLayout>
+#include <QVBoxLayout>
+#include <QFrame>
+#include <QLabel>
 
 MainWindow::MainWindow(NetClient *net, QWidget *parent) : QWidget(parent), m_net(net)
 {
     setWindowTitle(QStringLiteral("充电桩运营管理后台"));
-    resize(1200, 760);
+    resize(1280, 800);
 
     m_nav = new QListWidget(this);
-    m_nav->setFixedWidth(180);
+    m_nav->setObjectName(QStringLiteral("Navigation"));
+    m_nav->setMouseTracking(true);
+    m_extensionNav = new QListWidget(this);
+    m_extensionNav->setObjectName(QStringLiteral("Navigation"));
+    m_extensionNav->setMouseTracking(true);
     m_pages = new QStackedWidget(this);
 
     // 导航项与页面在同一张表里成对登记。
@@ -29,16 +36,26 @@ MainWindow::MainWindow(NetClient *net, QWidget *parent) : QWidget(parent), m_net
         { QStringLiteral("电桩管理"),   new PilePage(m_net, m_pages)     },
         { QStringLiteral("订单管理"),   new OrderPage(m_net, m_pages)    },
         { QStringLiteral("用户管理"),   new UserPage(m_net, m_pages)     },
-        { QStringLiteral("负荷预测"),   new ForecastPage(m_net, m_pages) },
-        // ---- 以下为扩展模块（加分项），服务端未开启对应开关时页面会提示未启用 ----
-        { QStringLiteral("碳排放报告"), new Ext08CarbonPage(m_net, m_pages) },   // 08（L5）
+        { QStringLiteral("负荷预测"),   new ForecastPage(m_net, m_pages) }
     };
     for (const auto &entry : navEntries) {
         m_nav->addItem(entry.title);
         m_pages->addWidget(entry.page);
     }
+    // ---- 以下为扩展模块（加分项），服务端未开启对应开关时页面会提示未启用 ----
+    m_pages->addWidget(new Ext08CarbonPage(m_net, m_pages)); // 08（L5）
 
-    connect(m_nav, &QListWidget::currentRowChanged, m_pages, &QStackedWidget::setCurrentIndex);
+    connect(m_nav, &QListWidget::currentRowChanged, this, [this](int row) {
+        if (row < 0) return;
+        m_extensionNav->clearSelection();
+        m_pages->setCurrentIndex(row);
+    });
+    connect(m_extensionNav, &QListWidget::currentRowChanged, this,
+            [this](int row) {
+        if (row < 0) return;
+        m_nav->clearSelection();
+        m_pages->setCurrentIndex(m_nav->count() + row);
+    });
     m_nav->setCurrentRow(0);
 
     connect(m_net, &NetClient::response, this,
@@ -57,7 +74,34 @@ MainWindow::MainWindow(NetClient *net, QWidget *parent) : QWidget(parent), m_net
 
     auto *lay = new QHBoxLayout(this);
     lay->setContentsMargins(0, 0, 0, 0);
-    lay->addWidget(m_nav);
+    lay->setSpacing(0);
+    auto *sidebar = new QFrame(this);
+    sidebar->setObjectName(QStringLiteral("Sidebar"));
+    sidebar->setFixedWidth(208);
+    auto *sidebarLayout = new QVBoxLayout(sidebar);
+    sidebarLayout->setContentsMargins(0, 24, 0, 20);
+    sidebarLayout->setSpacing(8);
+    auto *brand = new QLabel(QStringLiteral("充电运营中心"), sidebar);
+    brand->setObjectName(QStringLiteral("Brand"));
+    brand->setAlignment(Qt::AlignCenter);
+    sidebarLayout->addWidget(brand);
+    auto *section = new QLabel(QStringLiteral("运营管理"), sidebar);
+    section->setObjectName(QStringLiteral("NavSection"));
+    sidebarLayout->addWidget(section);
+    sidebarLayout->addWidget(m_nav, 1);
+
+    // 扩展分组标题是独立、不可选的 QLabel；扩展导航使用独立列表，
+    // 因而标题不会占用核心页面的 row，也不会与真实导航文字重叠。
+    auto *extensionTitle = new QLabel(QStringLiteral("扩展模块"), sidebar);
+    extensionTitle->setObjectName(QStringLiteral("NavSection"));
+    sidebarLayout->addWidget(extensionTitle);
+    m_extensionNav->addItem(QStringLiteral("碳排放报告"));
+    sidebarLayout->addWidget(m_extensionNav);
+    auto *footer = new QLabel(QStringLiteral("PC 管理端"), sidebar);
+    footer->setObjectName(QStringLiteral("Muted"));
+    footer->setAlignment(Qt::AlignCenter);
+    sidebarLayout->addWidget(footer);
+    lay->addWidget(sidebar);
     lay->addWidget(m_pages, 1);
 }
 

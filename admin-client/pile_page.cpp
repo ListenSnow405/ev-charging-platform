@@ -1,9 +1,11 @@
 #include "pile_page.h"
 #include "net_client.h"
+#include "loading_status.h"
 #include "protocol.h"
 #include <QAbstractItemView>
 #include <QComboBox>
 #include <QFont>
+#include <QFrame>
 #include <QHeaderView>
 #include <QHBoxLayout>
 #include <QJsonArray>
@@ -45,10 +47,11 @@ PilePage::PilePage(NetClient *net, QWidget *parent)
     connect(m_pileListTimer, &QTimer::timeout, this, [this] {
         if (m_pileListSeq < 0) return;
         m_pileListSeq = -1;
+        updateLoadingState();
         m_requestedPage = m_currentPage;
         m_requestedStationId = m_currentStationId;
         m_requestedStatus = m_currentStatus;
-        m_statusLabel->setText(QStringLiteral("电桩列表请求超时，请重试"));
+        m_statusLabel->setMessage(QStringLiteral("电桩列表请求超时，请重试"), LoadingStatus::Tone::Error);
         updatePaginationControls();
     });
 
@@ -64,10 +67,7 @@ void PilePage::setupUi()
     pageLayout->setSpacing(12);
 
     auto *title = new QLabel(QStringLiteral("充电桩管理"), this);
-    QFont titleFont = title->font();
-    titleFont.setPointSize(18);
-    titleFont.setBold(true);
-    title->setFont(titleFont);
+    title->setObjectName(QStringLiteral("PageTitle"));
     pageLayout->addWidget(title);
 
     auto *filterLayout = new QHBoxLayout;
@@ -87,19 +87,25 @@ void PilePage::setupUi()
     filterLayout->addWidget(m_statusFilter);
 
     auto *searchButton = new QPushButton(QStringLiteral("查询"), this);
+    searchButton->setObjectName(QStringLiteral("Primary"));
     auto *resetButton = new QPushButton(QStringLiteral("重置"), this);
+    resetButton->setObjectName(QStringLiteral("Secondary"));
     filterLayout->addWidget(searchButton);
     filterLayout->addWidget(resetButton);
     filterLayout->addStretch();
 
     m_rebootButton = new QPushButton(QStringLiteral("远程重启"), this);
+    m_rebootButton->setObjectName(QStringLiteral("Danger"));
     m_rebootButton->setEnabled(false);
     m_rebootButton->setToolTip(QStringLiteral("服务端 2112 尚未接入"));
     filterLayout->addWidget(m_rebootButton);
-    pageLayout->addLayout(filterLayout);
+    auto *filterCard = new QFrame(this);
+    filterCard->setObjectName(QStringLiteral("Card"));
+    filterLayout->setContentsMargins(16, 14, 16, 14);
+    filterCard->setLayout(filterLayout);
+    pageLayout->addWidget(filterCard);
 
-    m_statusLabel = new QLabel(QStringLiteral("准备加载电桩列表"), this);
-    m_statusLabel->setStyleSheet(QStringLiteral("color:#667085"));
+    m_statusLabel = new LoadingStatus(QStringLiteral("准备加载电桩列表"), this);
     pageLayout->addWidget(m_statusLabel);
 
     m_table = new QTableWidget(0, 7, this);
@@ -109,6 +115,9 @@ void PilePage::setupUi()
         QStringLiteral("累计充电次数"), QStringLiteral("累计充电时长")
     });
     m_table->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    m_table->setMouseTracking(true);
+    m_table->setShowGrid(false);
+    m_table->verticalHeader()->setDefaultSectionSize(40);
     m_table->setSelectionBehavior(QAbstractItemView::SelectRows);
     m_table->setSelectionMode(QAbstractItemView::SingleSelection);
     m_table->setAlternatingRowColors(true);
@@ -119,9 +128,11 @@ void PilePage::setupUi()
 
     auto *pagination = new QHBoxLayout;
     m_previousPageButton = new QPushButton(QStringLiteral("上一页"), this);
+    m_previousPageButton->setObjectName(QStringLiteral("Secondary"));
     m_pageLabel = new QLabel(this);
     m_pageLabel->setAlignment(Qt::AlignCenter);
     m_nextPageButton = new QPushButton(QStringLiteral("下一页"), this);
+    m_nextPageButton->setObjectName(QStringLiteral("Secondary"));
     pagination->addStretch();
     pagination->addWidget(m_previousPageButton);
     pagination->addWidget(m_pageLabel);
@@ -147,6 +158,7 @@ void PilePage::requestStationOptions()
 {
     m_stationOptionsTimer->stop();
     m_stationOptionsSeq = -1;
+    updateLoadingState();
     m_stationOptionsPage = 0;
     m_stationOptionsTotal = 0;
     m_stationOptionsSelectedId = m_stationFilter->currentData().toLongLong();
@@ -168,6 +180,7 @@ void PilePage::requestStationOptionsPage(int page)
         return;
     }
     m_stationOptionsSeq = seq;
+    updateLoadingState();
     m_stationOptionsPage = page;
     m_stationOptionsTimer->start(READ_RESPONSE_TIMEOUT_MS);
 }
@@ -176,6 +189,7 @@ void PilePage::abortStationOptionsLoad(const QString &message)
 {
     m_stationOptionsTimer->stop();
     m_stationOptionsSeq = -1;
+    updateLoadingState();
     m_stationOptionsPage = 0;
     m_stationOptionsTotal = 0;
     m_pendingStationOptions.clear();
@@ -207,7 +221,7 @@ void PilePage::requestPileList(int page, qint64 stationId, int status)
 {
     if (page < 1) return;
 
-    m_statusLabel->setText(QStringLiteral("正在加载电桩列表…"));
+    m_statusLabel->setMessage(QStringLiteral("正在加载电桩列表…"), LoadingStatus::Tone::Loading);
     const int seq = m_net->send(ecp::CMD_PILE_LIST, QJsonObject{
         { QStringLiteral("page"), page },
         { QStringLiteral("size"), PAGE_SIZE },
@@ -217,14 +231,16 @@ void PilePage::requestPileList(int page, qint64 stationId, int status)
     if (seq < 0) {
         m_pileListTimer->stop();
         m_pileListSeq = -1;
+        updateLoadingState();
         m_requestedPage = m_currentPage;
         m_requestedStationId = m_currentStationId;
         m_requestedStatus = m_currentStatus;
-        m_statusLabel->setText(QStringLiteral("电桩列表请求发送失败，请检查网络连接"));
+        m_statusLabel->setMessage(QStringLiteral("电桩列表请求发送失败，请检查网络连接"), LoadingStatus::Tone::Error);
         updatePaginationControls();
         return;
     }
     m_pileListSeq = seq;
+    updateLoadingState();
     m_requestedPage = page;
     m_requestedStationId = stationId;
     m_requestedStatus = status;
@@ -239,6 +255,7 @@ void PilePage::handleResponse(int cmd, int seq, int code, const QString &msg,
         if (seq != m_stationOptionsSeq) return;
         m_stationOptionsTimer->stop();
         m_stationOptionsSeq = -1;
+        updateLoadingState();
         handleStationOptionsResponse(code, msg, data);
         return;
     }
@@ -246,6 +263,7 @@ void PilePage::handleResponse(int cmd, int seq, int code, const QString &msg,
         if (seq != m_pileListSeq) return;
         m_pileListTimer->stop();
         m_pileListSeq = -1;
+        updateLoadingState();
         handlePileListResponse(code, msg, data);
     }
 }
@@ -297,7 +315,7 @@ void PilePage::handlePileListResponse(int code, const QString &msg,
         m_requestedPage = m_currentPage;
         m_requestedStationId = m_currentStationId;
         m_requestedStatus = m_currentStatus;
-        m_statusLabel->setText(QStringLiteral("电桩列表加载失败：%1").arg(msg));
+        m_statusLabel->setMessage(QStringLiteral("电桩列表加载失败：%1").arg(msg), LoadingStatus::Tone::Error);
         updatePaginationControls();
         return;
     }
@@ -309,7 +327,7 @@ void PilePage::handlePileListResponse(int code, const QString &msg,
         m_requestedPage = m_currentPage;
         m_requestedStationId = m_currentStationId;
         m_requestedStatus = m_currentStatus;
-        m_statusLabel->setText(QStringLiteral("电桩列表加载失败：服务器响应格式异常"));
+        m_statusLabel->setMessage(QStringLiteral("电桩列表加载失败：服务器响应格式异常"), LoadingStatus::Tone::Error);
         updatePaginationControls();
         return;
     }
@@ -341,8 +359,8 @@ void PilePage::handlePileListResponse(int code, const QString &msg,
     m_requestedStationId = m_currentStationId;
     m_requestedStatus = m_currentStatus;
     refreshTable();
-    m_statusLabel->setText(QStringLiteral("已加载 %1 个电桩，共 %2 个")
-                               .arg(m_piles.size()).arg(total));
+    m_statusLabel->setMessage(QStringLiteral("已加载 %1 个电桩，共 %2 个")
+                               .arg(m_piles.size()).arg(total), total == 0 ? LoadingStatus::Tone::Neutral : LoadingStatus::Tone::Success);
     updatePaginationControls();
 }
 
@@ -414,4 +432,9 @@ QString PilePage::durationText(qint64 seconds)
         return QStringLiteral("%1小时%2分钟").arg(hours).arg(minutes);
     }
     return QStringLiteral("%1分钟").arg(minutes);
+}
+
+void PilePage::updateLoadingState()
+{
+    m_statusLabel->setLoading(m_stationOptionsSeq >= 0 || m_pileListSeq >= 0);
 }

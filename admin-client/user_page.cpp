@@ -1,9 +1,11 @@
 #include "user_page.h"
 #include "net_client.h"
+#include "loading_status.h"
 #include "protocol.h"
 #include "time_util.h"
 #include <QAbstractItemView>
 #include <QFont>
+#include <QFrame>
 #include <QHeaderView>
 #include <QHBoxLayout>
 #include <QJsonArray>
@@ -41,11 +43,12 @@ UserPage::UserPage(NetClient *net, QWidget *parent)
     connect(m_userListTimer, &QTimer::timeout, this, [this] {
         if (m_userListSeq < 0) return;
         m_userListSeq = -1;
+        updateLoadingState();
         m_requestedPage = m_currentPage;
         m_requestedPhoneLike = m_currentPhoneLike;
-        m_statusLabel->setText(m_userStatusReconcilePending
+        m_statusLabel->setMessage(m_userStatusReconcilePending
             ? QStringLiteral("用户状态更新结果仍未知；列表核对请求超时，请重试查询")
-            : QStringLiteral("用户列表请求超时，请重试"));
+            : QStringLiteral("用户列表请求超时，请重试"), LoadingStatus::Tone::Warning);
         updatePaginationControls();
     });
 
@@ -54,6 +57,7 @@ UserPage::UserPage(NetClient *net, QWidget *parent)
     connect(m_userStatusTimer, &QTimer::timeout, this, [this] {
         if (m_userStatusSeq < 0) return;
         m_userStatusSeq = -1;
+        updateLoadingState();
         m_userStatusReconcilePending = true;
         updateStatusButton();
         requestUserList(m_currentPage, m_currentPhoneLike);
@@ -70,10 +74,7 @@ void UserPage::setupUi()
     pageLayout->setSpacing(12);
 
     auto *title = new QLabel(QStringLiteral("用户管理"), this);
-    QFont titleFont = title->font();
-    titleFont.setPointSize(18);
-    titleFont.setBold(true);
-    title->setFont(titleFont);
+    title->setObjectName(QStringLiteral("PageTitle"));
     pageLayout->addWidget(title);
 
     auto *toolbar = new QHBoxLayout;
@@ -86,18 +87,24 @@ void UserPage::setupUi()
     toolbar->addWidget(m_phoneSearch);
 
     auto *searchButton = new QPushButton(QStringLiteral("查询"), this);
+    searchButton->setObjectName(QStringLiteral("Primary"));
     auto *clearButton = new QPushButton(QStringLiteral("清空"), this);
+    clearButton->setObjectName(QStringLiteral("Secondary"));
     toolbar->addWidget(searchButton);
     toolbar->addWidget(clearButton);
     toolbar->addStretch();
 
     m_statusButton = new QPushButton(QStringLiteral("冻结用户"), this);
+    m_statusButton->setObjectName(QStringLiteral("Danger"));
     m_statusButton->setEnabled(false);
     toolbar->addWidget(m_statusButton);
-    pageLayout->addLayout(toolbar);
+    auto *filterCard = new QFrame(this);
+    filterCard->setObjectName(QStringLiteral("Card"));
+    toolbar->setContentsMargins(16, 14, 16, 14);
+    filterCard->setLayout(toolbar);
+    pageLayout->addWidget(filterCard);
 
-    m_statusLabel = new QLabel(QStringLiteral("准备加载用户列表"), this);
-    m_statusLabel->setStyleSheet(QStringLiteral("color:#667085"));
+    m_statusLabel = new LoadingStatus(QStringLiteral("准备加载用户列表"), this);
     pageLayout->addWidget(m_statusLabel);
 
     m_table = new QTableWidget(0, 6, this);
@@ -106,6 +113,9 @@ void UserPage::setupUi()
         QStringLiteral("钱包余额（元）"), QStringLiteral("注册时间"), QStringLiteral("状态")
     });
     m_table->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    m_table->setMouseTracking(true);
+    m_table->setShowGrid(false);
+    m_table->verticalHeader()->setDefaultSectionSize(40);
     m_table->setSelectionBehavior(QAbstractItemView::SelectRows);
     m_table->setSelectionMode(QAbstractItemView::SingleSelection);
     m_table->setAlternatingRowColors(true);
@@ -116,9 +126,11 @@ void UserPage::setupUi()
 
     auto *pagination = new QHBoxLayout;
     m_previousPageButton = new QPushButton(QStringLiteral("上一页"), this);
+    m_previousPageButton->setObjectName(QStringLiteral("Secondary"));
     m_pageLabel = new QLabel(this);
     m_pageLabel->setAlignment(Qt::AlignCenter);
     m_nextPageButton = new QPushButton(QStringLiteral("下一页"), this);
+    m_nextPageButton->setObjectName(QStringLiteral("Secondary"));
     pagination->addStretch();
     pagination->addWidget(m_previousPageButton);
     pagination->addWidget(m_pageLabel);
@@ -147,9 +159,9 @@ void UserPage::requestUserList(int page, const QString &phoneLike)
     if (page < 1) return;
 
     const QString normalizedPhoneLike = phoneLike.trimmed();
-    m_statusLabel->setText(m_userStatusReconcilePending
+    m_statusLabel->setMessage(m_userStatusReconcilePending
         ? QStringLiteral("用户状态更新响应超时，操作结果未知，正在刷新列表核对…")
-        : QStringLiteral("正在加载用户列表…"));
+        : QStringLiteral("正在加载用户列表…"), LoadingStatus::Tone::Warning);
     const int seq = m_net->send(ecp::CMD_ADMIN_USER_LIST, QJsonObject{
         { QStringLiteral("page"), page },
         { QStringLiteral("size"), PAGE_SIZE },
@@ -158,15 +170,17 @@ void UserPage::requestUserList(int page, const QString &phoneLike)
     if (seq < 0) {
         m_userListTimer->stop();
         m_userListSeq = -1;
+        updateLoadingState();
         m_requestedPage = m_currentPage;
         m_requestedPhoneLike = m_currentPhoneLike;
-        m_statusLabel->setText(m_userStatusReconcilePending
+        m_statusLabel->setMessage(m_userStatusReconcilePending
             ? QStringLiteral("用户状态更新结果仍未知；列表核对失败：请求发送失败，请检查网络连接")
-            : QStringLiteral("用户列表请求发送失败，请检查网络连接"));
+            : QStringLiteral("用户列表请求发送失败，请检查网络连接"), LoadingStatus::Tone::Warning);
         updatePaginationControls();
         return;
     }
     m_userListSeq = seq;
+    updateLoadingState();
     m_requestedPage = page;
     m_requestedPhoneLike = normalizedPhoneLike;
     m_userListTimer->start(READ_RESPONSE_TIMEOUT_MS);
@@ -185,6 +199,7 @@ void UserPage::handleResponse(int cmd, int seq, int code, const QString &msg,
         if (seq != m_userListSeq) return;
         m_userListTimer->stop();
         m_userListSeq = -1;
+        updateLoadingState();
         handleUserListResponse(code, msg, data);
         return;
     }
@@ -192,6 +207,7 @@ void UserPage::handleResponse(int cmd, int seq, int code, const QString &msg,
         if (seq != m_userStatusSeq) return;
         m_userStatusTimer->stop();
         m_userStatusSeq = -1;
+        updateLoadingState();
         m_userStatusReconcilePending = false;
         handleUserStatusResponse(code, msg);
     }
@@ -203,9 +219,9 @@ void UserPage::handleUserListResponse(int code, const QString &msg,
     if (code != ecp::ERR_OK) {
         m_requestedPage = m_currentPage;
         m_requestedPhoneLike = m_currentPhoneLike;
-        m_statusLabel->setText(m_userStatusReconcilePending
+        m_statusLabel->setMessage(m_userStatusReconcilePending
             ? QStringLiteral("用户状态更新结果仍未知；列表核对失败：%1").arg(msg)
-            : QStringLiteral("用户列表加载失败：%1").arg(msg));
+            : QStringLiteral("用户列表加载失败：%1").arg(msg), LoadingStatus::Tone::Warning);
         updatePaginationControls();
         return;
     }
@@ -216,9 +232,9 @@ void UserPage::handleUserListResponse(int code, const QString &msg,
     if (!totalValue.isDouble() || total < 0 || !listValue.isArray()) {
         m_requestedPage = m_currentPage;
         m_requestedPhoneLike = m_currentPhoneLike;
-        m_statusLabel->setText(m_userStatusReconcilePending
+        m_statusLabel->setMessage(m_userStatusReconcilePending
             ? QStringLiteral("用户状态更新结果仍未知；列表核对失败：服务器响应格式异常")
-            : QStringLiteral("用户列表加载失败：服务器响应格式异常"));
+            : QStringLiteral("用户列表加载失败：服务器响应格式异常"), LoadingStatus::Tone::Warning);
         updatePaginationControls();
         return;
     }
@@ -273,10 +289,10 @@ void UserPage::handleUserListResponse(int code, const QString &msg,
     m_requestedPage = m_currentPage;
     m_requestedPhoneLike = m_currentPhoneLike;
     refreshTable();
-    m_statusLabel->setText(reconcileMessage.isEmpty()
+    m_statusLabel->setMessage(reconcileMessage.isEmpty()
         ? QStringLiteral("已加载 %1 个用户，共 %2 个")
               .arg(m_users.size()).arg(total)
-        : reconcileMessage);
+        : reconcileMessage, reconcileMessage.isEmpty() ? (total == 0 ? LoadingStatus::Tone::Neutral : LoadingStatus::Tone::Success) : LoadingStatus::Tone::Warning);
     updatePaginationControls();
 }
 
@@ -289,7 +305,7 @@ void UserPage::handleUserStatusResponse(int code, const QString &msg)
     m_pendingNewStatus = ecp::USER_NORMAL;
 
     if (code != ecp::ERR_OK) {
-        m_statusLabel->setText(QStringLiteral("用户状态更新失败：%1").arg(msg));
+        m_statusLabel->setMessage(QStringLiteral("用户状态更新失败：%1").arg(msg), LoadingStatus::Tone::Error);
         QMessageBox::warning(this, QStringLiteral("用户状态更新失败"), msg);
         updateStatusButton();
         return;
@@ -381,6 +397,7 @@ void UserPage::handleUserStatusChange()
     if (seq < 0) {
         m_userStatusTimer->stop();
         m_userStatusSeq = -1;
+        updateLoadingState();
         m_userStatusReconcilePending = false;
         QMessageBox::warning(this, QStringLiteral("用户状态更新失败"),
                              QStringLiteral("请求发送失败，请检查网络连接"));
@@ -388,13 +405,14 @@ void UserPage::handleUserStatusChange()
     }
 
     m_userStatusSeq = seq;
+    updateLoadingState();
     m_pendingStatusUserId = user->userId;
     m_pendingStatusPhone = user->phone;
     m_pendingNewStatus = newStatus;
     m_userStatusReconcilePending = false;
     m_userStatusTimer->start(WRITE_RESPONSE_TIMEOUT_MS);
     m_statusButton->setEnabled(false);
-    m_statusLabel->setText(QStringLiteral("正在%1用户 %2…").arg(action, user->phone));
+    m_statusLabel->setMessage(QStringLiteral("正在%1用户 %2…").arg(action, user->phone), LoadingStatus::Tone::Loading);
 }
 
 const UserPage::UserData *UserPage::selectedUser() const
@@ -417,4 +435,9 @@ QString UserPage::statusText(int status)
     case ecp::USER_FROZEN: return QStringLiteral("冻结");
     default:               return QStringLiteral("未知");
     }
+}
+
+void UserPage::updateLoadingState()
+{
+    m_statusLabel->setLoading(m_userListSeq >= 0 || m_userStatusSeq >= 0);
 }

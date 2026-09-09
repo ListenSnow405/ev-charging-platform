@@ -9,6 +9,7 @@
 #include <QWidget>
 
 class NetClient;
+class LoadingStatus;
 class QComboBox;
 class QJsonObject;
 class QLabel;
@@ -41,6 +42,7 @@ private:
     };
 
     void setupUi();
+    void updateLoadingState();
     void requestStationOptions();
     void requestStationOptionsPage(int page);
     void abortStationOptionsLoad(const QString &message);
@@ -67,7 +69,7 @@ private:
     QPushButton  *m_rebootButton = nullptr;
     QPushButton  *m_previousPageButton = nullptr;
     QPushButton  *m_nextPageButton = nullptr;
-    QLabel       *m_statusLabel = nullptr;
+    LoadingStatus *m_statusLabel = nullptr;
     QLabel       *m_pageLabel = nullptr;
     QTimer       *m_stationOptionsTimer = nullptr;
     QTimer       *m_pileListTimer = nullptr;
