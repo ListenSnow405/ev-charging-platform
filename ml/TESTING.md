@@ -22,7 +22,7 @@
 
 | # | 操作 | 预期 |
 | --- | --- | --- |
-| 1.0 | `bash scripts/check-env.sh L5` | 「环境检查全部通过」。**这一条覆盖了下面 1.1～1.3**，不通过时它会直接给出安装命令 |
+| 1.0 | `bash scripts/check-env.sh L5` | 「环境检查全部通过」。**这一条覆盖了下面 1.1～1.3**，不通过时它会直接给出安装命令。装 venv 的命令见 [../docs/RUNBOOK.md 第 1 节](../docs/RUNBOOK.md) |
 | 1.1 | `python3 --version` | ≥ 3.10 |
 | 1.2 | `.venv/bin/python -c "import pandas,sklearn,joblib;print('ok')"` | 输出 `ok`。没有 venv 就 `python3 -m venv .venv && .venv/bin/pip install -r ml/requirements.txt` |
 | 1.3 | `ls ml/data/models/meta.json` | 存在。不存在则 `.venv/bin/python ml/train_forecast.py` |
@@ -159,8 +159,8 @@ L5 只负责把数据备好，**下面这些是别人的活，但要一起验**�
 | 4.1 | 管理端登录后看销售业绩 | 今日/本月/总营收与大屏 KPI **完全一致**（同一个 `charging.db`） | L3 |
 | 4.2 | 管理端近 7/30 日趋势 | 与大屏营收趋势图逐点一致 | L3 |
 | 4.3 | 管理端电桩状态 | 与大屏饼图一致 | L3 |
-| 4.4 | 2305 站点负荷预测 | **handler 尚未实现**（`docs/conventions.md` 第 9 节已点名 L2）。实现后：`stationId=0` 返回全部站点；`horizon` 传 2 返回 `ERR_PARAM`；表为空时返回 `code=0` + 空 list 而非报错 | L2 |
-| 4.5 | 1101 附近充电站 | **取数逻辑尚未实现**。实现后：`congestion` / `idleForecast` 取 `horizon=1` 最新一条；**无预测数据时填 −1 不是 0** | L2 |
+| 4.4 | 2305 站点负荷预测 | 管理端预测页数字与 `t_load_forecast` 一致；`stationId=0` 返回全部站点；`horizon` 传 2 返回 `ERR_PARAM`；表为空时返回 `code=0` + 空 list 而非报错 | L2 / L3 |
+| 4.5 | 1101 附近充电站 | `congestion` / `idleForecast` 取 `horizon=1` 最新一条；**无预测数据时填 −1 不是 0** | L2 |
 | 4.6 | 用户端按 `sortBy=1` 推荐排序 | 低拥堵站排前面；六个站的拥堵度**不应大量并列** | L4 |
 | 4.7 | 现场完成一次完整充电 | 结算后重跑 2.3.1，大屏「今日营收」**从 0 变成非 0**，顶栏「数据截止」由黄转正常 | 全组 |
 

@@ -47,6 +47,13 @@
 | 2026-09-02 | `docs/conventions.md` | 第 3 节拆为 3.1 已生效 / **3.2 待评审变更申请**；原先只有「改完之后」的记录，没有「提出到批准之间」的落点，CR 只能停在群聊里翻不到 | SCML | ⬜ |
 | 2026-09-02 | `.gitignore` | 补 `*.db-shm` / `*.db-wal`；原规则只挡 `*.db` 和 `*.db-journal`，SQLite 走 WAL 模式时这两个边车文件会漏进仓库 | SCML | ⬜ |
 | 2026-09-02 | `ml/CLAUDE.md` | 数据库权限改为「运行期只读 / 离线播种可写」两条并列规则，并挂 CR-002 未批前禁止 `--commit` | SCML | ⬜ |
+| 2026-09-05 | `charging.db` | L5 按 CR-002 流程正式落库：8292 单 + 32 条设备日志 + 18 行预测；备份 `charging-bak-20260905-082255.db`，五张禁改表哈希逐字节未变 | L5 | ✅ |
+| 2026-09-07 | `docs/expand/` | 扩展模块实施路径与认领看板定稿；B3（ext 建表自动执行）、B4（`t_sys_config` 功能开关）落地 | L5 代实现 | ✅ L3/L2 于 09-08 追认 |
+| 2026-09-08 | `common/error_code.h` | 新增 `ExtMsgProvider` 函数指针挂钩，扩展错误码可回中文 `msg`；冻结文件**不 include** `error_code_ext.h`，未注册时行为与从前完全一致 | L1 授权 | ✅ |
+| 2026-09-08 | `server/net/` | 网络层重构：移除「一连接一线程」阻塞模型，改为 epoll IO 线程 + Qt 主线事件循环；新增设备注册表与用户推送注册表。**`pool_size` 语义随之改变**——不再是最大并发连接数，而是最大并发业务处理数（上溯 09-02 那条记录） | L1 | ✅ |
+| 2026-09-08 | `server/biz/` `common/protocol_ext.h` | 扩展模块 08 碳减排与能源报告全栈交付，3740–3747 八个命令字 + 管理端页 + 碳排放大屏 + 独立对拍 | L5 | ✅ L1/L2/L3 追认 |
+| 2026-09-08 | `server/biz/order_flow_service.cpp` `pile_service.cpp` | R0 核心闭环补齐：1203–1205 计费结算三件套、2112→9003 远程重启、1208 充电推送、2305 预测查询 | L2/L4/L1 | ✅ |
+| 2026-09-09 | 全部文档 | 第二次文档整理：新增 [RUNBOOK.md](RUNBOOK.md) 收拢分散在六份文档里的运行命令；清除各模块文档中已完成的 TODO 与过期状态；`docs/expand/08-实现规划.md` → `08-运行手册.md`，技术路线改写为运行文档 | SCML | ⬜ |
 
 ### 3.2 待评审变更申请（CR）
 
@@ -331,30 +338,10 @@ bash scripts/check-env.sh L3     # 只查自己这条线
 
 L3 需要 QtCharts（`[说明书]` 1.4 营收趋势用 QChart），L4 需要 QtWebEngineWidgets（`[说明书]` 1.4 一键导航用 QWebEngineView），两者都不在 `qt6-base-dev` 里。这是 agent 完全帮不上的环境问题，拖到联调周会连累全组。
 
-### SSH 登录时 GUI 程序起不来
+### 运行与排障
 
-从宿主机 SSH 进虚拟机跑 `ecp-admin` / `ecp-user` 会报：
-
-```
-qt.qpa.xcb: could not connect to display
-This application failed to start because no Qt platform plugin could be initialized.
-Reinstalling the application may fix this problem.
-```
-
-**不是 Qt 装坏了**，最后那句提示极具误导性。原因是 SSH 会话没有 `DISPLAY`，Qt 不知道往哪儿画窗口。服务端与电桩模拟器是控制台程序，不受影响。
-
-三种做法：
-
-1. **在虚拟机桌面的终端里跑 GUI 程序**（推荐）。SSH 留给服务端、模拟器、大屏这些控制台程序，分工正好。
-2. 想留在 SSH 里跑，借用桌面的显示（窗口出现在虚拟机桌面上，不在 SSH 终端里）：
-
-   ```bash
-   export DISPLAY=:0
-   export XAUTHORITY=$(ls /run/user/1000/.mutter-Xwaylandauth.* 2>/dev/null | head -1)
-   ```
-
-   认证文件名里的随机串每次重启桌面会变，**必须用 `ls` 通配，不要写死**。可加进 `~/.bashrc`。
-3. `ssh -X` X11 转发，窗口显示在宿主机。Qt 程序走转发较卡，调界面不推荐。
+构建、启动、预测流水线、测试入口与常见故障（含 SSH 会话里 GUI 程序报
+`could not connect to display` 的三种解法）统一见 [RUNBOOK.md](RUNBOOK.md)，本文不重复。
 
 ## 6. 配置与密钥
 
@@ -401,17 +388,20 @@ cp config/app.ini.example config/app.ini   # 首次克隆后执行，填入自�
 
 | 阶段 | 成果物 | 责任人 | 状态 |
 | --- | --- | --- | --- |
-| 需求 | 需求理解与工作线拆解 | 全组 | ✅ |
+| 需求 | 需求理解与工作线拆解 | 全组 | ✅ [DIVISION-OF-LABOR.md](../DIVISION-OF-LABOR.md) |
 | 设计 | 通信协议 | L1 | ✅ [protocol.md](protocol.md) |
 | 设计 | 数据库设计 | L2 | ✅ [db-schema.sql](db-schema.sql) |
 | 设计 | 技术选型说明（含推论项理由） | 全组 | ✅ CLAUDE.md 第 2 节 |
-| 开发 | 各模块源码与模块级 CLAUDE.md | 各线 | ⬜ 进行中 |
+| 设计 | 系统架构与责任归属 | 全组 | ✅ [ARCHITECTURE.md](../ARCHITECTURE.md) |
+| 开发 | 各模块源码与模块级 CLAUDE.md | 各线 | ✅ 核心 35 个命令字全部落地 |
 | 开发 | 负荷预测建模与精度评估 | L5 | ✅ [../ml/reports/forecast_eval.md](../ml/reports/forecast_eval.md)，结论见 8.1 |
-| 测试 | 测试用例集与回归清单 | L4 | ⬜ 待建 |
+| 开发 | 扩展模块 08 碳减排与能源报告 | L5 | ✅ [expand/08-运行手册.md](expand/08-运行手册.md) |
+| 测试 | 自动化测试与冒烟脚本 | L3 / L5 | ✅ 清单见 [RUNBOOK.md 第 5 节](RUNBOOK.md) |
+| 测试 | 人工测试流程与回归清单 | L4 / L5 | ◐ 数据端已成文 [../ml/TESTING.md](../ml/TESTING.md)；客户端异常路径清单待补 |
 | 测试 | 交叉试读评审记录 | L2 | ⬜ 每周一次，记入第 4 节 |
-| 发布 | 部署与运行说明 | L3 | ⬜ 随一键启动脚本提交 |
+| 发布 | 部署与运行说明 | L3 | ✅ [RUNBOOK.md](RUNBOOK.md) |
 | 发布 | 答辩演示动线（大屏部分） | L5 | ✅ [../dataviz/DEMO.md](../dataviz/DEMO.md) |
-| 发布 | 答辩演示动线（整体） | 全组 | ⬜ W4 |
+| 发布 | 答辩 PPT 大纲与讲稿 | 全组 | ✅ [../DEFENSE-SCRIPT.md](../DEFENSE-SCRIPT.md) |
 
 ### 8.1 负荷预测精度评估结论　`[说明书]` 1.4
 
@@ -451,33 +441,20 @@ t−24h 自相关 0.345、分站曲线两两 L1 距离 0.475（噪声底实测 0
 
 ## 9. 待办
 
-- [x] 四项契约评审冻结　- [x] Qt 版本写死 6.2.4　- [x] 运行参数定案　- [x] 地图 Key 方案
-- [x] 模块级 `CLAUDE.md` / `AGENTS.md`（六个模块）　- [x] 工程骨架与一键构建
-- [ ] **全员 W1 第一天跑 `scripts/check-env.sh`，结论贴群**
-- [ ] **L3 装 `libqt6charts6-dev`，L4 装 `qt6-webengine-dev qt6-webengine-dev-tools`**
-- [ ] L4 申请腾讯地图 Key 并同步申请步骤
-- [ ] W1 结束各线在骨架上交出本线「能跑的空壳」，L3 汇总验证
-- [ ] **⚠ L1、L2 归队后必读**：`docs/protocol.md`(v1.1)、`server/net/session.h/.cpp`、`server/biz/user_management_service.cpp` 在二人不在时被 L5 代为直接改动（CR-001 + CR-003，第 3.2 节有完整越权记录），已编译通过但**不代表内容一定对**，必须逐条复核
-- [x] CR-001 已并入冻结协议 v1.1，`common/protocol.h` 已补 2305 常量
-- [x] CR-002 已获 L2 批复，三条意见已全部落地到 `ml/gen_history.py`
-- [ ] **⚠ L2：2305 服务端 handler 仍无人实现，但数据侧已就绪，现在落地只剩一个 query。**
-      `common/protocol.h` 的 `CMD_STAT_LOAD_FORECAST = 2305` 常量已在，`registerHandler` 列表里还没有。
-      `t_load_forecast` 已由 `ml/predict.py` 填充，每批 6 站 × 3 个 horizon = 18 行，
-      **整批共用一个 `create_time`**，可直接按协议第 126 行的口径取：
-      ```sql
-      SELECT f.station_id, s.name, f.horizon, f.predict_time, f.load_kw,
-             f.idle_pile, f.is_peak, f.congestion, f.model_version
-        FROM t_load_forecast f JOIN t_station s ON s.station_id = f.station_id
-       WHERE f.create_time = (SELECT MAX(create_time) FROM t_load_forecast
-                               WHERE model_version = f.model_version)
-         AND (? = 0 OR f.station_id = ?) AND f.horizon = ?
-       ORDER BY f.station_id
-      ```
-      这段 SQL 已在 `ml/export_snapshot.py` 上实跑验证过。注意：`stationId=0` 表示全部站点；
-      `horizon` 非 1/6/24 返回 `ERR_PARAM`；**无数据返回 `code=0` + 空 `list`，不新增错误码**。
-      L3 的管理端预警页按 `congestion ≥ 0.8` 本地判定，阈值不进协议
-- [ ] **⚠ L2：1101 取 `congestion` / `idleForecast` 的逻辑也还没接**（`station_service.cpp`）。
-      取 `horizon=1` 的最新一条；**无预测数据时两字段均填 −1 而不是 0**——
-      0 在拥堵度语义里是「最不拥堵」，会把没数据的站排到推荐最前面（协议第 95 行）
-- [ ] 1005 充值的冻结校验 L2 已补（46008a9），1006 也加了角色校验
-- [ ] CR-003 待 L1/L2 复核——冻结后会话立即失效，已代为应用；实测冻结后旧 token 立即返回 `ERR_TOKEN_INVALID`，测试后已解冻恢复数据库原状（`t_admin_oplog` 留了一对 FREEZE/UNFREEZE 记录，这是功能本身该留的审计痕迹，未清理）
+**已关闭**：四项契约评审冻结 · Qt 版本写死 6.2.4 · 运行参数定案 · 地图 Key 方案 ·
+模块级 `CLAUDE.md`/`AGENTS.md` · 工程骨架与一键构建 · CR-001/002/003 三条全部落地 ·
+R0 核心闭环（1203–1205 / 9001–9006 / 2112 / 2305 / 1208）· 底座 B2/B3/B4 · 扩展模块 08。
+
+**尚未关闭**：
+
+- [ ] **L1、L2 逐行复核越权改动**：`docs/protocol.md`(v1.1)、`server/net/session.h/.cpp`、
+      `server/biz/user_management_service.cpp` 在二人不在时由 L5 代改（CR-001 + CR-003，
+      第 3.2 节有完整越权记录）。二人均已追认，但**代码本身的逐行复核尚未做**——
+      编译通过与实测通过不代表设计取舍没有异议空间。
+- [ ] **L1：B1 通用定时任务框架。** 会话过期清理与离线判定已由 `tcp_server.cpp` 的 `QTimer` 每 60s 触发，
+      但那是写死的两件事；扩展模块 03/04/06 需要的是可注册 `(周期, 回调)` 列表的框架。
+      **这是目前唯一未完成的底座**，见 [expand/00 第 4.8 节](expand/00-扩展功能模块实施路径推荐.md)。
+- [ ] **L4：测试用例集与异常路径回归清单**（第 8 节归档表里唯一的 ◐）——
+      余额不足、账号冻结、断网重连、重复提交、未结算拦截。
+- [ ] **L2：每周交叉试读评审记录**，结论记入第 4 节。
+- [ ] 答辩前按 [../DEFENSE-SCRIPT.md](../DEFENSE-SCRIPT.md) 的检查清单走一遍，截图与计时在投影环境下实测。

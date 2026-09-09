@@ -17,10 +17,10 @@
 git clone <仓库> && cd ev-charging-platform
 bash scripts/check-env.sh L3     # 换成自己的线号；按提示装包，再跑一次直到通过
 bash scripts/build-all.sh        # 构建 + 建库 + 生成 config/app.ini
-./build/bin/ecp-server           # 终端 1；再另起自己那条线的程序，确认空壳能跑
+./build/bin/ecp-server           # 终端 1；再另起自己那条线的程序，确认能跑通
 ```
 
-把 `check-env.sh` 的「结论」一行贴群里，五人都贴完 W1 环境关才算过。
+把 `check-env.sh` 的「结论」一行贴群里。完整的启动参数、流水线与排障见 [docs/RUNBOOK.md](docs/RUNBOOK.md)。
 
 **每次开 agent 会话前三步，别省**：
 
@@ -76,6 +76,8 @@ bash scripts/build-all.sh && ./build/bin/ecp-server &
 ./build/bin/ecp-user      # 点一遍
 ```
 
+改动涉及协议或业务口径时，顺手跑一遍对应的冒烟/集成脚本（清单见 [RUNBOOK 第 5 节](docs/RUNBOOK.md)）。
+
 **重点测异常路径**：余额不足、账号冻结、断网、重复提交、未结算拦截。agent 写的正常流程通常没问题，异常路径几乎必漏。
 
 提交只加自己目录下的文件，一个功能点一次，信息写人话。**不要让 agent 执行 `git push`**。合入后群里说一声，模块 `CLAUDE.md` 的 TODO 打勾。
@@ -94,7 +96,8 @@ bash scripts/build-all.sh && ./build/bin/ecp-server &
 
 **每周交叉试读**（L2 组织）：互看代码，按 §3 清单查。全员用 agent 时评审强度要**提高**而非降低——agent 最擅长生成「看起来对」的错代码。
 
-**W3 联调周**（L3 主责）：每天一次例会。客户端此前走 `mock/` 假数据，这周才切真实链路——`mock/` 要全程保留，任何时候都能脱离服务端演示。
+**联调**（L3 主责）：两个客户端都已切到真实链路，`mock/` 已不再使用。改动跨模块口径时（统计、计费、预测取数）
+两端日志对照比反复问 agent 快，格式已统一。
 
 ## 附：常见情况
 
@@ -106,4 +109,4 @@ bash scripts/build-all.sh && ./build/bin/ecp-server &
 | 想新增命令字 | 先在 `docs/protocol.md` 占号（走 §5），再写代码 |
 | 连续两三轮修不好同一个错 | 停下自己读报错。通常是它误解了某个前提，直接告诉它前提更快 |
 | GUI 程序报 `could not connect to display` | SSH 会话没有 `DISPLAY`，不是 Qt 坏了。见 [conventions.md 第 5 节](docs/conventions.md) |
-| 客户端报「不支持的请求类型」 | 该命令字的 handler 还没实现（L2 的活），不是链路故障。服务端能打印出命令字就说明链路是通的 |
+| 客户端报「不支持的请求类型」 | 该命令字的 handler 没注册，不是链路故障。扩展模块还要看 `t_sys_config` 里对应的 `feat_*` 开关。服务端能打印出命令字就说明链路是通的 |

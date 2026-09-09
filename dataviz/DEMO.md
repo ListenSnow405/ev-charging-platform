@@ -21,37 +21,15 @@ python3 -m http.server 8080 -d dataviz     # 浏览器打开 http://127.0.0.1:80
 while true; do python3 ml/export_snapshot.py >/dev/null; sleep 30; done &
 ```
 
-## 2. 刷新预测（演示前跑一次即可）
+## 2. 刷新预测与重建模型
 
-```bash
-.venv/bin/python ml/predict.py charging.db --commit --prune   # 重新推理并回写 t_load_forecast
-python3          ml/export_snapshot.py                        # 重新导出快照
-```
+演示前跑一次「刷新预测」即可；只有改了生成器或特征后才需要重建模型。
+两条流程的完整命令、顺序约束、authorizer 保护与回滚方式见
+[../docs/RUNBOOK.md 第 4 节](../docs/RUNBOOK.md)。
 
-`predict.py` 挂了 SQLite authorizer，对 `charging.db` **只可能写 `t_load_forecast` 一张表**，
-其余表的写入与所有 DDL 在连接层就被拒绝，跑错参数也伤不到组员的联调数据。
+⚠ **不要对 `charging.db` 跑 `gen_history.py`**——历史数据已落库，`--reset` 对该库是硬性拒绝的。
 
-## 3. 重建模型（只有改了生成器或特征后才需要）
-
-⚠ **不要对 `charging.db` 跑 `gen_history.py`**。历史数据已于 2026-09-05 正式落库，
-且 `--reset` 对 `charging.db` 是硬性拒绝的（CR-002 批复第 2 条），重复执行只会撞 `order_no` 唯一约束。
-要重播先在副本上做：
-
-```bash
-python3      ml/gen_history.py   ml/data/dev.db --commit --reset   # 1 重播历史（仅副本）
-python3      ml/check_signal.py                                    # 2 信号体检，四项须全过
-.venv/bin/python ml/build_features.py charging.db                  # 3 特征面板（只读真库）
-.venv/bin/python ml/train_forecast.py                              # 4 训练 + 评估报告
-.venv/bin/python ml/predict.py charging.db --commit --prune        # 5 推理回写
-python3      ml/export_snapshot.py                                 # 6 导出快照
-```
-
-顺序不能乱：5 依赖 4 训出的模型与 `meta.json` 里的 is_peak 阈值，6 依赖 5 的回写。
-
-**万一 `charging.db` 需要回滚**：落库前的备份是 `charging-bak-20260905-082255.db`，
-`cp` 覆盖回去即可。`--reset` 帮不了你——它硬性拒绝碰这个库。
-
-## 4. 讲解顺序
+## 3. 讲解顺序
 
 | # | 看板 | 讲什么 |
 | --- | --- | --- |
@@ -65,7 +43,7 @@ python3      ml/export_snapshot.py                                 # 6 导出快
 被问到「模型学到了什么」，翻 [forecast_eval.md](../ml/reports/forecast_eval.md) 第 5、6 节——
 里面写明了 h=1 靠最近观测、h≥6 基本是复现季节均值，以及为什么这是数据决定的而不是模型缺陷。
 
-## 5. 三个必须提前知道的现场问题
+## 4. 三个必须提前知道的现场问题
 
 **① 服务端没跑之前，「今日营收」必然是 0。**
 `gen_history.py` 刻意不写当天订单——红线自检正是靠「今日无订单」来分辨库里有没有真实联调数据。

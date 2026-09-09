@@ -13,31 +13,25 @@
 
 这样服务端保持纯 Socket（[说明书] 1.6 考核点），L2 也不必额外写一套 HTTP 服务。此项是说明书未规定处的推论，**需在设计文档中写明理由**。
 
-## 本地预览
+## 页面
 
-```bash
-python3 ml/export_snapshot.py          # 生成 data/snapshot.json
-python3 -m http.server 8080 -d dataviz # 浏览器打开 http://127.0.0.1:8080
-```
+| 文件 | 内容 | 快照 |
+| --- | --- | --- |
+| `index.html` | 运营大屏，七块图表：营收三指标 / 全网充电负荷（实时 + 预测双层）/ 站点拥堵度预测 / 营收趋势 / 电桩状态 / 站点排行 / 用户行为 | `data/snapshot.json` |
+| `carbon.html` | 扩展 08 碳排放屏，`index.html` 只加了一行入口链接 | `data/carbon.json` |
 
-## TODO
+轮询间隔由快照里的 `pollIntervalSec` 控制，**不放 `t_sys_config`**——那张表归 L2，
+而轮询间隔纯粹是大屏与导出器之间的约定，两端都归 L5，放 JSON 里不动冻结契约，前端也不必额外读一次库。
 
-- [x] `index.html` 改为 `fetch("data/snapshot.json")` 轮询。
-      间隔取快照里的 `pollIntervalSec`，**不放 `t_sys_config`**——那张表归 L2，
-      而轮询间隔纯粹是大屏与导出器之间的约定，两端都归 L5，放 JSON 里不动冻结契约
-- [x] 补充充电负荷、用户行为两块图表（[说明书] 1.4 大屏功能）
-- [x] 接入 `t_load_forecast`，形成「实时 + 预测」双层看板。
-      两层必须同口径（kWh 按重叠时长摊进小时桶，数值即平均 kW），否则画在同一张图上是两个量纲；
-      负荷曲线右端锚在**最后一个有观测的小时**而非「现在」，实线终点才接得上虚线起点
-- [x] 分辨率适配（栅格 `auto-fit minmax` + ECharts `resize`）与答辩演示动线 → [DEMO.md](DEMO.md)
+两层负荷曲线必须同口径（kWh 按重叠时长摊进小时桶，数值即平均 kW），否则画在同一张图上是两个量纲；
+曲线右端锚在**最后一个有观测的小时**而非「现在」，实线终点才接得上虚线起点——那也正是 `predict.py` 的 origin。
 
-## 演示
+## 运行
 
-答辩现场照 [DEMO.md](DEMO.md) 跑，里面有启动命令、刷新预测与重建模型两条流程、讲解顺序，
-以及三个必须提前知道的现场问题（服务端没跑时今日营收为 0、默认起报点全落低谷、投影分辨率）。
+启动命令见 [../docs/RUNBOOK.md 第 3 节](../docs/RUNBOOK.md)。答辩现场动线见 [DEMO.md](DEMO.md)。
 
 **数据源自 2026-09-05 起是 `charging.db`**（正式落库 8292 单，见 [../docs/conventions.md](../docs/conventions.md) 第 8.1 节）。
 大屏与管理端同源，现场充电会直接反映到「今日营收」。
-⚠ 不要对 `charging.db` 跑 `ml/gen_history.py`——历史数据已落库，`--reset` 对该库是硬性拒绝的。
 
 ⚠ 金额字段单位是**分**，前端显示需除以 100。
+⚠ 必须经 http 访问；不要对 `charging.db` 跑 `ml/gen_history.py`。两条的理由都在 RUNBOOK 里。
