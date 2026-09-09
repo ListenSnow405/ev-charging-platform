@@ -3,6 +3,7 @@
 //
 //  [说明书] 1.4 预约 -> 开始充电 -> 结束计费 -> 结算
 // -----------------------------------------------------------------------------
+#include <cmath>
 #include <limits>
 
 #include <QJsonObject>
@@ -298,14 +299,28 @@ static int handleOrderSettle(const Request &req, QJsonObject &out)
 {
     if (req.session.role != ROLE_USER) return ERR_NO_PERMISSION;
     qint64 orderId = 0;
-    if (!positiveInteger(req.data.value("orderId"), orderId)) return ERR_PARAM;
+    const QJsonValue orderIdValue = req.data.value("orderId");
+    if (!orderIdValue.isDouble()) return ERR_PARAM;
+    const double orderIdNumber = orderIdValue.toDouble();
+    if (!std::isfinite(orderIdNumber) || orderIdNumber <= 0
+        || std::floor(orderIdNumber) != orderIdNumber
+        || orderIdNumber > static_cast<double>(std::numeric_limits<qint64>::max())
+        || !positiveInteger(orderIdValue, orderId)) {
+        return ERR_PARAM;
+    }
 
     QSqlDatabase db = threadDb();
-    if (!db.isOpen()) return ERR_INTERNAL;
+    if (!db.isOpen()) {
+        LOG_E(QStringLiteral("订单结算获取数据库连接失败: %1").arg(db.lastError().text()));
+        return ERR_INTERNAL;
+    }
 
     QSqlQuery begin(db);
     begin.prepare(QStringLiteral("BEGIN IMMEDIATE"));
-    if (!begin.exec()) return ERR_INTERNAL;
+    if (!begin.exec()) {
+        LOG_E(QStringLiteral("开启订单结算立即事务失败: %1").arg(begin.lastError().text()));
+        return ERR_INTERNAL;
+    }
 
     QSqlQuery order(db);
     order.prepare(QStringLiteral(
@@ -313,6 +328,7 @@ static int handleOrderSettle(const Request &req, QJsonObject &out)
     order.addBindValue(orderId);
     order.addBindValue(req.session.id);
     if (!order.exec()) {
+        LOG_E(QStringLiteral("查询待结算订单失败: %1").arg(order.lastError().text()));
         rollback(db);
         return ERR_INTERNAL;
     }
@@ -320,21 +336,30 @@ static int handleOrderSettle(const Request &req, QJsonObject &out)
         rollback(db);
         return ERR_ORDER_NOT_FOUND;
     }
-    if (order.value("status").toInt() != ORDER_TO_SETTLE) {
+    const int orderStatus = order.value("status").toInt();
+    if (orderStatus == ORDER_SETTLED) {
+        rollback(db);
+        return ERR_ORDER_SETTLED;
+    }
+    if (orderStatus != ORDER_TO_SETTLE) {
         rollback(db);
         return ERR_ORDER_STATUS;
     }
 
-    const qint64 amount = order.value("amount").toLongLong();
-    if (amount <= 0) {
+    bool amountOk = false;
+    const qint64 amount = order.value("amount").toLongLong(&amountOk);
+    if (!amountOk || amount < 0) {
+        LOG_E(QStringLiteral("订单金额异常: orderId=%1 amount=%2")
+                  .arg(orderId).arg(amount));
         rollback(db);
-        return ERR_AMOUNT_INVALID;
+        return ERR_INTERNAL;
     }
 
     QSqlQuery user(db);
     user.prepare(QStringLiteral("SELECT balance, status FROM t_user WHERE user_id = ?"));
     user.addBindValue(req.session.id);
     if (!user.exec()) {
+        LOG_E(QStringLiteral("查询结算用户失败: %1").arg(user.lastError().text()));
         rollback(db);
         return ERR_INTERNAL;
     }
@@ -347,7 +372,14 @@ static int handleOrderSettle(const Request &req, QJsonObject &out)
         return ERR_USER_FROZEN;
     }
 
-    const qint64 balance = user.value("balance").toLongLong();
+    bool balanceOk = false;
+    const qint64 balance = user.value("balance").toLongLong(&balanceOk);
+    if (!balanceOk || balance < 0) {
+        LOG_E(QStringLiteral("用户余额异常: userId=%1 balance=%2")
+                  .arg(req.session.id).arg(balance));
+        rollback(db);
+        return ERR_INTERNAL;
+    }
     if (balance < amount) {
         rollback(db);
         return ERR_BALANCE_NOT_ENOUGH;
@@ -356,30 +388,43 @@ static int handleOrderSettle(const Request &req, QJsonObject &out)
     const QString now = nowStr();
     const qint64 balanceAfter = balance - amount;
 
-    QSqlQuery updateUser(db);
-    updateUser.prepare(QStringLiteral(
-        "UPDATE t_user SET balance = ?, update_time = ? WHERE user_id = ?"));
-    updateUser.addBindValue(balanceAfter);
-    updateUser.addBindValue(now);
-    updateUser.addBindValue(req.session.id);
-    if (!updateUser.exec()) {
-        rollback(db);
-        return ERR_INTERNAL;
-    }
+    if (amount > 0) {
+        QSqlQuery updateUser(db);
+        updateUser.prepare(QStringLiteral(
+            "UPDATE t_user SET balance = ?, update_time = ?"
+            " WHERE user_id = ? AND status = ? AND balance >= ?"));
+        updateUser.addBindValue(balanceAfter);
+        updateUser.addBindValue(now);
+        updateUser.addBindValue(req.session.id);
+        updateUser.addBindValue(USER_NORMAL);
+        updateUser.addBindValue(amount);
+        if (!updateUser.exec()) {
+            LOG_E(QStringLiteral("更新结算用户余额失败: %1").arg(updateUser.lastError().text()));
+            rollback(db);
+            return ERR_INTERNAL;
+        }
+        if (updateUser.numRowsAffected() != 1) {
+            LOG_E(QStringLiteral("更新结算用户余额影响行数异常: userId=%1 rows=%2")
+                      .arg(req.session.id).arg(updateUser.numRowsAffected()));
+            rollback(db);
+            return ERR_INTERNAL;
+        }
 
-    QSqlQuery insertTx(db);
-    insertTx.prepare(QStringLiteral(
-        "INSERT INTO t_wallet_tx(user_id, type, amount, balance_after, order_id, remark, create_time)"
-        " VALUES(?, 1, ?, ?, ?, ?, ?)"));
-    insertTx.addBindValue(req.session.id);
-    insertTx.addBindValue(amount);
-    insertTx.addBindValue(balanceAfter);
-    insertTx.addBindValue(orderId);
-    insertTx.addBindValue(QStringLiteral("充电扣费"));
-    insertTx.addBindValue(now);
-    if (!insertTx.exec()) {
-        rollback(db);
-        return ERR_INTERNAL;
+        QSqlQuery insertTx(db);
+        insertTx.prepare(QStringLiteral(
+            "INSERT INTO t_wallet_tx(user_id, type, amount, balance_after, order_id, remark, create_time)"
+            " VALUES(?, 1, ?, ?, ?, ?, ?)"));
+        insertTx.addBindValue(req.session.id);
+        insertTx.addBindValue(amount);
+        insertTx.addBindValue(balanceAfter);
+        insertTx.addBindValue(orderId);
+        insertTx.addBindValue(QStringLiteral("充电扣费"));
+        insertTx.addBindValue(now);
+        if (!insertTx.exec()) {
+            LOG_E(QStringLiteral("写入充电扣费流水失败: %1").arg(insertTx.lastError().text()));
+            rollback(db);
+            return ERR_INTERNAL;
+        }
     }
 
     QSqlQuery updateOrder(db);
@@ -391,19 +436,28 @@ static int handleOrderSettle(const Request &req, QJsonObject &out)
     updateOrder.addBindValue(orderId);
     updateOrder.addBindValue(req.session.id);
     updateOrder.addBindValue(ORDER_TO_SETTLE);
-    if (!updateOrder.exec() || updateOrder.numRowsAffected() != 1) {
+    if (!updateOrder.exec()) {
+        LOG_E(QStringLiteral("更新订单结算状态失败: %1").arg(updateOrder.lastError().text()));
         rollback(db);
-        return ERR_ORDER_STATUS;
+        return ERR_INTERNAL;
+    }
+    if (updateOrder.numRowsAffected() != 1) {
+        LOG_E(QStringLiteral("更新订单结算状态影响行数异常: orderId=%1 rows=%2")
+                  .arg(orderId).arg(updateOrder.numRowsAffected()));
+        rollback(db);
+        return ERR_INTERNAL;
     }
 
     if (!db.commit()) {
+        LOG_E(QStringLiteral("提交订单结算事务失败: %1").arg(db.lastError().text()));
         rollback(db);
         return ERR_INTERNAL;
     }
 
     out["amount"] = amount;
     out["balance"] = balanceAfter;
-    out["settleTime"] = now;
+    LOG_I(QStringLiteral("订单结算成功: userId=%1 orderId=%2 amount=%3 balance=%4")
+              .arg(req.session.id).arg(orderId).arg(amount).arg(balanceAfter));
     return ERR_OK;
 }
 
