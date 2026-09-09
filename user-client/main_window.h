@@ -68,6 +68,7 @@ private:
     void refreshAvatarBadge();
     void updateMineTexts();
     void updateChargeSummary();
+    void focusChargeSettlementArea();
     void setChargeOrder(const QJsonObject &order);
     void clearChargeOrder();
     QString chargeOrderStatusText(int status) const;
@@ -107,6 +108,8 @@ private:
     QLabel      *m_chargeHint = nullptr;
     QTableWidget *m_chargePileTable = nullptr;
     QTableWidget *m_chargeOrderTable = nullptr;
+    QScrollArea *m_chargeScroll = nullptr;
+    QWidget     *m_chargeSettlementSection = nullptr;
     QPushButton *m_chargeRefreshBtn = nullptr;
     QPushButton *m_chargeReserveBtn = nullptr;
     QPushButton *m_chargeStartBtn = nullptr;

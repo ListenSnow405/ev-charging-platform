@@ -558,11 +558,17 @@ QWidget *MainWindow::makeNavPage()
 QWidget *MainWindow::makeChargePage()
 {
     auto *w = new QWidget;
-    auto *lay = new QVBoxLayout(w);
+    m_chargeScroll = new QScrollArea(w);
+    m_chargeScroll->setWidgetResizable(true);
+    m_chargeScroll->setFrameShape(QFrame::NoFrame);
+    m_chargeScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+
+    auto *content = new QWidget(m_chargeScroll);
+    auto *lay = new QVBoxLayout(content);
     lay->setContentsMargins(18, 18, 18, 18);
     lay->setSpacing(12);
 
-    auto *summary = new QFrame(w);
+    auto *summary = new QFrame(content);
     summary->setObjectName(QStringLiteral("Hero"));
     auto *summaryLay = new QVBoxLayout(summary);
     summaryLay->setContentsMargins(18, 18, 18, 18);
@@ -601,7 +607,7 @@ QWidget *MainWindow::makeChargePage()
     summaryLay->addLayout(orderRow);
     summaryLay->addWidget(m_chargeOrderPrice);
 
-    auto *actionCard = new QFrame(w);
+    auto *actionCard = new QFrame(content);
     actionCard->setObjectName(QStringLiteral("Card"));
     auto *actionLay = new QGridLayout(actionCard);
     actionLay->setContentsMargins(16, 16, 16, 16);
@@ -632,7 +638,7 @@ QWidget *MainWindow::makeChargePage()
     actionLay->addWidget(m_chargeSettleBtn, 2, 0);
     actionLay->addWidget(m_chargeCancelBtn, 2, 1);
 
-    auto *pileCard = new QFrame(w);
+    auto *pileCard = new QFrame(content);
     pileCard->setObjectName(QStringLiteral("Card"));
     auto *pileLay = new QVBoxLayout(pileCard);
     pileLay->setContentsMargins(16, 16, 16, 16);
@@ -670,7 +676,8 @@ QWidget *MainWindow::makeChargePage()
     pileLay->addWidget(m_chargeHint);
     pileLay->addWidget(m_chargePileTable);
 
-    auto *orderCard = new QFrame(w);
+    auto *orderCard = new QFrame(content);
+    m_chargeSettlementSection = orderCard;
     orderCard->setObjectName(QStringLiteral("Card"));
     auto *orderLay = new QVBoxLayout(orderCard);
     orderLay->setContentsMargins(16, 16, 16, 16);
@@ -702,6 +709,12 @@ QWidget *MainWindow::makeChargePage()
     lay->addWidget(actionCard);
     lay->addWidget(pileCard, 1);
     lay->addWidget(orderCard, 1);
+    lay->addStretch();
+
+    m_chargeScroll->setWidget(content);
+    auto *pageLay = new QVBoxLayout(w);
+    pageLay->setContentsMargins(0, 0, 0, 0);
+    pageLay->addWidget(m_chargeScroll);
 
     connect(m_chargeRefreshBtn, &QPushButton::clicked, this, [this] {
         requestChargeUnfinishedOrder();
@@ -1472,6 +1485,17 @@ void MainWindow::updateChargeSummary()
     if (m_chargeCancelBtn) m_chargeCancelBtn->setEnabled(hasOrder && status == ecp::ORDER_RESERVED);
 }
 
+void MainWindow::focusChargeSettlementArea()
+{
+    if (!m_tabs || !m_chargeScroll || !m_chargeSettlementSection) return;
+
+    m_tabs->setCurrentIndex(2);
+    QTimer::singleShot(0, this, [this] {
+        if (!m_chargeScroll || !m_chargeSettlementSection) return;
+        m_chargeScroll->ensureWidgetVisible(m_chargeSettlementSection, 0, 16);
+    });
+}
+
 void MainWindow::requestProfile()
 {
     if (!m_net || !m_net->isConnected()) {
@@ -1634,6 +1658,7 @@ void MainWindow::onNetResponse(int cmd, int seq, int code, const QString &msg, c
             if (!m_suppressChargeUnfinishedPrompt) {
                 QMessageBox::information(this, QStringLiteral("提示"),
                                          QStringLiteral("您有未完成的充电订单，请先结算。"));
+                focusChargeSettlementArea();
             }
             m_suppressChargeUnfinishedPrompt = false;
         } else {
