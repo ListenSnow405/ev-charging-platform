@@ -67,6 +67,9 @@ int main(int argc, char *argv[])
     auto *timer = new QTimer(&app);
     QObject::connect(timer, &QTimer::timeout, [&] {
         if (sock->state() != QAbstractSocket::ConnectedState) return;
+        // 心跳：刷新 last_heartbeat，否则服务端 15s 判离线
+        sock->write(encodeFrame(buildRequest(CMD_DEV_HEARTBEAT, ++seq, QString(),
+                                             QJsonObject{{"pileCode", pileCode}})));
         if (charging) kwh += power * 5.0 / 3600.0;   // 5s × kW / 3600s/h = kWh
         sock->write(encodeFrame(buildRequest(CMD_DEV_REPORT, ++seq, QString(), QJsonObject{
             {"pileCode", pileCode},
