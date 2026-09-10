@@ -61,7 +61,7 @@
 | 05 | — | — | — | ⬜ `docs/db-schema-ext-05.sql` |
 | 06 | — | — | — | ⬜ `docs/db-schema-ext-06.sql` |
 | 07 | — | — | — | ⬜ `docs/db-schema-ext-07.sql` |
-| 08 | 3740–3747（**8 个全部实现**） | 6701–6706 | `t_carbon_factor` `t_carbon_daily` `t_carbon_report` | ✅ `docs/db-schema-ext-08.sql`；运行手册 [08-运行手册.md](08-运行手册.md) |
+| 08 | 3740–3748（**9 个全部实现**） | 6701–6707 | `t_carbon_factor` `t_carbon_daily` `t_carbon_report` | ✅ `docs/db-schema-ext-08.sql`；运行手册 [08-运行手册.md](08-运行手册.md) |
 
 ## 放弃 / 移交记录
 

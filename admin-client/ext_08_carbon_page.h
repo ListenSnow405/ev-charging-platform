@@ -105,7 +105,11 @@ private:
     void openFactorDialog();
     void submitFactor(const CarbonFactorForm &form);
     void requestFactorDelete();
-    int  selectedFactorId() const;
+    void requestFactorPurge();
+    // 选中行的因子号与启用状态。返回 false = 没选中任何行
+    bool selectedFactor(int *factorId, bool *enabled) const;
+    QString selectedFactorLabel() const;
+    void updateFactorButtons();
 
     void handleResponse(int cmd, int seq, int code, const QString &msg,
                         const QJsonObject &data);
@@ -115,6 +119,7 @@ private:
     void handleAggregateResponse(int code, const QString &msg, const QJsonObject &data);
     void handleFactorSetResponse(int code, const QString &msg, const QJsonObject &data);
     void handleFactorDeleteResponse(int code, const QString &msg, const QJsonObject &data);
+    void handleFactorPurgeResponse(int code, const QString &msg, const QJsonObject &data);
     void handleReportListResponse(int code, const QString &msg, const QJsonObject &data);
     void handleReportGenResponse(int code, const QString &msg, const QJsonObject &data);
     void handleReportExportResponse(int code, const QString &msg, const QJsonObject &data);
@@ -139,6 +144,7 @@ private:
     QPushButton *m_aggregateButton = nullptr;
     QPushButton *m_addFactorButton = nullptr;
     QPushButton *m_delFactorButton = nullptr;
+    QPushButton *m_purgeFactorButton = nullptr;
     QPushButton *m_genReportButton = nullptr;
     QPushButton *m_exportCsvButton = nullptr;
     QPushButton *m_exportHtmlButton = nullptr;
@@ -167,6 +173,7 @@ private:
     QTimer *m_stationTimer = nullptr;
     QTimer *m_factorSetTimer = nullptr;
     QTimer *m_factorDelTimer = nullptr;
+    QTimer *m_factorPurgeTimer = nullptr;
     QTimer *m_reportListTimer = nullptr;
     QTimer *m_reportGenTimer = nullptr;
     QTimer *m_reportExportTimer = nullptr;
@@ -183,6 +190,7 @@ private:
     int m_aggregateSeq = -1;
     int m_factorSetSeq = -1;
     int m_factorDelSeq = -1;
+    int m_factorPurgeSeq = -1;
     int m_reportListSeq = -1;
     int m_reportGenSeq = -1;
     int m_reportExportSeq = -1;

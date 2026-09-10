@@ -100,22 +100,21 @@ static bool loadTariffPlan(QSqlDatabase &db, TariffPlan *plan)
     return true;
 }
 
-// 读因子，按 effect_from 倒序 —— pickFactor() 取首个命中者，
+// 读**启用中**的因子，按 effect_from 倒序 —— pickFactor() 取首个命中者，
 // 倒序即「最近生效的优先」，与左闭右开区间语义一致。
-// onlyEnabled=false 时连停用的一起读：撤销因子要恢复前驱的生效止，
-// 而前驱本身可能已经是停用状态，漏掉它就修不好时间线。
-static bool loadFactorRows(QSqlDatabase &db, QVector<Factor> *factors, bool onlyEnabled)
+//
+// ⚠ 只读 enabled = 1，且**时间线只由启用因子构成**，撤销与彻底删除的前驱查找也走这一份。
+//   停用的行是历史存根：它的 effect_from / effect_to 停在被停用的那一刻，
+//   不再跟随时间线变化。把它算进时间线，就会出现「两个因子闭合在同一时刻」的假破损
+//   —— 停用因子 [D1, D2) 与被恢复到 D2 的前驱同时命中 D2，
+//   factorClosedAt() 判为破损直接 5001。这是 2026-09-10 修的那个 bug，别改回去。
+static bool loadFactors(QSqlDatabase &db, QVector<Factor> *factors)
 {
     QSqlQuery q(db);
-    q.prepare(onlyEnabled
-        ? QStringLiteral(
-            "SELECT factor_id, region, version, effect_from, effect_to,"
-            " factor_g_per_kwh, source, enabled"
-            " FROM t_carbon_factor WHERE enabled = 1 ORDER BY effect_from DESC")
-        : QStringLiteral(
-            "SELECT factor_id, region, version, effect_from, effect_to,"
-            " factor_g_per_kwh, source, enabled"
-            " FROM t_carbon_factor ORDER BY effect_from DESC"));
+    q.prepare(QStringLiteral(
+        "SELECT factor_id, region, version, effect_from, effect_to,"
+        " factor_g_per_kwh, source, enabled"
+        " FROM t_carbon_factor WHERE enabled = 1 ORDER BY effect_from DESC"));
     if (!q.exec()) {
         LOG_E(QStringLiteral("读取排放因子失败: %1").arg(q.lastError().text()));
         return false;
@@ -133,16 +132,6 @@ static bool loadFactorRows(QSqlDatabase &db, QVector<Factor> *factors, bool only
         factors->append(f);
     }
     return true;
-}
-
-static bool loadFactors(QSqlDatabase &db, QVector<Factor> *factors)
-{
-    return loadFactorRows(db, factors, /*onlyEnabled=*/true);
-}
-
-static bool loadAllFactors(QSqlDatabase &db, QVector<Factor> *factors)
-{
-    return loadFactorRows(db, factors, /*onlyEnabled=*/false);
 }
 
 // 某一天该用哪个因子。裁决 D6 保证因子边界对齐自然日，
@@ -1426,6 +1415,12 @@ static int handleFactorSet(const Request &req, QJsonObject &out)
 //
 //  拒绝撤销最后一个启用的因子：撤了之后什么都算不出来，这种把系统弄瘫的操作
 //  不该让人一次点击就能完成。
+//
+//  ⚠ **对已停用的因子，本命令是幂等空操作**（返回 alreadyDisabled = true，不是错误）。
+//    界面上那一行还在（写着「（停用）」），用户再点一次是完全正常的操作，不该报错；
+//    更要紧的是**绝不能重跑时间线恢复** —— 恢复只在「因子退出启用时间线」那一刻做一次，
+//    重做会把前驱的生效止再改一遍，把一条完好的时间线改出重叠或空洞。
+//    想让这一行彻底消失，用 3748 CMD_EXT_FACTOR_PURGE。
 // -----------------------------------------------------------------------------
 static int handleFactorDelete(const Request &req, QJsonObject &out)
 {
@@ -1462,19 +1457,6 @@ static int handleFactorDelete(const Request &req, QJsonObject &out)
     const QString effectTo   = sel.value(3).isNull() ? QString() : sel.value(3).toString();
     const bool    enabled    = sel.value(4).toInt() != 0;
 
-    // 至少得留一个能用的因子，否则整个模块算不出任何东西
-    QSqlQuery cnt(db);
-    cnt.prepare(QStringLiteral("SELECT COUNT(*) FROM t_carbon_factor WHERE enabled = 1"));
-    if (!cnt.exec() || !cnt.next()) {
-        LOG_E(QStringLiteral("统计启用因子数失败: %1").arg(cnt.lastError().text()));
-        return ERR_INTERNAL;
-    }
-    if (enabled && cnt.value(0).toInt() <= 1) {
-        LOG_W(QStringLiteral("撤销因子 %1/%2: %3").arg(region, version)
-                  .arg(errMsgExt(ERR_CARBON_LAST_FACTOR)));
-        return ERR_CARBON_LAST_FACTOR;
-    }
-
     // ---- 引用统计：决定物理删除还是仅停用 ----
     QSqlQuery refD(db);
     refD.prepare(QStringLiteral(
@@ -1500,12 +1482,43 @@ static int handleFactorDelete(const Request &req, QJsonObject &out)
     const int reportRefs = refR.value(0).toInt();
     const bool referenced = (dailyRefs > 0 || reportRefs > 0);
 
+    // ---- 已经停用：幂等返回，一个字节都不写 ----
+    if (!enabled) {
+        out["factorId"]         = factorId;
+        out["version"]          = version;
+        out["removed"]          = false;
+        out["disabled"]         = true;
+        out["alreadyDisabled"]  = true;      // 客户端据此换一句话说，而不是报错
+        out["restoredFactorId"] = 0;
+        out["dailyRefs"]        = dailyRefs;
+        out["reportRefs"]       = reportRefs;
+        LOG_I(QStringLiteral("因子 %1/%2（id=%3）本就是停用状态，撤销为空操作；"
+                             "时间线未改动（引用 日聚合 %4 行 / 报告 %5 份）")
+                  .arg(region, version).arg(factorId).arg(dailyRefs).arg(reportRefs));
+        return ERR_OK;
+    }
+
+    // 至少得留一个能用的因子，否则整个模块算不出任何东西
+    QSqlQuery cnt(db);
+    cnt.prepare(QStringLiteral("SELECT COUNT(*) FROM t_carbon_factor WHERE enabled = 1"));
+    if (!cnt.exec() || !cnt.next()) {
+        LOG_E(QStringLiteral("统计启用因子数失败: %1").arg(cnt.lastError().text()));
+        return ERR_INTERNAL;
+    }
+    if (cnt.value(0).toInt() <= 1) {
+        LOG_W(QStringLiteral("撤销因子 %1/%2: %3").arg(region, version)
+                  .arg(errMsgExt(ERR_CARBON_LAST_FACTOR)));
+        return ERR_CARBON_LAST_FACTOR;
+    }
+
     // ---- 找出当初被它接续的前驱，撤销时把生效止还回去 ----
-    QVector<Factor> all;
-    if (!loadAllFactors(db, &all)) return ERR_INTERNAL;
-    const int predecessor = factorClosedAt(all, effectFrom, factorId);
+    // 只在启用时间线里找：停用行的 effect_to 是历史存根，算进来会误判为破损（见 loadFactors）
+    QVector<Factor> live;
+    if (!loadFactors(db, &live)) return ERR_INTERNAL;
+    const int predecessor = factorClosedAt(live, effectFrom, factorId);
     if (predecessor < 0) {
-        LOG_E(QStringLiteral("有多个因子闭合在 %1，因子表已处于破损状态，拒绝撤销").arg(effectFrom));
+        LOG_E(QStringLiteral("有多个启用因子闭合在 %1，因子表已处于破损状态，拒绝撤销")
+                  .arg(effectFrom));
         return ERR_INTERNAL;
     }
 
@@ -1555,6 +1568,7 @@ static int handleFactorDelete(const Request &req, QJsonObject &out)
     out["version"]           = version;
     out["removed"]           = !referenced;      // true = 物理删除，false = 仅停用
     out["disabled"]          = referenced;
+    out["alreadyDisabled"]   = false;
     out["restoredFactorId"]  = predecessor;      // 0 = 没有前驱需要恢复
     out["dailyRefs"]         = dailyRefs;
     out["reportRefs"]        = reportRefs;
@@ -1570,6 +1584,226 @@ static int handleFactorDelete(const Request &req, QJsonObject &out)
               .arg(dailyRefs).arg(reportRefs));
     LOG_W(QStringLiteral("因子时间线已变更，受影响日期将在下次 3740 查询时自动重算，"
                          "覆盖这些日期的既有报告会被置为 STALE"));
+    return ERR_OK;
+}
+
+// -----------------------------------------------------------------------------
+//  3748 CMD_EXT_FACTOR_PURGE  彻底删除排放因子版本
+//
+//  3747 撤销是**保守**的：被引用过的因子只停用不删，行留着，历史结果里的
+//  factor_version 才查得到当时用的是多少 g/度、来源是什么 —— 追溯链不能断。
+//
+//  但「这个版本从头到尾就是错的，连同它算出来的东西一起清干净」也是真实需求：
+//  演示前清场、录错的因子把一批日聚合和报告污染了，留着比删掉更容易误导人。
+//  留下一个只能停用的因子，用户就只能上裸 SQL —— 那才是真正危险的做法。
+//  所以给一条明路，但把话说全：
+//
+//    · 因子行本身          → DELETE
+//    · 它算出的日聚合行    → DELETE（factor_version 匹配）
+//    · 引用它的报告快照    → DELETE，连同已导出的文件一起删
+//    · 时间线              → 与 3747 同一套恢复逻辑（仅当它还在启用时间线里）
+//
+//  ⚠ 不可恢复，且**会删掉别人可能正在看的报告**。因此：管理员限定、界面二次确认、
+//    与 3747 拒绝最后一个启用因子同样的兜底。
+//
+//  ⚠ 级联的匹配键是 version 字符串而不是 factor_id —— t_carbon_daily / t_carbon_report
+//    存的就是版本号（不变量 6：快照要能脱离因子表自解释）。建表只保证
+//    UNIQUE(region, version)，于是两个区域用同一个版本号时，级联会误伤对方的历史行。
+//    与其猜，不如拒绝：同版本号存在第二行时返回 6707，让用户先改名再删。
+// -----------------------------------------------------------------------------
+
+// 报告导出文件名是 3744 用整数拼出来的（export/carbon/report_<id>_v<ver>.<fmt>），
+// 所以这里照样用整数重新拼，不去信 output_path 那一列 —— 数据库里的路径字符串
+// 一旦被写坏（或有朝一日变成可配置项），就会变成一条通往任意文件的删除指令。
+static int removeReportExports(int reportId, int version)
+{
+    int removed = 0;
+    const QStringList formats{ QStringLiteral("csv"), QStringLiteral("html") };
+    for (const QString &fmt : formats) {
+        const QString path = QStringLiteral("export/carbon/report_%1_v%2.%3")
+                                 .arg(reportId).arg(version).arg(fmt);
+        if (!QFile::exists(path)) continue;
+        if (QFile::remove(path)) ++removed;
+        else LOG_W(QStringLiteral("删除导出文件 %1 失败，文件残留在服务端磁盘上").arg(path));
+    }
+    return removed;
+}
+
+static int handleFactorPurge(const Request &req, QJsonObject &out)
+{
+    if (req.session.role != ROLE_ADMIN) return ERR_NO_PERMISSION;
+
+    const QJsonValue idValue = req.data.value("factorId");
+    if (!idValue.isDouble()) return ERR_PARAM;
+    const int factorId = idValue.toInt(0);
+    if (factorId <= 0) return ERR_PARAM;
+
+    QSqlDatabase db = threadDb();
+    if (!db.isOpen()) {
+        LOG_E(QStringLiteral("彻底删除排放因子获取数据库连接失败: %1").arg(db.lastError().text()));
+        return ERR_INTERNAL;
+    }
+
+    QSqlQuery sel(db);
+    sel.prepare(QStringLiteral(
+        "SELECT region, version, effect_from, effect_to, enabled"
+        " FROM t_carbon_factor WHERE factor_id = ?"));
+    sel.addBindValue(factorId);
+    if (!sel.exec()) {
+        LOG_E(QStringLiteral("查询因子 %1 失败: %2").arg(factorId).arg(sel.lastError().text()));
+        return ERR_INTERNAL;
+    }
+    if (!sel.next()) {
+        LOG_W(QStringLiteral("彻底删除因子 %1: %2").arg(factorId)
+                  .arg(errMsgExt(ERR_CARBON_FACTOR_NOT_FOUND)));
+        return ERR_CARBON_FACTOR_NOT_FOUND;
+    }
+    const QString region     = sel.value(0).toString();
+    const QString version    = sel.value(1).toString();
+    const QString effectFrom = sel.value(2).toString();
+    const QString effectTo   = sel.value(3).isNull() ? QString() : sel.value(3).toString();
+    const bool    enabled    = sel.value(4).toInt() != 0;
+
+    // 同一个版本号被第二行占着 → 级联按版本号匹配会误伤，拒绝
+    QSqlQuery shared(db);
+    shared.prepare(QStringLiteral(
+        "SELECT COUNT(*) FROM t_carbon_factor WHERE version = ? AND factor_id <> ?"));
+    shared.addBindValue(version);
+    shared.addBindValue(factorId);
+    if (!shared.exec() || !shared.next()) {
+        LOG_E(QStringLiteral("统计同版本号因子失败: %1").arg(shared.lastError().text()));
+        return ERR_INTERNAL;
+    }
+    if (shared.value(0).toInt() > 0) {
+        LOG_W(QStringLiteral("彻底删除因子 %1/%2: %3").arg(region, version)
+                  .arg(errMsgExt(ERR_CARBON_VERSION_SHARED)));
+        return ERR_CARBON_VERSION_SHARED;
+    }
+
+    // 还在启用时间线里的话，删掉之后至少得剩一个能用的因子
+    int predecessor = 0;
+    if (enabled) {
+        QSqlQuery cnt(db);
+        cnt.prepare(QStringLiteral("SELECT COUNT(*) FROM t_carbon_factor WHERE enabled = 1"));
+        if (!cnt.exec() || !cnt.next()) {
+            LOG_E(QStringLiteral("统计启用因子数失败: %1").arg(cnt.lastError().text()));
+            return ERR_INTERNAL;
+        }
+        if (cnt.value(0).toInt() <= 1) {
+            LOG_W(QStringLiteral("彻底删除因子 %1/%2: %3").arg(region, version)
+                      .arg(errMsgExt(ERR_CARBON_LAST_FACTOR)));
+            return ERR_CARBON_LAST_FACTOR;
+        }
+
+        // 时间线恢复与 3747 同源。已停用的因子早在停用那一刻就恢复过了，不能再做第二遍。
+        QVector<Factor> live;
+        if (!loadFactors(db, &live)) return ERR_INTERNAL;
+        predecessor = factorClosedAt(live, effectFrom, factorId);
+        if (predecessor < 0) {
+            LOG_E(QStringLiteral("有多个启用因子闭合在 %1，因子表已处于破损状态，拒绝删除")
+                      .arg(effectFrom));
+            return ERR_INTERNAL;
+        }
+    }
+
+    // 先把要删的报告号读出来：事务提交后才动磁盘文件。
+    // 反过来做的话，事务一回滚，文件已经没了，数据库里却还挂着一份指向空文件的报告。
+    struct ExportRef { int reportId; int version; };
+    QVector<ExportRef> exports;
+    QSqlQuery pick(db);
+    // 报告的 factor_version 可能是 "a/b"（区间跨越多个版本），两端补分隔符再匹配，
+    // 避免 "2023" 命中 "2023-plus" 这类子串。与 3747 的引用统计同一写法。
+    pick.prepare(QStringLiteral(
+        "SELECT report_id, version FROM t_carbon_report"
+        " WHERE ('/' || factor_version || '/') LIKE ('%/' || ? || '/%')"));
+    pick.addBindValue(version);
+    if (!pick.exec()) {
+        LOG_E(QStringLiteral("查询待删报告失败: %1").arg(pick.lastError().text()));
+        return ERR_INTERNAL;
+    }
+    while (pick.next())
+        exports.append({ pick.value(0).toInt(), pick.value(1).toInt() });
+
+    if (!db.transaction()) {
+        LOG_E(QStringLiteral("开启事务失败: %1").arg(db.lastError().text()));
+        return ERR_INTERNAL;
+    }
+
+    if (predecessor > 0) {
+        QSqlQuery reopen(db);
+        reopen.prepare(QStringLiteral(
+            "UPDATE t_carbon_factor SET effect_to = ? WHERE factor_id = ?"));
+        reopen.addBindValue(effectTo.isEmpty() ? QVariant(QMetaType(QMetaType::QString))
+                                               : QVariant(effectTo));
+        reopen.addBindValue(predecessor);
+        if (!reopen.exec()) {
+            LOG_E(QStringLiteral("恢复前驱因子 %1 的生效止失败: %2")
+                      .arg(predecessor).arg(reopen.lastError().text()));
+            db.rollback();
+            return ERR_INTERNAL;
+        }
+    }
+
+    QSqlQuery delR(db);
+    delR.prepare(QStringLiteral(
+        "DELETE FROM t_carbon_report"
+        " WHERE ('/' || factor_version || '/') LIKE ('%/' || ? || '/%')"));
+    delR.addBindValue(version);
+    if (!delR.exec()) {
+        LOG_E(QStringLiteral("删除报告失败: %1").arg(delR.lastError().text()));
+        db.rollback();
+        return ERR_INTERNAL;
+    }
+    const int reportsDeleted = delR.numRowsAffected();
+
+    QSqlQuery delD(db);
+    delD.prepare(QStringLiteral("DELETE FROM t_carbon_daily WHERE factor_version = ?"));
+    delD.addBindValue(version);
+    if (!delD.exec()) {
+        LOG_E(QStringLiteral("删除日聚合失败: %1").arg(delD.lastError().text()));
+        db.rollback();
+        return ERR_INTERNAL;
+    }
+    const int dailyDeleted = delD.numRowsAffected();
+
+    QSqlQuery delF(db);
+    delF.prepare(QStringLiteral("DELETE FROM t_carbon_factor WHERE factor_id = ?"));
+    delF.addBindValue(factorId);
+    if (!delF.exec()) {
+        LOG_E(QStringLiteral("删除因子 %1 失败: %2").arg(factorId).arg(delF.lastError().text()));
+        db.rollback();
+        return ERR_INTERNAL;
+    }
+
+    if (!db.commit()) {
+        LOG_E(QStringLiteral("提交彻底删除失败: %1").arg(db.lastError().text()));
+        db.rollback();
+        return ERR_INTERNAL;
+    }
+
+    // 数据库已经落定，磁盘上的导出件跟着清掉。删不掉只记警告：
+    // 报告行没了，残留文件不会再被任何界面引用，不值得把已提交的删除回滚掉。
+    int filesDeleted = 0;
+    for (const ExportRef &e : exports) filesDeleted += removeReportExports(e.reportId, e.version);
+
+    out["factorId"]         = factorId;
+    out["version"]          = version;
+    out["region"]           = region;
+    out["wasEnabled"]       = enabled;
+    out["dailyDeleted"]     = dailyDeleted;
+    out["reportsDeleted"]   = reportsDeleted;
+    out["filesDeleted"]     = filesDeleted;
+    out["restoredFactorId"] = predecessor;       // 0 = 没有前驱需要恢复
+
+    LOG_W(QStringLiteral("彻底删除排放因子 %1/%2（id=%3）：日聚合 %4 行、报告 %5 份、"
+                         "导出文件 %6 个已永久删除；前驱 %7")
+              .arg(region, version).arg(factorId)
+              .arg(dailyDeleted).arg(reportsDeleted).arg(filesDeleted)
+              .arg(predecessor > 0 ? QStringLiteral("%1 的生效止已恢复为 %2")
+                                         .arg(predecessor)
+                                         .arg(effectTo.isEmpty() ? QStringLiteral("无穷") : effectTo)
+                                   : QStringLiteral("无")));
+    LOG_W(QStringLiteral("被删版本覆盖的日期将在下次 3740 查询时用现行因子重算"));
     return ERR_OK;
 }
 
@@ -1633,10 +1867,11 @@ void registerExt08CarbonService()
     Dispatcher::instance().registerHandler(CMD_EXT_REPORT_EXPORT,    handleReportExport);
     Dispatcher::instance().registerHandler(CMD_EXT_REPORT_LIST,      handleReportList);
     Dispatcher::instance().registerHandler(CMD_EXT_FACTOR_DELETE,    handleFactorDelete);
+    Dispatcher::instance().registerHandler(CMD_EXT_FACTOR_PURGE,     handleFactorPurge);
 
     LOG_I(QStringLiteral("扩展模块 08 碳减排与能源报告已注册: 3740 日指标、3741 因子列表、"
                          "3742 新增因子、3743 生成报告、3744 导出、3745 显式重算、"
-                         "3746 报告列表、3747 撤销因子"));
+                         "3746 报告列表、3747 撤销因子、3748 彻底删除因子"));
 }
 
 } // namespace ecp

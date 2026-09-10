@@ -46,6 +46,7 @@ CMD_EXT_REPORT_EXPORT = 3744
 CMD_EXT_CARBON_AGGREGATE = 3745
 CMD_EXT_REPORT_LIST = 3746
 CMD_EXT_FACTOR_DELETE = 3747
+CMD_EXT_FACTOR_PURGE = 3748
 
 ERR_CARBON_NO_FACTOR = 6701
 ERR_CARBON_FACTOR_OVERLAP = 6702
@@ -53,6 +54,7 @@ ERR_CARBON_REPORT_STALE = 6703
 ERR_CARBON_REPORT_NOT_FOUND = 6704
 ERR_CARBON_FACTOR_NOT_FOUND = 6705
 ERR_CARBON_LAST_FACTOR = 6706
+ERR_CARBON_VERSION_SHARED = 6707
 
 DISCLAIMER = "课程项目估算，非认证碳数据，不可用于碳交易或监管申报"
 ALGO_VERSION = "carbon-v1"
@@ -490,6 +492,95 @@ def validate_factor_delete_write(client, token):
     print(f"[PASS] 3747 撤销：物理删除并还原时间线（前驱 {removed['restoredFactorId']}）")
 
 
+def validate_factor_disable_twice(client, token, date_from, date_to):
+    """回归 2026-09-10 的 bug：对已停用的因子再点一次撤销（仅 --mutating）。
+
+    原来会走两条错路：一是重跑时间线恢复，把前驱的生效止改第二遍；二是停用行
+    留着旧的 effect_to，与被恢复到同一时刻的前驱一起被判成「多个因子闭合在同一
+    时刻 = 破损」，撤下一个因子时直接 5001。这里把整条路铺完再逐项断言。
+    """
+    # 造一个「已被引用」的因子：查一次 3740 就会按它写下日聚合行，撤销时只能停用
+    added = expect_ok(client.request(CMD_EXT_FACTOR_SET, token, {
+        "region": "smoke-停用回归", "version": "smoke-disable-twice",
+        "source": "回归用：被引用后只能停用的因子", "factorGPerKwh": 350,
+        "effectFrom": f"{date_from} 00:00:00"}), CMD_EXT_FACTOR_SET)
+    factor_id = added["factorId"]
+    superseded = added.get("supersededFactorId", 0)
+    expect_ok(client.request(CMD_EXT_CARBON_METRIC, token,
+                             {"stationId": 0, "dateFrom": date_from, "dateTo": date_to}),
+              CMD_EXT_CARBON_METRIC)
+
+    first = expect_ok(client.request(CMD_EXT_FACTOR_DELETE, token, {"factorId": factor_id}),
+                      CMD_EXT_FACTOR_DELETE)
+    require(first["removed"] is False and first["disabled"] is True, CMD_EXT_FACTOR_DELETE,
+            "已被日聚合引用 → 停用而非删除", first)
+    require(first.get("alreadyDisabled") is False, CMD_EXT_FACTOR_DELETE,
+            "首次撤销 alreadyDisabled == False", first)
+    timeline = factor_timeline(client, token)
+
+    second = expect_ok(client.request(CMD_EXT_FACTOR_DELETE, token, {"factorId": factor_id}),
+                       CMD_EXT_FACTOR_DELETE)
+    require(second.get("alreadyDisabled") is True, CMD_EXT_FACTOR_DELETE,
+            "对已停用因子再撤一次 → 幂等空操作而非报错", second)
+    require(second["restoredFactorId"] == 0, CMD_EXT_FACTOR_DELETE,
+            "空操作不得再次恢复前驱", second)
+    require(factor_timeline(client, token) == timeline, CMD_EXT_FACTOR_DELETE,
+            "第二次撤销后时间线逐格不变", factor_timeline(client, token))
+    print("[PASS] 3747 幂等：已停用因子再撤一次不报错、不改时间线")
+
+    # 停用行还留在表里。此时撤销它的后继（前驱刚被恢复到同一时刻）曾误判为破损 → 5001
+    tail = expect_ok(client.request(CMD_EXT_FACTOR_SET, token, {
+        "region": "smoke-停用回归", "version": "smoke-disable-tail",
+        "source": "回归用：停用行的后继", "factorGPerKwh": 360,
+        "effectFrom": f"{date_to} 00:00:00"}), CMD_EXT_FACTOR_SET)
+    undo_tail = expect_ok(client.request(CMD_EXT_FACTOR_DELETE, token,
+                                         {"factorId": tail["factorId"]}), CMD_EXT_FACTOR_DELETE)
+    require(undo_tail["removed"] is True, CMD_EXT_FACTOR_DELETE,
+            "停用行的存在不应把后继的撤销打成 5001", undo_tail)
+    print("[PASS] 3747 不再误判破损：停用行不参与时间线，后继照常撤销")
+
+    # 清场：把这一轮造出来的东西连同日聚合一起删干净，--mutating 才能重复跑
+    purged = expect_ok(client.request(CMD_EXT_FACTOR_PURGE, token, {"factorId": factor_id}),
+                       CMD_EXT_FACTOR_PURGE)
+    require(purged["dailyDeleted"] > 0, CMD_EXT_FACTOR_PURGE,
+            "彻底删除应连同它算出的日聚合一起清掉", purged)
+    if superseded:
+        require(purged["restoredFactorId"] == 0, CMD_EXT_FACTOR_PURGE,
+                "停用因子早已退出时间线，彻底删除不该再恢复一次前驱", purged)
+    require(all(f["factorId"] != factor_id for f in
+                expect_ok(client.request(CMD_EXT_FACTOR_LIST, token, {}),
+                          CMD_EXT_FACTOR_LIST)["list"]),
+            CMD_EXT_FACTOR_PURGE, "彻底删除后因子行消失", purged)
+    print(f"[PASS] 3748 彻底删除：因子行 + {purged['dailyDeleted']} 行日聚合"
+          f" + {purged['reportsDeleted']} 份报告已永久清除")
+
+
+def validate_factor_purge_guards(client, token, existing):
+    """3748 的只读拒绝路径 —— 不改动任何因子。"""
+    for payload in ({}, {"factorId": "1"}, {"factorId": 0}, {"factorId": -3}):
+        response = client.request(CMD_EXT_FACTOR_PURGE, token, payload)
+        require(response["code"] == ERR_PARAM, CMD_EXT_FACTOR_PURGE,
+                f"入参 {payload} → ERR_PARAM({ERR_PARAM})", response["code"])
+    response = client.request(CMD_EXT_FACTOR_PURGE, token, {"factorId": 999999})
+    require(response["code"] == ERR_CARBON_FACTOR_NOT_FOUND, CMD_EXT_FACTOR_PURGE,
+            f"不存在的 factorId → {ERR_CARBON_FACTOR_NOT_FOUND}", response["code"])
+    enabled = [f for f in existing if f["enabled"]]
+    if len(enabled) == 1:
+        response = client.request(CMD_EXT_FACTOR_PURGE, token,
+                                  {"factorId": enabled[0]["factorId"]})
+        require(response["code"] == ERR_CARBON_LAST_FACTOR, CMD_EXT_FACTOR_PURGE,
+                f"删最后一个启用因子 → {ERR_CARBON_LAST_FACTOR}", response["code"])
+        print("[PASS] 3748 拒绝路径：非法入参、不存在(6705)、最后一个启用因子(6706)")
+    else:
+        print("[PASS] 3748 拒绝路径：非法入参、不存在(6705)　[SKIP] 6706（当前有多个启用因子）")
+
+
+def factor_timeline(client, token):
+    """因子表的可比较快照，用于断言「时间线逐格不变」。"""
+    rows = expect_ok(client.request(CMD_EXT_FACTOR_LIST, token, {}), CMD_EXT_FACTOR_LIST)["list"]
+    return sorted((r["factorId"], r["effectFrom"], r["effectTo"], r["enabled"]) for r in rows)
+
+
 def validate_empty_range(client, token):
     """空日期范围必须返回空结果而不是崩溃或伪造 100% 完整度。"""
     data = expect_ok(client.request(CMD_EXT_CARBON_METRIC, token,
@@ -642,6 +733,7 @@ def run_smoke(host, port, account, password, args):
         validate_no_factor(client, token)
         validate_factor_set_guards(client, token, factors)
         validate_factor_delete_guards(client, token, factors)
+        validate_factor_purge_guards(client, token, factors)
         if args.mutating:
             validate_factor_delete_write(client, token)
             validate_factor_set_write(client, token, factors)
@@ -658,8 +750,10 @@ def run_smoke(host, port, account, password, args):
             print(f"[SKIP] 未找到 {args.db}，跳过 SQLite 对拍")
         if args.mutating:
             validate_report_write(client, token, date_from, date_to)
+            validate_factor_disable_twice(client, token, date_from, date_to)
         else:
             print("[SKIP] 3743/3744 写入测试需 --mutating（会生成报告行与导出文件）")
+            print("[SKIP] 3747 幂等 / 3748 彻底删除写入测试需 --mutating")
 
         totals = metric["totals"]
         print(f"\n汇总：电量 {totals['totalKwhX100'] / 100:.2f} 度　"

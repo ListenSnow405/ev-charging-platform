@@ -52,6 +52,8 @@ namespace {
 
 constexpr int READ_RESPONSE_TIMEOUT_MS = 30000;   // 首次懒聚合要跑全量，比总览页给得宽
 constexpr int NOT_APPLICABLE = -1;
+// 因子行的启用状态挂在第 0 列上（factorId 用 Qt::UserRole，这里顺延一个）
+constexpr int FACTOR_ENABLED_ROLE = Qt::UserRole + 1;
 const char *const DATE_FMT = "yyyy-MM-dd";
 
 // 三处必须逐字一致：页眉、导出文件头、快照 JSON（实现规划第 2 节）
@@ -285,11 +287,26 @@ Ext08CarbonPage::Ext08CarbonPage(NetClient *net, QWidget *parent)
     connect(m_factorDelTimer, &QTimer::timeout, this, [this] {
         if (m_factorDelSeq < 0) return;
         m_factorDelSeq = -1;
-        m_delFactorButton->setEnabled(true);
+        updateFactorButtons();
         m_actionNote = QStringLiteral(
             "撤销因子响应超时，操作结果未知；请核对刷新后的因子列表再决定是否重试。");
         updateStatusLabel();
         requestFactorList();
+    });
+
+    m_factorPurgeTimer = new QTimer(this);
+    m_factorPurgeTimer->setSingleShot(true);
+    connect(m_factorPurgeTimer, &QTimer::timeout, this, [this] {
+        if (m_factorPurgeSeq < 0) return;
+        m_factorPurgeSeq = -1;
+        updateFactorButtons();
+        // 删除不可逆，也没有幂等键：结果未知时**不能**建议直接重试 ——
+        // 万一服务端其实已经删掉了，重试删的就是另一个东西。先看列表。
+        m_actionNote = QStringLiteral(
+            "彻底删除响应超时，操作结果未知；请先核对刷新后的因子与报告列表，不要盲目重试。");
+        updateStatusLabel();
+        requestFactorList();
+        requestReportList();
     });
 
     connect(m_net, &NetClient::response, this, &Ext08CarbonPage::handleResponse);
@@ -498,8 +515,18 @@ void Ext08CarbonPage::setupUi()
     m_delFactorButton->setToolTip(QStringLiteral(
         "撤销后该版本不再参与计算，时间线会自动恢复。\n"
         "若它已被历史结果引用，会保留为「停用」以便追溯；没有引用才真正删除。"));
+    // 不可逆操作单独一颗按钮并染红：它和「撤销」隔着一整条追溯链的距离，
+    // 长得一样、挨在一起，迟早有人点错
+    m_purgeFactorButton = new QPushButton(QStringLiteral("彻底删除"), factorGroup);
+    m_purgeFactorButton->setStyleSheet(QStringLiteral(
+        "QPushButton { color:#a8071a; }"
+        "QPushButton:disabled { color:#bfbfbf; }"));
+    m_purgeFactorButton->setToolTip(QStringLiteral(
+        "永久删除该版本，连同它算出的日聚合与引用它的报告（含已导出文件）。\n"
+        "不可恢复，历史结果里将再也查不到这个版本的因子值与来源。"));
     factorToolbar->addWidget(m_addFactorButton);
     factorToolbar->addWidget(m_delFactorButton);
+    factorToolbar->addWidget(m_purgeFactorButton);
     factorLayout->addLayout(factorToolbar);
     sideLayout->addWidget(factorGroup, 1);
 
@@ -550,6 +577,10 @@ void Ext08CarbonPage::setupUi()
     connect(m_aggregateButton, &QPushButton::clicked, this, &Ext08CarbonPage::requestAggregate);
     connect(m_addFactorButton, &QPushButton::clicked, this, &Ext08CarbonPage::openFactorDialog);
     connect(m_delFactorButton, &QPushButton::clicked, this, &Ext08CarbonPage::requestFactorDelete);
+    connect(m_purgeFactorButton, &QPushButton::clicked, this, &Ext08CarbonPage::requestFactorPurge);
+    connect(m_factorTable, &QTableWidget::itemSelectionChanged,
+            this, &Ext08CarbonPage::updateFactorButtons);
+    updateFactorButtons();                    // 初始无选中行，两颗按钮都该是灰的
     connect(m_genReportButton,  &QPushButton::clicked, this, &Ext08CarbonPage::requestReportGen);
     connect(m_exportCsvButton,  &QPushButton::clicked, this,
             [this] { requestReportExport(QStringLiteral("csv"), false); });
@@ -787,27 +818,71 @@ void Ext08CarbonPage::submitFactor(const CarbonFactorForm &form)
     m_factorSetTimer->start(READ_RESPONSE_TIMEOUT_MS);
 }
 
-int Ext08CarbonPage::selectedFactorId() const
+bool Ext08CarbonPage::selectedFactor(int *factorId, bool *enabled) const
 {
     const int row = m_factorTable->currentRow();
-    if (row < 0 || !m_factorTable->item(row, 0)) return -1;
-    return m_factorTable->item(row, 0)->data(Qt::UserRole).toInt();
+    const QTableWidgetItem *item = (row < 0) ? nullptr : m_factorTable->item(row, 0);
+    if (!item || !m_factorTable->item(row, 0)->isSelected()) return false;
+    *factorId = item->data(Qt::UserRole).toInt();
+    *enabled  = item->data(FACTOR_ENABLED_ROLE).toBool();
+    return *factorId > 0;
+}
+
+// 确认框里给人看的名字：区域 / 版本。取不到就返回空串，调用方据此放弃操作
+QString Ext08CarbonPage::selectedFactorLabel() const
+{
+    const int row = m_factorTable->currentRow();
+    if (row < 0) return QString();
+    const QTableWidgetItem *regionItem  = m_factorTable->item(row, 0);
+    const QTableWidgetItem *versionItem = m_factorTable->item(row, 1);
+    if (!regionItem || !versionItem) return QString();
+    return QStringLiteral("%1 / %2").arg(regionItem->text(), versionItem->text());
+}
+
+// 选中行变了就重算两颗按钮的可用性。
+// ⚠ 已停用的版本不给点「撤销」：服务端那边是幂等空操作（3747 返回 alreadyDisabled），
+//   但按钮亮着就等于在说「这里还有事可做」，用户点完什么也没变，只会以为撤销失灵。
+//   要让它彻底消失，走旁边的「彻底删除」。
+void Ext08CarbonPage::updateFactorButtons()
+{
+    int factorId = 0;
+    bool factorEnabled = false;
+    const bool has  = selectedFactor(&factorId, &factorEnabled);
+    const bool busy = (m_factorDelSeq >= 0 || m_factorPurgeSeq >= 0);
+
+    m_delFactorButton->setEnabled(has && factorEnabled && !busy);
+    m_purgeFactorButton->setEnabled(has && !busy);
+
+    if (has && !factorEnabled) {
+        m_delFactorButton->setToolTip(QStringLiteral(
+            "该版本已经是「停用」状态，没有可撤销的内容。\n"
+            "如需连同它算出的日聚合与报告一起清掉，请用右侧「彻底删除」。"));
+    } else {
+        m_delFactorButton->setToolTip(QStringLiteral(
+            "撤销后该版本不再参与计算，时间线会自动恢复。\n"
+            "若它已被历史结果引用，会保留为「停用」以便追溯；没有引用才真正删除。"));
+    }
 }
 
 void Ext08CarbonPage::requestFactorDelete()
 {
-    const int factorId = selectedFactorId();
-    if (factorId <= 0) {
+    int factorId = 0;
+    bool factorEnabled = false;
+    if (!selectedFactor(&factorId, &factorEnabled)) {
         QMessageBox::information(this, QStringLiteral("撤销因子版本"),
                                  QStringLiteral("请先在因子列表里选中一行。"));
         return;
     }
-    const int row = m_factorTable->currentRow();
-    const QTableWidgetItem *regionItem = m_factorTable->item(row, 0);
-    const QTableWidgetItem *versionItem = m_factorTable->item(row, 1);
-    if (!regionItem || !versionItem) return;      // 表结构异常时宁可什么都不做，也不要解引用空指针
-    const QString label = QStringLiteral("%1 / %2")
-        .arg(regionItem->text(), versionItem->text());
+    // 按钮平时就置灰了，这里是兜底：列表刷新与点击之间存在时间差
+    if (!factorEnabled) {
+        QMessageBox::information(this, QStringLiteral("撤销因子版本"),
+            QStringLiteral("「%1」已经是停用状态，无需再次撤销。\n\n"
+                           "如需连同它算出的日聚合与报告一起永久清除，请使用「彻底删除」。")
+                .arg(selectedFactorLabel()));
+        return;
+    }
+    const QString label = selectedFactorLabel();
+    if (label.isEmpty()) return;                  // 表结构异常时宁可什么都不做
 
     // 说清楚会发生什么再动手：撤销会改变时间线，进而改变历史日期的排放结果
     const auto answer = QMessageBox::question(this, QStringLiteral("撤销因子版本"),
@@ -820,20 +895,72 @@ void Ext08CarbonPage::requestFactorDelete()
         QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
     if (answer != QMessageBox::Yes) return;
 
-    m_delFactorButton->setEnabled(false);
-    m_actionNote = QStringLiteral("正在撤销排放因子…");
-    updateStatusLabel();
-
     const int seq = m_net->send(ecp::CMD_EXT_FACTOR_DELETE, QJsonObject{
         { QStringLiteral("factorId"), factorId } });
     if (seq < 0) {
-        m_delFactorButton->setEnabled(true);
         m_actionNote = QStringLiteral("撤销请求发送失败，请检查网络连接");
         updateStatusLabel();
         return;
     }
     m_factorDelSeq = seq;
+    m_actionNote = QStringLiteral("正在撤销排放因子…");
+    updateFactorButtons();                    // 请求在途，两颗按钮一起锁上
+    updateStatusLabel();
     if (m_factorDelTimer) m_factorDelTimer->start(READ_RESPONSE_TIMEOUT_MS);
+}
+
+// -----------------------------------------------------------------------------
+//  3748 彻底删除
+//
+//  与「撤销」的分界：撤销保追溯（被引用过就只停用，行留着），
+//  彻底删除是清场 —— 因子行、它算出的日聚合、引用它的报告快照与导出文件一起没。
+//  所以确认框必须把「会连报告一起删」摆在最显眼的位置：
+//  用户脑子里想的多半只是「把这条因子删掉」，不会想到报告列表也会少几行。
+// -----------------------------------------------------------------------------
+void Ext08CarbonPage::requestFactorPurge()
+{
+    int factorId = 0;
+    bool factorEnabled = false;
+    if (!selectedFactor(&factorId, &factorEnabled)) {
+        QMessageBox::information(this, QStringLiteral("彻底删除因子版本"),
+                                 QStringLiteral("请先在因子列表里选中一行。"));
+        return;
+    }
+    const QString label = selectedFactorLabel();
+    if (label.isEmpty()) return;
+
+    QMessageBox box(this);
+    box.setIcon(QMessageBox::Warning);
+    box.setWindowTitle(QStringLiteral("彻底删除因子版本"));
+    box.setText(QStringLiteral("确定永久删除「%1」吗？此操作不可恢复。").arg(label));
+    box.setInformativeText(QStringLiteral(
+        "以下内容会被一并删除：\n"
+        "· 该排放因子版本本身\n"
+        "· 用它算出的全部日聚合行\n"
+        "· 引用它的全部报告快照，连同已导出的 CSV / HTML 文件\n\n"
+        "删除后这些日期会在下次查询时用现行因子重算，"
+        "但那些报告里的历史数字找不回来。\n"
+        "只想让它不再参与计算，请改用「撤销选中版本」。%1")
+            .arg(factorEnabled ? QStringLiteral("\n\n注意：该版本目前仍在生效时间线内，"
+                                                "删除后时间线会自动闭合。")
+                               : QString()));
+    box.setStandardButtons(QMessageBox::Yes | QMessageBox::Cancel);
+    box.setDefaultButton(QMessageBox::Cancel);        // 默认停在「取消」上，别让回车键替人做决定
+    box.button(QMessageBox::Yes)->setText(QStringLiteral("永久删除"));
+    if (box.exec() != QMessageBox::Yes) return;
+
+    const int seq = m_net->send(ecp::CMD_EXT_FACTOR_PURGE, QJsonObject{
+        { QStringLiteral("factorId"), factorId } });
+    if (seq < 0) {
+        m_actionNote = QStringLiteral("删除请求发送失败，请检查网络连接");
+        updateStatusLabel();
+        return;
+    }
+    m_factorPurgeSeq = seq;
+    m_actionNote = QStringLiteral("正在彻底删除排放因子…");
+    updateFactorButtons();
+    updateStatusLabel();
+    if (m_factorPurgeTimer) m_factorPurgeTimer->start(READ_RESPONSE_TIMEOUT_MS);
 }
 
 // -----------------------------------------------------------------------------
@@ -857,6 +984,9 @@ QString Ext08CarbonPage::describeError(int code, const QString &serverMsg)
     case ecp::ERR_CARBON_LAST_FACTOR:
         return QStringLiteral("这是最后一个启用的排放因子。撤销后将无法计算任何排放，"
                               "请先新增一个替代版本");
+    case ecp::ERR_CARBON_VERSION_SHARED:
+        return QStringLiteral("有多个区域的因子共用这个版本号，按版本号级联删除会误伤"
+                              "别人的历史数据。请先把其中一个改成不重名的版本再删");
     default:
         break;
     }
@@ -903,6 +1033,12 @@ void Ext08CarbonPage::handleResponse(int cmd, int seq, int code, const QString &
         handleFactorDeleteResponse(code, msg, data);
         return;
     }
+    if (cmd == ecp::CMD_EXT_FACTOR_PURGE && seq == m_factorPurgeSeq) {
+        if (m_factorPurgeTimer) m_factorPurgeTimer->stop();
+        m_factorPurgeSeq = -1;
+        handleFactorPurgeResponse(code, msg, data);
+        return;
+    }
     if (cmd == ecp::CMD_EXT_REPORT_LIST && seq == m_reportListSeq) {
         m_reportListTimer->stop();
         m_reportListSeq = -1;
@@ -928,7 +1064,7 @@ void Ext08CarbonPage::handleResponse(int cmd, int seq, int code, const QString &
 void Ext08CarbonPage::handleFactorDeleteResponse(int code, const QString &msg,
                                                 const QJsonObject &data)
 {
-    m_delFactorButton->setEnabled(true);
+    updateFactorButtons();
     if (code != ecp::ERR_OK) {
         m_actionNote.clear();
         updateStatusLabel();
@@ -937,6 +1073,14 @@ void Ext08CarbonPage::handleFactorDeleteResponse(int code, const QString &msg,
     }
 
     const QString version = data.value(QStringLiteral("version")).toString();
+    // 服务端认定这一版本本来就是停用的：空操作，不是失败，也没动时间线。
+    // 老版本服务端不带这个字段，取不到即 false，行为与从前一致。
+    if (data.value(QStringLiteral("alreadyDisabled")).toBool()) {
+        m_actionNote = QStringLiteral("因子版本 %1 本来就是停用状态，未做任何改动").arg(version);
+        updateStatusLabel();
+        requestFactorList();
+        return;
+    }
     const int restored = data.value(QStringLiteral("restoredFactorId")).toInt();
     const QString restoreNote = restored > 0
         ? QStringLiteral("，已恢复因子 %1 的生效区间").arg(restored) : QString();
@@ -955,6 +1099,32 @@ void Ext08CarbonPage::handleFactorDeleteResponse(int code, const QString &msg,
     updateStatusLabel();
     requestFactorList();
     requestMetric();          // 时间线变了，重查一次让重算与 STALE 角标立刻可见
+}
+
+void Ext08CarbonPage::handleFactorPurgeResponse(int code, const QString &msg,
+                                               const QJsonObject &data)
+{
+    updateFactorButtons();
+    if (code != ecp::ERR_OK) {
+        m_actionNote.clear();
+        updateStatusLabel();
+        QMessageBox::warning(this, QStringLiteral("彻底删除失败"), describeError(code, msg));
+        return;
+    }
+
+    const QString version = data.value(QStringLiteral("version")).toString();
+    const int restored = data.value(QStringLiteral("restoredFactorId")).toInt();
+    m_actionNote = QStringLiteral("已彻底删除因子版本 %1：日聚合 %2 行、报告 %3 份、导出文件 %4 个%5")
+                       .arg(version)
+                       .arg(data.value(QStringLiteral("dailyDeleted")).toInt())
+                       .arg(data.value(QStringLiteral("reportsDeleted")).toInt())
+                       .arg(data.value(QStringLiteral("filesDeleted")).toInt())
+                       .arg(restored > 0 ? QStringLiteral("，已恢复因子 %1 的生效区间").arg(restored)
+                                         : QString());
+    updateStatusLabel();
+    requestFactorList();
+    requestReportList();      // 报告被删掉了几份，列表必须立刻跟上
+    requestMetric();          // 日聚合被删，当前范围要用现行因子重算一遍
 }
 
 void Ext08CarbonPage::handleReportListResponse(int code, const QString &msg,
@@ -1236,6 +1406,8 @@ void Ext08CarbonPage::handleFactorListResponse(int code, const QString &msg,
         auto *regionItem = cell(item.value(QStringLiteral("region")).toString());
         // factorId 不占一列（区域/版本才是人看的），挂在 UserRole 上供撤销时取用
         regionItem->setData(Qt::UserRole, item.value(QStringLiteral("factorId")).toInt());
+        // 启用状态同样挂在行上：撤销按钮要据此置灰，不能只在文本里写「（停用）」
+        regionItem->setData(FACTOR_ENABLED_ROLE, enabled);
         m_factorTable->setItem(row, 0, regionItem);
         m_factorTable->setItem(row, 1, cell(item.value(QStringLiteral("version")).toString()
                                             + (enabled ? QString() : QStringLiteral("（停用）"))));
@@ -1252,6 +1424,7 @@ void Ext08CarbonPage::handleFactorListResponse(int code, const QString &msg,
     }
     m_factorState = LoadState::Success;
     m_factorError.clear();
+    updateFactorButtons();                    // 刷新会清掉选中行，按钮态跟着回到「未选中」
     updateStatusLabel();
 }
 
