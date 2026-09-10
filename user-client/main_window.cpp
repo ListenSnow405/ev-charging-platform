@@ -6,6 +6,7 @@
 #include "webengine_env.h"
 
 #include <algorithm>
+#include <cmath>
 #include <QAbstractItemView>
 #include <QComboBox>
 #include <QFrame>
@@ -125,11 +126,8 @@ static QString formatMoney(qint64 fen)
     return QStringLiteral("%1 元").arg(ecp::fenToYuan(fen));
 }
 
-static QString formatElapsedTime(const QString &startTime, const QString &endTime = QString())
+static QString formatDuration(qint64 seconds)
 {
-    if (startTime.isEmpty()) return QStringLiteral("-");
-    const QString end = endTime.isEmpty() ? ecp::nowStr() : endTime;
-    const qint64 seconds = ecp::secondsBetween(startTime, end);
     if (seconds < 0) return QStringLiteral("-");
     const qint64 hours = seconds / 3600;
     const qint64 minutes = (seconds % 3600) / 60;
@@ -138,24 +136,6 @@ static QString formatElapsedTime(const QString &startTime, const QString &endTim
         .arg(hours, 2, 10, QLatin1Char('0'))
         .arg(minutes, 2, 10, QLatin1Char('0'))
         .arg(secs, 2, 10, QLatin1Char('0'));
-}
-
-static qint64 estimateChargeAmountFen(const QJsonObject &order)
-{
-    const int status = order.value(QStringLiteral("status")).toInt(-1);
-    const qint64 amountFen = order.value(QStringLiteral("amount")).toVariant().toLongLong();
-    if (status != ecp::ORDER_CHARGING) return amountFen;
-
-    const qint64 priceFen = order.value(QStringLiteral("price")).toVariant().toLongLong();
-    const qreal powerKw = order.value(QStringLiteral("power")).toDouble(-1.0);
-    const QString startTime = order.value(QStringLiteral("startTime")).toString();
-    if (priceFen <= 0 || powerKw <= 0.0 || startTime.isEmpty()) return amountFen;
-
-    qint64 seconds = ecp::secondsBetween(startTime, ecp::nowStr());
-    if (seconds <= 0) seconds = 1;
-    qint64 kwhX100 = static_cast<qint64>(powerKw * seconds * 100.0 / 3600.0 + 0.5);
-    if (kwhX100 <= 0) kwhX100 = 1;
-    return (priceFen * kwhX100 + 50) / 100;
 }
 
 static QString stationLoadLabel(const QJsonObject &item)
@@ -275,6 +255,7 @@ MainWindow::MainWindow(NetClient *net, QWidget *parent)
     lay->addWidget(m_tabs);
 
     connect(m_net, &NetClient::response, this, &MainWindow::onNetResponse);
+    connect(m_net, &NetClient::push, this, &MainWindow::onNetPush);
     connect(m_net, &NetClient::disconnected, this, &MainWindow::onNetDisconnected);
     connect(m_tabs, &QTabWidget::currentChanged, this, [this](int index) {
         if (index == 2) {
@@ -627,12 +608,15 @@ QWidget *MainWindow::makeChargePage()
     m_chargeOrderMeta->setWordWrap(true);
     m_chargeOrderMoney = new QLabel(QStringLiteral("费用：-"), summary);
     m_chargeOrderMoney->setWordWrap(true);
+    m_chargeOrderEnergy = new QLabel(QStringLiteral("电量：-"), summary);
+    m_chargeOrderEnergy->setWordWrap(true);
     m_chargeOrderTime = new QLabel(QStringLiteral("已充电时长：-"), summary);
     m_chargeOrderTime->setWordWrap(true);
     m_chargeOrderPrice = new QLabel(QStringLiteral("单价：-"), summary);
     m_chargeOrderPrice->setWordWrap(true);
     orderRow->addWidget(m_chargeOrderMeta, 1);
     orderRow->addWidget(m_chargeOrderMoney, 0);
+    orderRow->addWidget(m_chargeOrderEnergy, 0);
     orderRow->addWidget(m_chargeOrderTime, 0);
 
     summaryLay->addWidget(title);
@@ -802,11 +786,6 @@ QWidget *MainWindow::makeChargePage()
         m_pendingChargeCancelSeq = m_net->send(ecp::CMD_ORDER_CANCEL,
                                                QJsonObject{{QStringLiteral("orderId"), m_chargeOrderId}});
     });
-
-    m_chargeSummaryTimer = new QTimer(this);
-    m_chargeSummaryTimer->setInterval(1000);
-    connect(m_chargeSummaryTimer, &QTimer::timeout, this, &MainWindow::updateChargeSummary);
-    m_chargeSummaryTimer->start();
 
     updateChargeSummary();
     requestChargeUnfinishedOrder();
@@ -1483,6 +1462,13 @@ void MainWindow::setChargeOrder(const QJsonObject &order)
     m_chargeOrder = order;
     m_chargeOrderId = order.value(QStringLiteral("orderId")).toVariant().toLongLong();
     m_selectedChargePileId = order.value(QStringLiteral("pileId")).toVariant().toLongLong();
+    if (!m_pendingChargePush.isEmpty()
+        && m_pendingChargePush.value(QStringLiteral("orderId")).toVariant().toLongLong()
+               == m_chargeOrderId) {
+        const QJsonObject pending = m_pendingChargePush;
+        m_pendingChargePush = QJsonObject();
+        applyChargeProgressPush(pending);
+    }
     updateChargeSummary();
     renderChargePiles();
 }
@@ -1490,6 +1476,7 @@ void MainWindow::setChargeOrder(const QJsonObject &order)
 void MainWindow::clearChargeOrder()
 {
     m_chargeOrder = QJsonObject();
+    m_pendingChargePush = QJsonObject();
     m_chargeOrderId = -1;
     updateChargeSummary();
     renderChargePiles();
@@ -1522,17 +1509,35 @@ void MainWindow::updateChargeSummary()
             m_chargeOrderMoney->setText(QStringLiteral("费用：-"));
         } else {
             m_chargeOrderMoney->setText(QStringLiteral("费用：%1")
-                                        .arg(formatMoney(estimateChargeAmountFen(m_chargeOrder))));
+                                        .arg(formatMoney(m_chargeOrder.value(QStringLiteral("amount"))
+                                                             .toVariant().toLongLong())));
+        }
+    }
+    if (m_chargeOrderEnergy) {
+        if (m_chargeOrder.isEmpty()) {
+            m_chargeOrderEnergy->setText(QStringLiteral("电量：-"));
+        } else {
+            const double kwh = m_chargeOrder.value(QStringLiteral("kwh")).toDouble(0.0);
+            m_chargeOrderEnergy->setText(QStringLiteral("电量：%1 kWh")
+                                         .arg(QString::number(kwh, 'f', 2)));
         }
     }
     if (m_chargeOrderTime) {
         if (m_chargeOrder.isEmpty()) {
             m_chargeOrderTime->setText(QStringLiteral("已充电时长：-"));
         } else {
-            const QString startTime = m_chargeOrder.value(QStringLiteral("startTime")).toString();
-            const QString endTime = m_chargeOrder.value(QStringLiteral("endTime")).toString();
+            qint64 duration = m_chargeOrder.value(QStringLiteral("duration")).toInteger(-1);
+            if (duration < 0
+                && m_chargeOrder.value(QStringLiteral("status")).toInt(-1)
+                       != ecp::ORDER_CHARGING) {
+                const QString startTime = m_chargeOrder.value(QStringLiteral("startTime")).toString();
+                const QString endTime = m_chargeOrder.value(QStringLiteral("endTime")).toString();
+                if (!startTime.isEmpty() && !endTime.isEmpty()) {
+                    duration = ecp::secondsBetween(startTime, endTime);
+                }
+            }
             m_chargeOrderTime->setText(QStringLiteral("已充电时长：%1")
-                                       .arg(formatElapsedTime(startTime, endTime)));
+                                       .arg(formatDuration(duration)));
         }
     }
     if (m_chargeOrderPrice) {
@@ -1806,6 +1811,9 @@ void MainWindow::onNetResponse(int cmd, int seq, int code, const QString &msg, c
         if (!m_chargeOrder.isEmpty()) {
             m_chargeOrder[QStringLiteral("status")] = ecp::ORDER_CHARGING;
             m_chargeOrder[QStringLiteral("startTime")] = data.value(QStringLiteral("startTime"));
+            m_chargeOrder[QStringLiteral("kwh")] = 0.0;
+            m_chargeOrder[QStringLiteral("amount")] = 0;
+            m_chargeOrder[QStringLiteral("duration")] = 0;
         }
         setStatus(QStringLiteral("充电已开始"));
         requestChargeOrders();
@@ -1825,6 +1833,12 @@ void MainWindow::onNetResponse(int cmd, int seq, int code, const QString &msg, c
             m_chargeOrder[QStringLiteral("endTime")] = data.value(QStringLiteral("endTime"));
             m_chargeOrder[QStringLiteral("kwh")] = data.value(QStringLiteral("kwh"));
             m_chargeOrder[QStringLiteral("amount")] = data.value(QStringLiteral("amount"));
+            const QString startTime = m_chargeOrder.value(QStringLiteral("startTime")).toString();
+            const QString endTime = data.value(QStringLiteral("endTime")).toString();
+            if (!startTime.isEmpty() && !endTime.isEmpty()) {
+                m_chargeOrder[QStringLiteral("duration")] =
+                    ecp::secondsBetween(startTime, endTime);
+            }
         }
         setStatus(QStringLiteral("已结束充电，等待结算"));
         QMessageBox::information(this, QStringLiteral("提示"),
@@ -1856,6 +1870,60 @@ void MainWindow::onNetResponse(int cmd, int seq, int code, const QString &msg, c
         requestChargeOrders();
         return;
     }
+}
+
+void MainWindow::onNetPush(int cmd, const QJsonObject &data)
+{
+    if (cmd != ecp::CMD_ORDER_PUSH) return;
+    applyChargeProgressPush(data);
+}
+
+void MainWindow::applyChargeProgressPush(const QJsonObject &data)
+{
+    const qint64 orderId = data.value(QStringLiteral("orderId")).toInteger(-1);
+    const double kwh = data.value(QStringLiteral("kwh")).toDouble(-1.0);
+    const qint64 amount = data.value(QStringLiteral("amount")).toInteger(-1);
+    const qint64 duration = data.value(QStringLiteral("duration")).toInteger(-1);
+    if (orderId <= 0 || !std::isfinite(kwh) || kwh < 0.0 || amount < 0 || duration < 0) {
+        setStatus(QStringLiteral("收到的充电实时数据格式异常"), true);
+        return;
+    }
+
+    if (m_chargeOrder.isEmpty()) {
+        m_pendingChargePush = data;
+        if (m_pendingChargeUnfinishedSeq < 0) requestChargeUnfinishedOrder();
+        return;
+    }
+    if (orderId != m_chargeOrderId
+        || m_chargeOrder.value(QStringLiteral("status")).toInt(-1) != ecp::ORDER_CHARGING) {
+        return;
+    }
+
+    const qint64 previousDuration = m_chargeOrder.value(QStringLiteral("duration")).toInteger(-1);
+    const double previousKwh = m_chargeOrder.value(QStringLiteral("kwh")).toDouble(-1.0);
+    if ((previousDuration >= 0 && duration < previousDuration)
+        || (previousKwh >= 0.0 && kwh < previousKwh)) {
+        return;
+    }
+
+    m_chargeOrder[QStringLiteral("kwh")] = kwh;
+    m_chargeOrder[QStringLiteral("amount")] = amount;
+    m_chargeOrder[QStringLiteral("duration")] = duration;
+
+    bool orderListChanged = false;
+    for (qsizetype i = 0; i < m_chargeOrders.size(); ++i) {
+        QJsonObject order = m_chargeOrders.at(i).toObject();
+        if (order.value(QStringLiteral("orderId")).toInteger(-1) != orderId) continue;
+        order[QStringLiteral("kwh")] = kwh;
+        order[QStringLiteral("amount")] = amount;
+        order[QStringLiteral("duration")] = duration;
+        m_chargeOrders.replace(i, order);
+        orderListChanged = true;
+        break;
+    }
+
+    updateChargeSummary();
+    if (orderListChanged) renderChargeOrders();
 }
 
 void MainWindow::onNetDisconnected()

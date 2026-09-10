@@ -33,6 +33,8 @@ signals:
     void errorText(const QString &msg);
     // 收到一条完整响应：cmd / seq / code / msg / data
     void response(int cmd, int seq, int code, const QString &msg, const QJsonObject &data);
+    // 服务端主动推送：冻结协议规定 seq=0、code=0。
+    void push(int cmd, const QJsonObject &data);
 
 private slots:
     void onReadyRead();

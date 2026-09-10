@@ -12,7 +12,6 @@
 #include <QTableWidget>
 #include <QVBoxLayout>
 #include <QPushButton>
-#include <QTimer>
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QHash>
@@ -33,6 +32,7 @@ signals:
 
 private slots:
     void onNetResponse(int cmd, int seq, int code, const QString &msg, const QJsonObject &data);
+    void onNetPush(int cmd, const QJsonObject &data);
     void onNetDisconnected();
     void refreshProfile();
     void editNickname();
@@ -68,6 +68,7 @@ private:
     void refreshAvatarBadge();
     void updateMineTexts();
     void updateChargeSummary();
+    void applyChargeProgressPush(const QJsonObject &data);
     void focusChargeSettlementArea();
     void setChargeOrder(const QJsonObject &order);
     void clearChargeOrder();
@@ -103,6 +104,7 @@ private:
     QLabel      *m_chargeStage = nullptr;
     QLabel      *m_chargeOrderMeta = nullptr;
     QLabel      *m_chargeOrderMoney = nullptr;
+    QLabel      *m_chargeOrderEnergy = nullptr;
     QLabel      *m_chargeOrderTime = nullptr;
     QLabel      *m_chargeOrderPrice = nullptr;
     QLabel      *m_chargeHint = nullptr;
@@ -122,7 +124,6 @@ private:
     QPushButton *m_nicknameBtn = nullptr;
     QPushButton *m_avatarBtn = nullptr;
     QPushButton *m_logoutBtn = nullptr;
-    QTimer       *m_chargeSummaryTimer = nullptr;
     QJsonObject  m_profile;
     QJsonArray   m_nearbyStations;
     QJsonArray   m_nearbyPiles;
@@ -147,5 +148,6 @@ private:
     double       m_mapDefaultLat = 22.5470;
     double       m_mapDefaultLng = 114.0650;
     QJsonObject  m_chargeOrder;
+    QJsonObject  m_pendingChargePush;
     QJsonArray   m_chargeOrders;
 };

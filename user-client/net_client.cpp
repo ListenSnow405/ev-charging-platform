@@ -43,9 +43,15 @@ void NetClient::onReadyRead()
             emit errorText(QStringLiteral("报文解析失败"));
             continue;
         }
-        emit response(env.value("cmd").toInt(), env.value("seq").toInt(),
-                      env.value("code").toInt(), env.value("msg").toString(),
-                      env.value("data").toObject());
+        const int cmd = env.value("cmd").toInt();
+        const int seq = env.value("seq").toInt();
+        const int code = env.value("code").toInt();
+        const QJsonObject data = env.value("data").toObject();
+        if (cmd != 0 && seq == 0 && code == ecp::ERR_OK) {
+            emit push(cmd, data);
+        } else {
+            emit response(cmd, seq, code, env.value("msg").toString(), data);
+        }
     }
     if (m_parser.overflow()) {
         emit errorText(QStringLiteral("报文长度越界，连接已断开"));
