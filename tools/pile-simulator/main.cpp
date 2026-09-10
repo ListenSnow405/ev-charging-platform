@@ -105,7 +105,7 @@ int main(int argc, char *argv[])
         for (int i = 1; i < argc; ++i)
             piles << QString::fromLocal8Bit(argv[i]);
     } else {
-        for (int s = 1; s <= 5; ++s)
+        for (int s = 1; s <= 4; ++s)
             for (int p = 1; p <= 4; ++p)
                 piles << QStringLiteral("SZ%1-%2")
                               .arg(s, 3, 10, QLatin1Char('0'))
