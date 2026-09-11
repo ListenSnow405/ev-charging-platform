@@ -99,6 +99,8 @@ python3          ml/export_snapshot.py                               # 6 导出�
 
 机器验不了的（布局、交互、跨模块联调、演示动线）见 [../ml/TESTING.md](../ml/TESTING.md)。
 
+全组测试用例集见 [../03测试用例.xlsx](../03测试用例.xlsx)：9 张模块表 106 条用例 + 缺陷清单，协议层 94 条已实测，GUI 12 条标注待人工执行。**执行充电类用例前务必先拉起电桩模拟器**，否则 1203 恒返回 3005，会被误判为缺陷。
+
 ## 6. 常见故障
 
 **GUI 程序报 `could not connect to display`。** 不是 Qt 装坏了——最后那句「Reinstalling the application may fix this」极具误导性。

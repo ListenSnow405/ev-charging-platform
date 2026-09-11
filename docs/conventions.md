@@ -56,6 +56,7 @@
 | 2026-09-10 | `server/biz/ext_08_carbon_service.cpp` `common/protocol_ext.h` `common/error_code_ext.h` | 修复 3747 撤销因子：时间线改为**只由启用因子构成**（停用行不再参与前驱判定，此前会被误判成「多个因子闭合在同一时刻」而返回 5001），对已停用因子改为幂等空操作；新增 3748 `CMD_EXT_FACTOR_PURGE` 彻底删除因子及其日聚合、报告与导出文件，新增错误码 6707。ext 头文件段内自治，非冻结契约 | L5 | ⬜ 待 L1 复核 |
 | 2026-09-11 | `user-client/main_window.cpp` | **修复 [说明书] 1.4「用户端优先推荐低拥堵、高空闲率的充电站」实际未生效**：客户端确实发了 `sortBy=1`，但收到响应后又用 `pileIdle`（**当前**空闲数）本地重排，把服务端按 `t_load_forecast` **预测**拥堵度排好的顺序整个覆盖掉。本地重排改为同一口径（`congestion` 升序 → 无预测的 `-1` 排最后 → 退回 `pileIdle`/距离）；站点卡片开始读取并展示 `congestion`/`idleForecast`（此前两个字段一次都没用过），分档阈值 0.8 与管理端 `forecast_page` 的负荷预警判定一致；下拉项「空闲优先」改名「低拥堵优先」。用 `charging.db` 的 6 站真实预测实测：服务端序 `[4,1,3,6,5,2]`，修复前本地重排成 `[1,3,4,2,6,5]`（拥堵度最低的站 4 从第 1 位掉到第 3 位，最高的站 2 从末位提到第 4 位），修复后与服务端逐位一致 | 用户指示（越权代改 L4 目录） | ⬜ 待 L4 追认 |
 | 2026-09-11 | `server/main.cpp` `server/net/session.h` `server/net/dispatcher.h` `tools/pile-simulator/main.cpp` `ml/selftest.py` `docs/RUNBOOK.md` `tools/CLAUDE.md` | 答辩前收尾四项：① 启动日志 `LOG_W「其余业务 handler 尚未注册」`早已过期（40 个入向命令字全部注册完毕），改为 `LOG_I` 汇总实际注册数，为此给 `Dispatcher` 加只读的 `handlerCount()`；② `session.h` 的 `token_ttl_sec` TODO 落地——启动时 `loadTokenTtl()` 从 `t_sys_config` 读入并在起线程池前设定，读不到或非法则记 `LOG_E` 后沿用默认 7200s，不因一条配置缺失拦住启动；③ 电桩模拟器新增 `--host/--port`，此前写死 `127.0.0.1:9527`，是充电闭环进不了自动化测试的直接原因（`test-admin-integration.sh` 里 2112 只能标 `[DETECTED]`）。顺带修掉 `RUNBOOK.md` 里 `ecp-pile-sim SZ002-03 127.0.0.1 9527` 这个从未实现过的位置参数写法——那三个值会被全部当成桩号；④ `ml/selftest.py` 增加建模依赖前置检查，用系统 python 误跑时直接指向 `.venv` 并以退出码 2 退出，不再散成十几条 `No module named` | 用户指示（越权代改 L1/L5 目录） | ⬜ 待 L1/L5 追认 |
+| 2026-09-11 | `03测试用例.xlsx` | **全组测试用例集成文**，关掉第 8 节归档表里「客户端异常路径清单待补」那条 ◐。按模板「一表一模块」的结构拆 9 张模块表（对齐 [说明书] 1.4 功能条目）+ 1 张缺陷清单，共 106 条用例，正常路径约 35% / 异常与边界约 65%——配比依据是 [DIVISION-OF-LABOR.md](../DIVISION-OF-LABOR.md) 对 L4 的预警「异常路径几乎必漏」。其中 94 条协议层用例在隔离实例上真跑过一遍（隔离库 + `--port` 指向的模拟器，不碰 `charging.db`），「测试结果」列填的是实测 code/msg 原文，**91/91 全通过**；12 条 GUI 用例留空并在备注标「待人工执行」。第 9 张表单独覆盖 [说明书] 2.2 通信安全与 2.3 错误处理（粘包/半包/超长长度头/鉴权四边界/8 连接并发），这部分不属于任何业务模块，没有独立表则答辩时无处可指。缺陷清单录入 BUG-001（低拥堵推荐失效，已修复并回归） | 用户指示（L4 职责，代为落地） | ⬜ 待 L4 追认 |
 | 2026-09-09 | 全部文档 | 第二次文档整理：新增 [RUNBOOK.md](RUNBOOK.md) 收拢分散在六份文档里的运行命令；清除各模块文档中已完成的 TODO 与过期状态；`docs/expand/08-实现规划.md` → `08-运行手册.md`，技术路线改写为运行文档 | SCML | ⬜ |
 
 ### 3.2 待评审变更申请（CR）
@@ -400,7 +401,7 @@ cp config/app.ini.example config/app.ini   # 首次克隆后执行，填入自�
 | 开发 | 负荷预测建模与精度评估 | L5 | ✅ [../ml/reports/forecast_eval.md](../ml/reports/forecast_eval.md)，结论见 8.1 |
 | 开发 | 扩展模块 08 碳减排与能源报告 | L5 | ✅ [expand/08-运行手册.md](expand/08-运行手册.md) |
 | 测试 | 自动化测试与冒烟脚本 | L3 / L5 | ✅ 清单见 [RUNBOOK.md 第 5 节](RUNBOOK.md) |
-| 测试 | 人工测试流程与回归清单 | L4 / L5 | ◐ 数据端已成文 [../ml/TESTING.md](../ml/TESTING.md)；客户端异常路径清单待补 |
+| 测试 | 人工测试流程与回归清单 | L4 / L5 | ✅ 数据端 [../ml/TESTING.md](../ml/TESTING.md)；客户端与全链路 [../03测试用例.xlsx](../03测试用例.xlsx)（9 张模块表 106 条用例 + 缺陷清单，94 条已实测，12 条 GUI 待人工执行）|
 | 测试 | 交叉试读评审记录 | L2 | ⬜ 每周一次，记入第 4 节 |
 | 发布 | 部署与运行说明 | L3 | ✅ [RUNBOOK.md](RUNBOOK.md) |
 | 发布 | 答辩演示动线（大屏部分） | L5 | ✅ [../dataviz/DEMO.md](../dataviz/DEMO.md) |
