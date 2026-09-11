@@ -138,11 +138,34 @@ static QString formatDuration(qint64 seconds)
         .arg(secs, 2, 10, QLatin1Char('0'));
 }
 
+// 1101 返回的预测拥堵度（0..1）；-1 表示该站在 t_load_forecast 里没有预测数据。
+// 见 docs/protocol.md 4.2：0 在拥堵度语义中是「最不拥堵」，不能兼职表示「没有数据」。
+static double stationCongestion(const QJsonObject &item)
+{
+    const QJsonValue value = item.value(QStringLiteral("congestion"));
+    return value.isDouble() ? value.toDouble() : -1.0;
+}
+
 static QString stationLoadLabel(const QJsonObject &item)
 {
     const qint64 total = item.value(QStringLiteral("pileTotal")).toVariant().toLongLong();
     const qint64 idle = item.value(QStringLiteral("pileIdle")).toVariant().toLongLong();
     if (total <= 0) return QStringLiteral("暂无电桩");
+
+    // [说明书] 1.4 机器学习：预测可用时优先展示预测拥堵度，让「低拥堵推荐」在卡片上看得见。
+    // 0.8 阈值与管理端 forecast_page 的负荷预警判定保持一致。
+    const double congestion = stationCongestion(item);
+    if (congestion >= 0.0) {
+        const qint64 idleForecast =
+            item.value(QStringLiteral("idleForecast")).toVariant().toLongLong();
+        const QString level = congestion < 0.4 ? QStringLiteral("预测空闲")
+                            : congestion < 0.8 ? QStringLiteral("预测适中")
+                                               : QStringLiteral("预测拥堵");
+        if (idleForecast >= 0)
+            return QStringLiteral("%1 · 1 小时后约 %2 桩空闲").arg(level).arg(idleForecast);
+        return level;
+    }
+
     if (idle <= 0) return QStringLiteral("当前繁忙");
     if (idle * 2 >= total) return QStringLiteral("空闲较多");
     return QStringLiteral("状态正常");
@@ -157,6 +180,18 @@ static int stationSortCompare(const QJsonObject &left, const QJsonObject &right,
     const qint64 leftPrice = left.value(QStringLiteral("price")).toVariant().toLongLong();
     const qint64 rightPrice = right.value(QStringLiteral("price")).toVariant().toLongLong();
     if (sortIndex == 1) {
+        // [说明书] 1.4 机器学习：「在用户端优先推荐低拥堵、高空闲率的充电站」。
+        // 服务端收到 sortBy=1 后已按 t_load_forecast 的预测拥堵度排好序（station_service.cpp），
+        // 这里的本地重排必须用同一口径，否则会把服务端的预测排序覆盖掉。
+        // 有预测的站整体排在无预测的站之前——congestion=-1 是「没有数据」，不是「最不拥堵」。
+        const double leftCongestion = stationCongestion(left);
+        const double rightCongestion = stationCongestion(right);
+        const bool leftHasForecast = leftCongestion >= 0.0;
+        const bool rightHasForecast = rightCongestion >= 0.0;
+        if (leftHasForecast != rightHasForecast) return leftHasForecast ? -1 : 1;
+        if (leftHasForecast && leftCongestion != rightCongestion)
+            return leftCongestion < rightCongestion ? -1 : 1;
+        // 无预测数据时退回当前空闲数，保证模型没跑到的站仍有合理顺序。
         if (leftIdle != rightIdle) return leftIdle > rightIdle ? -1 : 1;
         if (leftDistance != rightDistance) return leftDistance < rightDistance ? -1 : 1;
     } else if (sortIndex == 2) {
@@ -323,7 +358,7 @@ QWidget *MainWindow::makeNearbyPage()
     m_nearbySearch->setPlaceholderText(QStringLiteral("输入站点名或地址"));
     m_nearbySort = new QComboBox(toolbar);
     m_nearbySort->addItem(QStringLiteral("距离最近"));
-    m_nearbySort->addItem(QStringLiteral("空闲优先"));
+    m_nearbySort->addItem(QStringLiteral("低拥堵优先"));   // [说明书] 1.4 预测驱动的推荐
     m_nearbySort->addItem(QStringLiteral("价格优先"));
     m_nearbyRefreshBtn = new QPushButton(QStringLiteral("刷新站点"), toolbar);
     searchRow->addWidget(m_nearbySearch, 1);

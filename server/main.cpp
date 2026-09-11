@@ -24,6 +24,7 @@
 #include "protocol.h"
 #include "net/tcp_server.h"
 #include "net/dispatcher.h"
+#include "net/session.h"
 #include "dao/db.h"
 #include "app_path.h"
 
@@ -36,8 +37,8 @@ static void onSignal(int) { g_quitRequested.store(true); }
 
 // -----------------------------------------------------------------------------
 //  业务 handler 注册。
-//  TODO(L2)：在 server/biz/ 下实现各服务后，在此逐个注册。
-//            清单见 server/biz/README.md 与 docs/protocol.md 第 4 节。
+//  docs/protocol.md 第 4 节的命令字已全部注册；新增服务在此加一行 register*Service()。
+//  下行推送命令字（9003/9005/9006 设备侧、1208 用户侧）由服务端主动发出，不注册 handler。
 // -----------------------------------------------------------------------------
 namespace ecp { void registerUserService(); void registerAdminService(); void registerWalletService(); void registerUserManagementService(); void registerStationService(); void registerPileService(); void registerReservationService(); void registerOrderService(); void registerStatisticsService(); void registerDeviceService(); }
 
@@ -115,6 +116,36 @@ private:
     bool m_loaded = false;
 };
 
+// t_sys_config.token_ttl_sec → SessionTable。
+// 读不到或非法一律沿用 session.h 里的默认值：token 有效期是可降级项，
+// 不能让一条配置缺失把服务端拦在启动之外。先记 LOG_E 再降级（CLAUDE.md 第 7 节）。
+static void loadTokenTtl()
+{
+    QSqlDatabase db = threadDb();
+    if (!db.isOpen()) {
+        LOG_E(QStringLiteral("token 有效期无法读取（数据库未就绪），沿用默认值: %1")
+                  .arg(db.lastError().text()));
+        return;
+    }
+    QSqlQuery q(db);
+    q.prepare(QStringLiteral("SELECT cfg_value FROM t_sys_config WHERE cfg_key = ?"));
+    q.addBindValue(QStringLiteral("token_ttl_sec"));
+    if (!q.exec() || !q.next()) {
+        LOG_E(QStringLiteral("t_sys_config 缺少 token_ttl_sec，沿用默认值: %1")
+                  .arg(q.lastError().text()));
+        return;
+    }
+    bool ok = false;
+    const qint64 ttl = q.value(0).toString().trimmed().toLongLong(&ok);
+    if (!ok || ttl <= 0) {
+        LOG_E(QStringLiteral("t_sys_config.token_ttl_sec 非法(%1)，沿用默认值")
+                  .arg(q.value(0).toString()));
+        return;
+    }
+    SessionTable::instance().setTtl(ttl);
+    LOG_I(QStringLiteral("token 有效期 %1 秒（t_sys_config.token_ttl_sec）").arg(ttl));
+}
+
 static void registerAllServices()
 {
     registerUserService();      // 1001 / 1002   [说明书] 1.4 手机号免密登录
@@ -143,7 +174,9 @@ static void registerAllServices()
         return ERR_OK;
     }, /*needAuth=*/false);
 
-    LOG_W(QStringLiteral("其余业务 handler 尚未注册 —— 未实现的命令字返回 ERR_CMD_UNKNOWN(1005)"));
+    LOG_I(QStringLiteral("业务 handler 注册完毕，共 %1 个（含 0 号连通性探针）；"
+                         "未注册的命令字返回 ERR_CMD_UNKNOWN(1005)")
+              .arg(Dispatcher::instance().handlerCount()));
 }
 
 int main(int argc, char *argv[])
@@ -195,6 +228,7 @@ int main(int argc, char *argv[])
         LOG_I(QStringLiteral("数据库就绪: %1").arg(dbFile));
     }
 
+    loadTokenTtl();              // 必须在起线程池之前：此后 m_ttl 只读
     registerAllServices();
 
     // ---- 启动 ----

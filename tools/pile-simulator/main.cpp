@@ -6,8 +6,9 @@
 //  docs/protocol.md 第 4.5 节 命令字 9001–9006。
 //
 //  单进程模拟多台桩：默认 4 站 × 4 桩 = 16 台（SZ001-01 ~ SZ004-04）。
-//  用法：./ecp-pile-sim                    # 默认 16 台
-//        ./ecp-pile-sim SZ001-01 SZ002-02  # 只起指定桩号
+//  用法：./ecp-pile-sim                              # 默认 16 台，连 127.0.0.1:9527
+//        ./ecp-pile-sim SZ001-01 SZ002-02            # 只起指定桩号
+//        ./ecp-pile-sim --port 58171 SZ001-01        # 指向隔离实例（集成测试用）
 // -----------------------------------------------------------------------------
 #include <QCoreApplication>
 #include <QTcpSocket>
@@ -96,15 +97,39 @@ int main(int argc, char *argv[])
 {
     QCoreApplication app(argc, argv);
 
-    const QString host = QStringLiteral("127.0.0.1");
-    const quint16 port = 9527;
+    // 服务端地址可覆盖：集成测试会把服务端起在随机端口上，写死 9527 就没法纳入自动化。
+    QString host = QStringLiteral("127.0.0.1");
+    quint16 port = 9527;
 
     // 默认 4 站 × 4 桩 = 16 台；传桩号则只起指定几台
     QStringList piles;
-    if (argc > 1) {
-        for (int i = 1; i < argc; ++i)
-            piles << QString::fromLocal8Bit(argv[i]);
-    } else {
+    for (int i = 1; i < argc; ++i) {
+        const QString arg = QString::fromLocal8Bit(argv[i]);
+        if ((arg == QLatin1String("--host") || arg == QLatin1String("--port")) && i + 1 >= argc) {
+            LOG_E(QStringLiteral("%1 缺少取值。用法：./ecp-pile-sim [--host H] [--port P] [桩号...]")
+                      .arg(arg));
+            return 1;
+        }
+        if (arg == QLatin1String("--host")) {
+            host = QString::fromLocal8Bit(argv[++i]);
+        } else if (arg == QLatin1String("--port")) {
+            bool ok = false;
+            const uint value = QString::fromLocal8Bit(argv[++i]).toUInt(&ok);
+            if (!ok || value == 0 || value > 65535) {
+                LOG_E(QStringLiteral("--port 取值非法：%1").arg(QString::fromLocal8Bit(argv[i])));
+                return 1;
+            }
+            port = static_cast<quint16>(value);
+        } else if (arg.startsWith(QLatin1String("--"))) {
+            LOG_E(QStringLiteral("未知选项 %1。用法：./ecp-pile-sim [--host H] [--port P] [桩号...]")
+                      .arg(arg));
+            return 1;
+        } else {
+            piles << arg;
+        }
+    }
+
+    if (piles.isEmpty()) {
         for (int s = 1; s <= 4; ++s)
             for (int p = 1; p <= 4; ++p)
                 piles << QStringLiteral("SZ%1-%2")

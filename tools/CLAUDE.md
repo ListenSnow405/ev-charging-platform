@@ -11,6 +11,7 @@
 ```bash
 ./build/bin/ecp-pile-sim                  # 默认起 16 台（SZ001-01 ~ SZ004-04）
 ./build/bin/ecp-pile-sim SZ001-01 SZ002-02   # 只起指定桩号
+./build/bin/ecp-pile-sim --port 58171 SZ001-01   # 指向隔离实例，供集成测试用
 ```
 
 > 单进程多台：一个 `ecp-pile-sim` 进程内用多个 `QTcpSocket` + `QTimer` 同时模拟多台桩（默认 16 台），

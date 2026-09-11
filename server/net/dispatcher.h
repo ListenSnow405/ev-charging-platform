@@ -47,6 +47,9 @@ public:
     // conn 为请求所属连接，handler 可通过 req.conn 取用（可为空）。
     QByteArray handle(const QByteArray &payload, std::shared_ptr<ConnectionCtx> conn);
 
+    // 已注册的 handler 数量，供启动日志汇总实际注册结果。
+    int handlerCount() const { return m_handlers.size(); }
+
 private:
     Dispatcher() = default;
     QHash<int, Handler> m_handlers;

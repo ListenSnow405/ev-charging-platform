@@ -687,8 +687,31 @@ if (bad) imports.system.exit(1);
 MODELS_DIR: Path = None
 
 
+# build_features / train_forecast / predict 这三步要 pandas + sklearn，缺了会让
+# 十几项检查各自报一句 "No module named ..."，看不出根因是解释器选错了。
+# 自检本身与子进程都用 sys.executable（见 PY），所以在这里一次问清楚。
+def _require_modelling_deps() -> None:
+    import importlib.util
+
+    missing = [m for m in ("pandas", "numpy", "sklearn", "joblib")
+               if importlib.util.find_spec(m) is None]
+    if not missing:
+        return
+    venv_py = REPO / ".venv" / "bin" / "python"
+    print(f"当前解释器缺少建模依赖：{', '.join(missing)}\n"
+          f"  解释器：{sys.executable}", file=sys.stderr)
+    if venv_py.exists():
+        print(f"  请改用项目虚拟环境：{venv_py} ml/selftest.py", file=sys.stderr)
+    else:
+        print("  请先建虚拟环境："
+              "python3 -m venv .venv && .venv/bin/pip install -r ml/requirements.txt",
+              file=sys.stderr)
+    raise SystemExit(2)
+
+
 def main() -> int:
     global CTX, MODELS_DIR
+    _require_modelling_deps()
     ap = argparse.ArgumentParser(description="L5 全链路自检")
     ap.add_argument("--full", action="store_true",
                     help="在临时目录里真正跑一遍训练（约 4 分钟）；缺省复用现有模型产物")

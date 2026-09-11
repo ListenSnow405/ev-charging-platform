@@ -47,7 +47,9 @@ public:
     // 清空全部会话，所有 token 立即失效；仅供热重载/管理场景使用，运行中勿调。
     void clearAll();
 
-    void setTtl(qint64 sec);      // 设置 token 有效期（秒）。TODO：待接入 t_sys_config.token_ttl_sec
+    // 设置 token 有效期（秒）。由 server/main.cpp::loadTokenTtl() 在启动时
+    // 从 t_sys_config.token_ttl_sec 读入；起线程池之后不应再调用。
+    void setTtl(qint64 sec);
 
 private:
     SessionTable();

@@ -34,7 +34,7 @@ python3 -m venv .venv && .venv/bin/pip install -r ml/requirements.txt
 ./build/bin/ecp-admin                         # PC 管理端（GUI）
 ./build/bin/ecp-user                          # 充电用户端（GUI）
 ./build/bin/ecp-pile-sim SZ001-01             # 电桩模拟器，默认连 127.0.0.1:9527
-./build/bin/ecp-pile-sim SZ002-03 127.0.0.1 9527
+./build/bin/ecp-pile-sim --port 58171 SZ002-03   # 指向其他端口的服务端实例
 ```
 
 运行参数在 `config/app.ini`：`server/host`、`server/port`、`server/pool_size`（工作线程数 = 最大并发业务处理数）、
