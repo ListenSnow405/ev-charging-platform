@@ -66,6 +66,7 @@ Ubuntu 22.04+（VMware 17）、Qt **6.2.4**、g++ / C++17、Python 3.10（数据
 ├── DIVISION-OF-LABOR.md      # 团队分工方案
 ├── WORKFLOW.md               # 日常开发流程
 ├── DEFENSE-SCRIPT.md         # 答辩 PPT 大纲与讲稿
+├── PHASE2-PLAN.md            # 第二阶段任务清单（大数据大屏 + MLlib 子系统）
 └── README.md
 ```
 

@@ -63,7 +63,7 @@ bash scripts/build-all.sh        # 构建 + 建库 + 生成 config/app.ini
 
 **agent 写完，自己先从头读一遍。** 评审和答辩会问「这段为什么这么写」，没读过当场就露。
 
-按 [CLAUDE.md 第 5 节](CLAUDE.md)那五条逐项查：绕过 `FrameCodec` 自己解析？跨线程共用 DB 连接？金额出现 `double`？网络线程直接改控件？Qt5 废弃 API？
+按 [CLAUDE.md 第 5.1 节](CLAUDE.md)那五条逐项查（第二阶段代码改查 5.2）：绕过 `FrameCodec` 自己解析？跨线程共用 DB 连接？金额出现 `double`？网络线程直接改控件？Qt5 废弃 API？
 
 有问题**补充约束重来**，不要自己手工改完了事——同一个坑下次它还踩。
 

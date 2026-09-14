@@ -8,7 +8,7 @@
 
 ## 会话开始必读
 
-1. [CLAUDE.md](CLAUDE.md) —— 技术基线、目录归属、五条硬性规则、业务规则
+1. [CLAUDE.md](CLAUDE.md) —— 技术基线（两阶段）、目录归属、硬性规则、业务规则
 2. [docs/protocol.md](docs/protocol.md) —— 通信协议（冻结契约）
 3. [docs/db-schema.sql](docs/db-schema.sql) —— 数据库结构（冻结契约）
 4. [WORKFLOW.md](WORKFLOW.md) —— 日常流程与指令模板
