@@ -1,0 +1,143 @@
+{
+  "dimension": "d14_carbon_recent",
+  "description": "最近 15 日碳排放明细（表格）",
+  "generated_at": "2026-09-14 18:18:31",
+  "row_count": 15,
+  "rows": [
+    {
+      "stat_date": "2026-09-04",
+      "kwh": 5447.9,
+      "emission_kg": 3165.2,
+      "intensity_g_per_kwh": 581.0,
+      "order_cnt": 101,
+      "completeness": 100.0,
+      "factor_version": "demo-2022"
+    },
+    {
+      "stat_date": "2026-09-03",
+      "kwh": 4559.5,
+      "emission_kg": 2649.1,
+      "intensity_g_per_kwh": 581.0,
+      "order_cnt": 82,
+      "completeness": 100.0,
+      "factor_version": "demo-2022"
+    },
+    {
+      "stat_date": "2026-09-02",
+      "kwh": 7617.5,
+      "emission_kg": 4425.7,
+      "intensity_g_per_kwh": 581.0,
+      "order_cnt": 130,
+      "completeness": 100.0,
+      "factor_version": "demo-2022"
+    },
+    {
+      "stat_date": "2026-09-01",
+      "kwh": 5966.1,
+      "emission_kg": 3466.3,
+      "intensity_g_per_kwh": 581.0,
+      "order_cnt": 109,
+      "completeness": 100.0,
+      "factor_version": "demo-2022"
+    },
+    {
+      "stat_date": "2026-08-31",
+      "kwh": 6063.8,
+      "emission_kg": 3523.1,
+      "intensity_g_per_kwh": 581.0,
+      "order_cnt": 106,
+      "completeness": 100.0,
+      "factor_version": "demo-2022"
+    },
+    {
+      "stat_date": "2026-08-30",
+      "kwh": 6114.6,
+      "emission_kg": 3552.6,
+      "intensity_g_per_kwh": 581.0,
+      "order_cnt": 103,
+      "completeness": 100.0,
+      "factor_version": "demo-2022"
+    },
+    {
+      "stat_date": "2026-08-29",
+      "kwh": 6092.2,
+      "emission_kg": 3539.6,
+      "intensity_g_per_kwh": 581.0,
+      "order_cnt": 110,
+      "completeness": 100.0,
+      "factor_version": "demo-2022"
+    },
+    {
+      "stat_date": "2026-08-28",
+      "kwh": 6189.4,
+      "emission_kg": 3596.0,
+      "intensity_g_per_kwh": 581.0,
+      "order_cnt": 108,
+      "completeness": 100.0,
+      "factor_version": "demo-2022"
+    },
+    {
+      "stat_date": "2026-08-27",
+      "kwh": 6679.9,
+      "emission_kg": 3881.0,
+      "intensity_g_per_kwh": 581.0,
+      "order_cnt": 126,
+      "completeness": 100.0,
+      "factor_version": "demo-2022"
+    },
+    {
+      "stat_date": "2026-08-26",
+      "kwh": 7254.1,
+      "emission_kg": 4214.6,
+      "intensity_g_per_kwh": 581.0,
+      "order_cnt": 128,
+      "completeness": 100.0,
+      "factor_version": "demo-2022"
+    },
+    {
+      "stat_date": "2026-08-25",
+      "kwh": 5962.1,
+      "emission_kg": 3464.0,
+      "intensity_g_per_kwh": 581.0,
+      "order_cnt": 105,
+      "completeness": 100.0,
+      "factor_version": "demo-2022"
+    },
+    {
+      "stat_date": "2026-08-24",
+      "kwh": 8128.7,
+      "emission_kg": 4722.8,
+      "intensity_g_per_kwh": 581.0,
+      "order_cnt": 141,
+      "completeness": 100.0,
+      "factor_version": "demo-2022"
+    },
+    {
+      "stat_date": "2026-08-23",
+      "kwh": 6785.1,
+      "emission_kg": 3942.1,
+      "intensity_g_per_kwh": 581.0,
+      "order_cnt": 115,
+      "completeness": 100.0,
+      "factor_version": "demo-2022"
+    },
+    {
+      "stat_date": "2026-08-22",
+      "kwh": 7536.4,
+      "emission_kg": 4378.7,
+      "intensity_g_per_kwh": 581.0,
+      "order_cnt": 126,
+      "completeness": 100.0,
+      "factor_version": "demo-2022"
+    },
+    {
+      "stat_date": "2026-08-21",
+      "kwh": 7979.8,
+      "emission_kg": 4636.3,
+      "intensity_g_per_kwh": 581.0,
+      "order_cnt": 144,
+      "completeness": 100.0,
+      "factor_version": "demo-2022"
+    }
+  ]
+}

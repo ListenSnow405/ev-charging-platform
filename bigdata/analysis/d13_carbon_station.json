@@ -1,0 +1,74 @@
+{
+  "dimension": "d13_carbon_station",
+  "description": "分站碳排放汇总（表格）",
+  "generated_at": "2026-09-14 18:18:31",
+  "row_count": 6,
+  "rows": [
+    {
+      "station_id": "4",
+      "station_name": "深圳湾公园充电站",
+      "emission_kg": 41564.7,
+      "kwh": 71540.0,
+      "intensity_g_per_kwh": 581.0,
+      "order_cnt": 1260,
+      "peak_pct": 52.0,
+      "valley_pct": 8.4,
+      "min_completeness": 100.0
+    },
+    {
+      "station_id": "3",
+      "station_name": "深圳市民中心充电站",
+      "emission_kg": 38380.6,
+      "kwh": 66059.5,
+      "intensity_g_per_kwh": 581.0,
+      "order_cnt": 1179,
+      "peak_pct": 45.7,
+      "valley_pct": 12.5,
+      "min_completeness": 100.0
+    },
+    {
+      "station_id": "6",
+      "station_name": "龙岗大运充电站",
+      "emission_kg": 35002.6,
+      "kwh": 60245.4,
+      "intensity_g_per_kwh": 581.0,
+      "order_cnt": 1045,
+      "peak_pct": 38.3,
+      "valley_pct": 23.3,
+      "min_completeness": 100.0
+    },
+    {
+      "station_id": "5",
+      "station_name": "宝安中心充电站",
+      "emission_kg": 34640.2,
+      "kwh": 59621.7,
+      "intensity_g_per_kwh": 581.0,
+      "order_cnt": 1046,
+      "peak_pct": 39.5,
+      "valley_pct": 22.8,
+      "min_completeness": 100.0
+    },
+    {
+      "station_id": "2",
+      "station_name": "南山科技园充电站",
+      "emission_kg": 32304.5,
+      "kwh": 55601.5,
+      "intensity_g_per_kwh": 581.0,
+      "order_cnt": 981,
+      "peak_pct": 47.9,
+      "valley_pct": 9.5,
+      "min_completeness": 100.0
+    },
+    {
+      "station_id": "1",
+      "station_name": "福田CBD充电站",
+      "emission_kg": 30974.4,
+      "kwh": 53312.2,
+      "intensity_g_per_kwh": 581.0,
+      "order_cnt": 966,
+      "peak_pct": 48.4,
+      "valley_pct": 8.3,
+      "min_completeness": 100.0
+    }
+  ]
+}

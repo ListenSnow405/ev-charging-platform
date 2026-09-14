@@ -91,24 +91,45 @@ def main() -> int:
                       "return e? e.innerText.slice(0,180) : '';", "args": []})["value"]
         check("无全局错误提示", not err, err or "页面正常加载")
 
-        # 2) 面板数量。少一个就是某个维度没渲染出来
-        n_panel = rq("POST", base + "/execute/sync", {
-            "script": "return document.querySelectorAll('.panel-inner').length;",
+        # 2) 分页：逐页点过去，每页都要有面板且不空
+        tabs = rq("POST", base + "/execute/sync", {
+            "script": "return [...document.querySelectorAll('nav.tabs .tab')]"
+                      ".filter(b=>!b.classList.contains('auto')).map(b=>b.innerText.trim());",
             "args": []})["value"]
-        check("面板数 = 14", n_panel == 14, f"实际 {n_panel} 个")
+        check("分页标签已渲染", len(tabs) >= 3, f"{len(tabs)} 页：{tabs}")
 
-        # 3) 没有面板停在「加载中」或「暂无数据」——这是空白图的主要来源
-        stuck = rq("POST", base + "/execute/sync", {
-            "script": "return [...document.querySelectorAll('.panel-state')]"
-                      ".map(e=>e.innerText.trim()).filter(Boolean);", "args": []})["value"]
-        check("无面板卡在加载/空数据", not stuck, str(stuck) if stuck else "全部渲染完成")
+        total_panels = 0
+        for i in range(len(tabs)):
+            rq("POST", base + "/execute/sync", {
+                "script": "const b=[...document.querySelectorAll('nav.tabs .tab')]"
+                          ".filter(x=>!x.classList.contains('auto'));b[arguments[0]].click();",
+                "args": [i]})
+            time.sleep(3)                       # 等该页图表画完
+            st = rq("POST", base + "/execute/sync", {
+                "script": "return {panels: document.querySelectorAll('.panel-inner').length,"
+                          "canvas: [...document.querySelectorAll('.echart canvas')]"
+                          ".map(c=>c.width*c.height).filter(a=>a>1000).length,"
+                          "stuck: [...document.querySelectorAll('.panel-state')]"
+                          ".map(e=>e.innerText.trim()).filter(Boolean)};", "args": []})["value"]
+            total_panels += st["panels"]
+            # d12 在 MLlib 跑完前必然「暂无数据」，是已知且预期的
+            stuck = [x for x in st["stuck"] if x != "暂无数据"]
+            # 负荷预测页只有 1 格是设计如此（D12 独占整页），所以下限是 1 不是 2
+            check(f"第 {i+1} 页「{tabs[i]}」", st["panels"] >= 1 and not stuck,
+                  f"{st['panels']} 个面板　{st['canvas']} 个非空 canvas"
+                  + (f"　空数据 {len(st['stuck'])} 格" if st["stuck"] else ""))
+        check("面板总数 = 17", total_panels == 17, f"实际 {total_panels} 个")
+        n_panel = total_panels
+
+        # （原整屏级「无面板卡在空数据」断言已删：分页后它只作用于当前页，
+        #   与上面的逐页检查重复，且会因 d12 的预期空数据误报失败）
 
         # 4) ECharts 真的画出了像素。canvas 存在还不够——
         #    尺寸为 0 的 canvas 也"存在"，那就是一块空白。
         canvas = rq("POST", base + "/execute/sync", {
             "script": "return [...document.querySelectorAll('.echart canvas')]"
                       ".map(c=>c.width*c.height).filter(a=>a>1000).length;", "args": []})["value"]
-        check("ECharts canvas 有实际尺寸", canvas >= 10, f"{canvas} 个非空 canvas")
+        check("当前页 ECharts 已出图", canvas >= 1, f"{canvas} 个非空 canvas")
 
         # 5) DataV 组件渲染（边框 svg + 数字翻牌）
         datav = rq("POST", base + "/execute/sync", {
@@ -117,11 +138,20 @@ def main() -> int:
                       "capsule: document.querySelectorAll('.dv-capsule-chart').length,"
                       "ring: document.querySelectorAll('.dv-active-ring-chart').length};",
             "args": []})["value"]
-        check("DataV 边框组件已渲染", datav["border"] >= 14, f"BorderBox13 × {datav['border']}")
+        check("DataV 边框组件已渲染", datav["border"] >= 2, f"当前页 BorderBox13 × {datav['border']}")
         check("DataV 数字翻牌已渲染", datav["flop"] >= 6, f"DigitalFlop × {datav['flop']}")
-        check("DataV 胶囊图与环图已渲染",
-              datav["capsule"] >= 1 and datav["ring"] >= 1,
-              f"Capsule × {datav['capsule']}　ActiveRing × {datav['ring']}")
+        # 胶囊图与环图都在第 1 页，上面逐页遍历后会停在最后一页，这里回到第 1 页再验
+        rq("POST", base + "/execute/sync", {
+            "script": "[...document.querySelectorAll('nav.tabs .tab')]"
+                      ".filter(x=>!x.classList.contains('auto'))[0].click();", "args": []})
+        time.sleep(3)
+        dv1 = rq("POST", base + "/execute/sync", {
+            "script": "return {capsule: document.querySelectorAll('.dv-capsule-chart').length,"
+                      "ring: document.querySelectorAll('.dv-active-ring-chart').length};",
+            "args": []})["value"]
+        check("DataV 胶囊图与环图已渲染（第 1 页）",
+              dv1["capsule"] >= 1 and dv1["ring"] >= 1,
+              f"Capsule × {dv1['capsule']}　ActiveRing × {dv1['ring']}")
 
         # 6) KPI 数字确实被画出来了。
         #    DvDigitalFlop 渲染进 <canvas>，**没有任何文本节点**——

@@ -334,3 +334,60 @@ export function c3StationRadar (rows) {
     }]
   }
 }
+
+/** D12 负荷预测（MLlib）：按站分组的三个 horizon 预测柱 + 空闲桩折线。
+ *
+ *  这里**不画「实测 + 预测」的接续曲线**：起报点是历史末尾，三个目标时刻
+ *  落在 1/6/24 小时之后，若与实测画在同一条时间轴上，虚线会插进实线中间
+ *  （第一阶段踩过，见 L5-PLAN 第 3 节）。改为按站横向对比三个 horizon，
+ *  读者一眼看到的是"哪个站接下来会忙"，这才是大屏要回答的问题。 */
+export function d12Forecast (rows) {
+  const stations = [...new Set(rows.map(r => r.station_name))]
+  const short = n => n.replace('充电站', '')
+  const HS = [1, 6, 24]
+  return base({
+    legend: { data: HS.map(h => `${h}h 后`), textStyle: { color: C.text }, top: 0, itemWidth: 14 },
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'shadow' },
+      formatter: ps => {
+        const st = ps[0].axisValue
+        const lines = ps.map(p => {
+          const h = HS[p.seriesIndex]
+          const hit = rows.find(r => short(r.station_name) === st && r.horizon === h)
+          if (!hit) return ''
+          return `${p.marker}${h}h 后　${hit.load_kw} kW　空闲 ${hit.idle_pile}/${hit.pile_total} 桩` +
+                 (hit.is_peak ? '　<b style="color:#ff7875">高峰</b>' : '') +
+                 `<br/><span style="color:#8fa9c4;padding-left:18px">${hit.predict_time}</span>`
+        }).filter(Boolean)
+        return `<b>${st}</b><br/>` + lines.join('<br/>')
+      }
+    },
+    grid: { left: 46, right: 20, top: 34, bottom: 30, containLabel: true },
+    xAxis: {
+      type: 'category', data: stations.map(short),
+      ...axis({ splitLine: { show: false }, axisLabel: { color: C.text, fontSize: 11, interval: 0 } })
+    },
+    // 只保留一根 kW 轴。原先把「空闲桩数」放副轴画成折线，
+    // 那条线走在图顶、视觉权重最大，实际只在 2~3 之间跳（满格 4 桩），
+    // 信息量远配不上它占的位置。空闲桩数改到 tooltip 与右侧明细表里看。
+    yAxis: { type: 'value', name: 'kW', ...axis() },
+    series: HS.map((h, i) => ({
+      name: `${h}h 后`,
+      type: 'bar',
+      barWidth: '22%',
+      data: stations.map(st => {
+        const hit = rows.find(r => r.station_name === st && r.horizon === h)
+        if (!hit) return null
+        return {
+          value: +hit.load_kw.toFixed(1),
+          // 预测为高峰的柱子描红边，一眼可辨
+          itemStyle: hit.is_peak
+            ? { color: SERIES_COLORS[i], borderColor: C.warn, borderWidth: 2, borderRadius: [3, 3, 0, 0] }
+            : { color: SERIES_COLORS[i], borderRadius: [3, 3, 0, 0] }
+        }
+      }),
+      label: { show: true, position: 'top', color: C.text, fontSize: 9, formatter: p => p.value || '' }
+    }))
+  })
+}

@@ -82,3 +82,7 @@ ml/data/seed_manifest.json
 # ---- 第二阶段前端 ----
 bigdata/web/node_modules/
 bigdata/web/dist/
+# MLlib 训练期检查点（用于截断 GBT 血缘，避免 StackOverflowError），每次重训重建
+bigdata/mllib/.checkpoint/
+bigdata/mllib/data/
+bigdata/mllib/models/

@@ -177,6 +177,50 @@ def main() -> int:
             .orderBy("minutes_from", "type_label")),
          "充电时长分桶 × 快慢充")
 
+    # ---------- D13 分站碳排放汇总（表格用）----------
+    #  D9 按日汇总看趋势，这里按站汇总看横向差异——两者是同一份数据的两个切面。
+    #  排放强度 g/度 = 总排放 / 总电量，**不能对各日强度取平均**（那是加权错误）。
+    emi = F.sum(F.col("emission_g").cast("double"))
+    kwh = F.sum(F.col("total_kwh_x100").cast("double")) / 100.0
+    emit("d13_carbon_station",
+         (carbon.groupBy("station_id")
+                .agg(emi.alias("_emi"), kwh.alias("_kwh"),
+                     F.sum(F.col("order_cnt").cast("long")).alias("order_cnt"),
+                     F.sum(F.col("peak_kwh_x100").cast("double")).alias("_peak"),
+                     F.sum(F.col("valley_kwh_x100").cast("double")).alias("_valley"),
+                     F.min(F.col("completeness").cast("double")).alias("min_completeness"))
+                .join(stn.select("station_id", F.col("name").alias("station_name")),
+                      "station_id", "left")
+                .withColumn("emission_kg", F.round(F.col("_emi") / 1000, 1))
+                .withColumn("kwh", F.round(F.col("_kwh"), 1))
+                .withColumn("intensity_g_per_kwh",
+                            F.round(F.col("_emi") / (F.col("_kwh")), 1))
+                .withColumn("peak_pct",
+                            F.round(F.col("_peak") / (F.col("_kwh") * 100) * 100, 1))
+                .withColumn("valley_pct",
+                            F.round(F.col("_valley") / (F.col("_kwh") * 100) * 100, 1))
+                .select("station_id", "station_name", "emission_kg", "kwh",
+                        "intensity_g_per_kwh", "order_cnt", "peak_pct", "valley_pct",
+                        "min_completeness")
+                .orderBy(F.desc("emission_kg"))),
+         "分站碳排放汇总（表格）")
+
+    # ---------- D14 最近 15 日碳排放明细（表格用）----------
+    #  带上因子版本与数据质量标记：答辩被问「这个排放量怎么来的」时，
+    #  能当场指出用的是哪个版本的排放因子、完整度多少。
+    recent = (carbon.groupBy("stat_date")
+              .agg(emi.alias("_emi"), kwh.alias("_kwh"),
+                   F.sum(F.col("order_cnt").cast("long")).alias("order_cnt"),
+                   F.min(F.col("completeness").cast("double")).alias("completeness"),
+                   F.first("factor_version").alias("factor_version"))
+              .withColumn("emission_kg", F.round(F.col("_emi") / 1000, 1))
+              .withColumn("kwh", F.round(F.col("_kwh"), 1))
+              .withColumn("intensity_g_per_kwh", F.round(F.col("_emi") / F.col("_kwh"), 1))
+              .select("stat_date", "kwh", "emission_kg", "intensity_g_per_kwh",
+                      "order_cnt", "completeness", "factor_version")
+              .orderBy(F.desc("stat_date")).limit(15))
+    emit("d14_carbon_recent", recent, "最近 15 日碳排放明细（表格）")
+
     print("\n== 对比分析 ==\n")
 
     # ---------- C1 快充 vs 慢充 ----------

@@ -1,6 +1,6 @@
 {
-  "generated_at": "2026-09-14 13:45:09",
-  "dimension_count": 11,
+  "generated_at": "2026-09-14 18:18:31",
+  "dimension_count": 13,
   "comparison_count": 3,
   "dimensions": {
     "d1_revenue_trend": "按日营收 / 订单量 / 电量",
@@ -14,6 +14,8 @@
     "d9_carbon_daily": "每日碳排放与峰平谷构成",
     "d10_station_geo": "站点经纬度 + 营收气泡（供地图）",
     "d11_duration_distribution": "充电时长分桶 × 快慢充",
+    "d13_carbon_station": "分站碳排放汇总（表格）",
+    "d14_carbon_recent": "最近 15 日碳排放明细（表格）",
     "c1_fast_vs_slow": "快充 vs 慢充：量价时长与取消率",
     "c2_weekday_vs_weekend": "工作日 vs 周末：日均单量与营收",
     "c2_weekday_weekend_hourly": "工作日 vs 周末：24 小时曲线形态",

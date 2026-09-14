@@ -150,9 +150,16 @@ def dimension(name: str):
 
     结果表最多 60 行，一次返回完；分页只会让前端画图变复杂而没有收益。
     """
+    global _dimensions                                # 未命中时要重载目录，见下
     if name not in _dimensions:                       # 白名单校验，见 load_catalog
-        return fail(ERR_NOT_FOUND,
-                    f"维度 {name} 不存在。可用维度见 /api/dimensions", 404)
+        # 目录是启动时缓存的，analysis.py 新增维度后本服务并不知情。
+        # 与其要求「每加一个维度就重启一次 Flask」（迟早有人忘，表现为大屏莫名空白），
+        # 不如在未命中时**重载一次目录**再判——命中则自愈，仍未命中才是真的不存在。
+        _dimensions = load_catalog()
+        if name not in _dimensions:
+            return fail(ERR_NOT_FOUND,
+                        f"维度 {name} 不存在。可用维度见 /api/dimensions", 404)
+        log.info("维度目录已热重载，新增维度 %s 生效", name)
     try:
         conn = connect()
     except Exception as e:

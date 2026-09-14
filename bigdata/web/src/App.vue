@@ -2,7 +2,9 @@
 import { computed, onMounted, onBeforeUnmount, reactive, ref } from 'vue'
 import EChart from './components/EChart.vue'
 import Panel from './components/Panel.vue'
+import DataTable from './components/DataTable.vue'
 import { fetchOverview, fetchDimension, fenToYuan, kwhOf, wan } from './api.js'
+import { PAGES, ALL_DIMS } from './pages.js'
 import * as B from './charts.js'
 
 // 设计稿 1920×1080，实际按比例缩放。投影分辨率不可控，
@@ -19,30 +21,55 @@ let clock = null
 
 const state = reactive({ loading: true, error: '' })
 const overview = ref(null)
-const dim = reactive({})          // 维度名 → rows
+const dim = reactive({})
 
-// 面板与维度的对应关系集中在这里，便于对照 PHASE2-PLAN 第 7 节
-const NEEDED = [
-  'd1_revenue_trend', 'd2_station_rank', 'd3_pile_utilization', 'd4_hourly_load',
-  'd5_kwh_distribution', 'd6_order_status', 'd7_pile_status', 'd8_device_events',
-  'd9_carbon_daily', 'd10_station_geo', 'd11_duration_distribution',
-  'c1_fast_vs_slow', 'c2_weekday_weekend_hourly', 'c3_station_radar'
-]
+// ---- 分页 ----
+const pageIdx = ref(0)
+const page = computed(() => PAGES[pageIdx.value])
+const autoPlay = ref(false)          // 答辩可开自动轮播；默认关闭，免得检查时页面乱跳
+let rotator = null
+
+function goto (i) {
+  pageIdx.value = (i + PAGES.length) % PAGES.length
+}
+function toggleAuto () {
+  autoPlay.value = !autoPlay.value
+  if (rotator) { clearInterval(rotator); rotator = null }
+  if (autoPlay.value) rotator = setInterval(() => goto(pageIdx.value + 1), 15000)
+}
+// 方向键翻页：答辩用的遥控笔多数映射为方向键，可以不碰鼠标
+function onKey (e) {
+  if (e.key === 'ArrowRight') goto(pageIdx.value + 1)
+  else if (e.key === 'ArrowLeft') goto(pageIdx.value - 1)
+  else if (e.key >= '1' && e.key <= String(PAGES.length)) goto(+e.key - 1)
+}
 
 async function load () {
   state.loading = true
   state.error = ''
   try {
-    // 并发取数：十几个小请求串行会让首屏明显变慢
-    const [ov, ...rest] = await Promise.all([
+    // 一次性取全部维度：翻页时不再发请求，切换是瞬时的。
+    // 用 allSettled 而非 all：**单个维度缺失不应该让整屏变成错误页**。
+    // 譬如 MLlib 还没跑完时 d12 表不存在，那一格显示「暂无数据」即可。
+    const rs = await Promise.allSettled([
       fetchOverview(),
-      ...NEEDED.map(n => fetchDimension(n))
+      ...ALL_DIMS.map(n => fetchDimension(n))
     ])
-    overview.value = ov
-    NEEDED.forEach((n, i) => { dim[n] = rest[i] })
+    if (rs[0].status === 'fulfilled') {
+      overview.value = rs[0].value
+    } else {
+      // overview 挂了才是真的没数据——它是所有 KPI 的来源
+      state.error = String(rs[0].reason?.message || rs[0].reason)
+    }
+    const missing = []
+    ALL_DIMS.forEach((n, i) => {
+      const r = rs[i + 1]
+      if (r.status === 'fulfilled') dim[n] = r.value
+      else { dim[n] = []; missing.push(n) }
+    })
+    // 缺哪几个要能看见，否则「暂无数据」和「忘了接线」分不出来
+    if (missing.length) console.warn('[大屏] 以下维度取数失败：', missing.join(', '))
   } catch (e) {
-    // 把真实错误显示出来而不是吞掉——大屏出问题时，
-    // 「接口 404」和「数据库没起来」需要现场就能分辨
     state.error = String(e.message || e)
   } finally {
     state.loading = false
@@ -52,6 +79,7 @@ async function load () {
 onMounted(() => {
   fit()
   window.addEventListener('resize', fit)
+  window.addEventListener('keydown', onKey)
   clock = setInterval(() => {
     now.value = new Date().toLocaleString('zh-CN', { hour12: false })
   }, 1000)
@@ -59,7 +87,9 @@ onMounted(() => {
 })
 onBeforeUnmount(() => {
   window.removeEventListener('resize', fit)
+  window.removeEventListener('keydown', onKey)
   if (clock) clearInterval(clock)
+  if (rotator) clearInterval(rotator)
 })
 
 const has = n => Array.isArray(dim[n]) && dim[n].length > 0
@@ -85,7 +115,6 @@ const flop = (v, color) => ({
   toFixed: Number.isInteger(v) ? 0 : (String(v).split('.')[1] || '').length
 })
 
-// ---- D2 站点排行用 DataV 的胶囊图，换个图表形态，别全是 ECharts ----
 const capsuleCfg = computed(() => ({
   data: (dim.d2_station_rank || []).map(r => ({
     name: r.station_name.replace('充电站', ''),
@@ -98,18 +127,101 @@ const capsuleCfg = computed(() => ({
   colors: ['#36cfc9', '#597ef7']
 }))
 
-// ---- D6 订单终态用 DataV 的活动环图 ----
 const ringCfg = computed(() => ({
   data: (dim.d6_order_status || []).map(r => ({
     name: r.status_label, value: r.order_cnt
   })),
-  lineWidth: 22,
-  radius: '58%',
-  activeRadius: '64%',
-  digitalFlopStyle: { fill: '#e6f7ff', fontSize: 18 },
+  lineWidth: 26,
+  radius: '60%',
+  activeRadius: '66%',
+  digitalFlopStyle: { fill: '#e6f7ff', fontSize: 20 },
   color: ['#36cfc9', '#ff7875']
 }))
 
+/** 表格里的条形背景单元格：数值 + 视觉长度。
+ *
+ *  DvScrollBoard 的单元格支持 HTML，所以用一个绝对定位的色条垫在数字底下。
+ *  `width` 按同列最大值归一——按满量程归一会让差异被压平。
+ *  条形只是**辅助**，数值仍然完整显示，不能只靠长度读数。
+ */
+function bar (value, max, unit = '', color = '#36cfc9') {
+  const pct = Math.max(2, Math.min(100, (value / max) * 100))
+  // 用 flex + height:100% 撑满单元格并垂直居中。
+  // 写死 height:18px 会让色条挂在行顶、串出行边界（第一版就是这个毛病）——
+  // DvScrollBoard 的行高是按 rowNum 算出来的，不能假设。
+  return `<div style="position:relative;display:flex;align-items:center;height:100%;">
+    <div style="position:absolute;left:0;top:50%;transform:translateY(-50%);
+                height:60%;width:${pct}%;
+                background:linear-gradient(90deg,${color}55,${color}18);
+                border-left:2px solid ${color};border-radius:2px;"></div>
+    <span style="position:relative;padding-left:8px;">${value}${unit}</span>
+  </div>`
+}
+
+// ---- 表格配置。键名对应 pages.js 里的 panel.table ----
+//  数值在这里格式化成字符串，组件层不再换算——与 charts.js 同一口径。
+const tables = {
+  carbonStation: computed(() => {
+    const rows = dim.d13_carbon_station || []
+    // 条形长度按**本列最大值**归一，而不是按 100%——六个站都在 38~52% 之间，
+    // 按 100% 归一的话所有条子都只有半截，差异根本看不出来。
+    const maxPeak = Math.max(...rows.map(r => r.peak_pct), 1)
+    return {
+      header: ['站点', '排放(吨)', '电量(万度)', '强度 g/度', '订单', '峰占比'],
+      columnWidth: [46, 96],
+      align: ['center', 'left', 'right', 'right', 'right', 'right', 'left'],
+      rowNum: 6,
+      rows: rows.map(r => ([
+        r.station_name.replace('充电站', ''),
+        (r.emission_kg / 1000).toFixed(2),
+        (r.kwh / 10000).toFixed(2),
+        String(r.intensity_g_per_kwh),
+        String(r.order_cnt),
+        bar(r.peak_pct, maxPeak, '%')
+      ]))
+    }
+  }),
+  forecast: computed(() => {
+    const rows = dim.d12_load_forecast || []
+    const maxKw = Math.max(...rows.map(r => r.load_kw), 1)
+    return {
+      header: ['站点', 'h', '负荷 kW', '空闲桩', '状态'],
+      columnWidth: [40, 84, 34],
+      align: ['center', 'left', 'center', 'left', 'center', 'center'],
+      rowNum: 9,
+      rows: rows.map(r => ([
+        r.station_name.replace('充电站', ''),
+        r.horizon + 'h',
+        bar(r.load_kw, maxKw),
+        `${r.idle_pile}/${r.pile_total}`,
+        // 高峰标红：这是运营真正要看的一列
+        r.is_peak
+          ? '<span style="color:#ff7875;font-weight:600">高峰</span>'
+          : '<span style="color:#6d89a6">平峰</span>'
+      ]))
+    }
+  }),
+  carbonRecent: computed(() => ({
+    header: ['日期', '电量(度)', '排放(kg)', '强度 g/度', '订单数', '完整度', '排放因子版本'],
+    columnWidth: [46],
+    align: ['center', 'center', 'right', 'right', 'right', 'right', 'center', 'center'],
+    rowNum: 8,
+    rows: (dim.d14_carbon_recent || []).map(r => ([
+      String(r.stat_date),
+      r.kwh.toFixed(1),
+      r.emission_kg.toFixed(1),
+      String(r.intensity_g_per_kwh),
+      String(r.order_cnt),
+      // 完整度低于 100% 要显眼——它直接影响排放量可不可信
+      r.completeness >= 100
+        ? '<span style="color:#73d13d">100%</span>'
+        : `<span style="color:#ffc53d">${r.completeness}%</span>`,
+      r.factor_version
+    ]))
+  }))
+}
+
+// 键名对应 pages.js 里的 panel.opt
 const opt = {
   d1: () => B.d1RevenueTrend(dim.d1_revenue_trend),
   d3: () => B.d3PileUtilization(dim.d3_pile_utilization),
@@ -120,6 +232,7 @@ const opt = {
   d9: () => B.d9Carbon(dim.d9_carbon_daily),
   d10: () => B.d10StationGeo(dim.d10_station_geo),
   d11: () => B.d11Duration(dim.d11_duration_distribution),
+  d12: () => B.d12Forecast(dim.d12_load_forecast),
   c1: () => B.c1FastVsSlow(dim.c1_fast_vs_slow),
   c2: () => B.c2WeekdayHourly(dim.c2_weekday_weekend_hourly),
   c3: () => B.c3StationRadar(dim.c3_station_radar)
@@ -129,7 +242,6 @@ const opt = {
 <template>
   <div class="screen-wrap">
     <div class="screen" :style="{ transform: `scale(${scale})` }">
-      <!-- 顶栏 -->
       <header class="head">
         <DvDecoration10 class="deco-line" />
         <div class="head-mid">
@@ -141,7 +253,6 @@ const opt = {
         <div class="clock">{{ now }}</div>
       </header>
 
-      <!-- KPI -->
       <section class="kpis">
         <DvBorderBox12 v-for="k in kpis" :key="k.label" class="kpi">
           <div class="kpi-in">
@@ -151,63 +262,35 @@ const opt = {
         </DvBorderBox12>
       </section>
 
-      <!-- 全局错误：接口全挂时给一条能照着排查的提示 -->
+      <nav class="tabs">
+        <button v-for="(p, i) in PAGES" :key="p.key"
+                :class="['tab', { on: i === pageIdx }]" @click="goto(i)">
+          <span class="tab-no">{{ i + 1 }}</span>{{ p.name }}
+        </button>
+        <span class="tab-desc">{{ page.desc }}</span>
+        <button class="tab auto" :class="{ on: autoPlay }" @click="toggleAuto">
+          {{ autoPlay ? '⏸ 停止轮播' : '▶ 自动轮播' }}
+        </button>
+        <span class="tab-hint">← → 翻页　数字键直达</span>
+      </nav>
+
       <div v-if="state.error" class="global-err">
         <p>数据加载失败：{{ state.error }}</p>
         <p class="hint">请确认 Flask 已启动：<code>.venv-phase2/bin/python bigdata/api/app.py</code></p>
         <button @click="load">重试</button>
       </div>
 
-      <!-- 主体三列 -->
-      <main v-else class="grid">
-        <!-- 左列 -->
-        <Panel class="g" title="站点营收排行" tag="D2" :loading="state.loading" :empty="!has('d2_station_rank')">
-          <DvCapsuleChart :config="capsuleCfg" style="width:100%;height:100%" />
-        </Panel>
-        <Panel class="g" title="订单终态构成" tag="D6" :loading="state.loading" :empty="!has('d6_order_status')">
-          <DvActiveRingChart :config="ringCfg" style="width:100%;height:100%" />
-        </Panel>
-        <Panel class="g" title="电桩在线率" tag="D7" :loading="state.loading" :empty="!has('d7_pile_status')">
-          <EChart :option="opt.d7()" />
-        </Panel>
-        <Panel class="g" title="电桩利用率 Top12" tag="D3" :loading="state.loading" :empty="!has('d3_pile_utilization')">
-          <EChart :option="opt.d3()" />
-        </Panel>
-
-        <!-- 中列 -->
-        <Panel class="g wide" title="营收与订单趋势（近 60 日）" tag="D1" :loading="state.loading" :empty="!has('d1_revenue_trend')">
-          <EChart :option="opt.d1()" />
-        </Panel>
-        <Panel class="g wide" title="工作日 vs 周末 · 24 小时日均单量" tag="C2 对比" :loading="state.loading" :empty="!has('c2_weekday_weekend_hourly')">
-          <EChart :option="opt.c2()" />
-        </Panel>
-        <Panel class="g" title="站点地理分布" tag="D10" :loading="state.loading" :empty="!has('d10_station_geo')">
-          <EChart :option="opt.d10()" />
-        </Panel>
-        <Panel class="g" title="时段负荷分布" tag="D4" :loading="state.loading" :empty="!has('d4_hourly_load')">
-          <EChart :option="opt.d4()" />
-        </Panel>
-
-        <!-- 右列 -->
-        <Panel class="g" title="快充 vs 慢充" tag="C1 对比" :loading="state.loading" :empty="!has('c1_fast_vs_slow')">
-          <EChart :option="opt.c1()" />
-        </Panel>
-        <Panel class="g" title="站点多指标对标" tag="C3 对比" :loading="state.loading" :empty="!has('c3_station_radar')">
-          <EChart :option="opt.c3()" />
-        </Panel>
-        <Panel class="g" title="碳排放与峰平谷构成" tag="D9" :loading="state.loading" :empty="!has('d9_carbon_daily')">
-          <EChart :option="opt.d9()" />
-        </Panel>
-        <Panel class="g" title="充电时长分布" tag="D11" :loading="state.loading" :empty="!has('d11_duration_distribution')">
-          <EChart :option="opt.d11()" />
-        </Panel>
-
-        <!-- 底排 -->
-        <Panel class="g wide" title="充电量分桶" tag="D5" :loading="state.loading" :empty="!has('d5_kwh_distribution')">
-          <EChart :option="opt.d5()" />
-        </Panel>
-        <Panel class="g wide" title="设备事件时序" tag="D8" :loading="state.loading" :empty="!has('d8_device_events')">
-          <EChart :option="opt.d8()" />
+      <!-- 当前页。用 :key 让翻页时图表重新 init——
+           若改用 v-show，隐藏页的图表会以 0 尺寸初始化，切过去是错的 -->
+      <main v-else :key="page.key" class="grid">
+        <Panel v-for="p in page.panels" :key="p.tag + '/' + p.dim"
+               class="g" :style="{ gridColumn: `span ${p.span}` }"
+               :title="p.title" :tag="p.tag"
+               :loading="state.loading" :empty="!has(p.dim)">
+          <DvCapsuleChart v-if="p.kind === 'capsule'" :config="capsuleCfg" style="width:100%;height:100%" />
+          <DvActiveRingChart v-else-if="p.kind === 'ring'" :config="ringCfg" style="width:100%;height:100%" />
+          <DataTable v-else-if="p.kind === 'table'" v-bind="tables[p.table].value" />
+          <EChart v-else :option="opt[p.opt]()" />
         </Panel>
       </main>
     </div>
@@ -230,17 +313,29 @@ const opt = {
 .deco-8 { width: 180px; height: 40px; }
 .clock { position: absolute; right: 6px; bottom: 4px; font-size: 13px; color: #7f9cb8; letter-spacing: 1px; }
 
-.kpis { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; height: 92px; margin: 4px 0 10px; }
+.kpis { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; height: 92px; margin: 4px 0 8px; }
 .kpi { height: 92px; }
 .kpi-in { height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; }
 .kpi-num { width: 100%; height: 36px; }
 .kpi-label { font-size: 12px; color: #8fa9c4; letter-spacing: 1px; }
 .kpi-suffix { color: #5c7a99; margin-left: 4px; }
 
-.grid { flex: 1 1 auto; min-height: 0; display: grid; gap: 12px;
+.tabs { display: flex; align-items: center; gap: 10px; height: 40px; flex: 0 0 auto; margin-bottom: 8px; }
+.tab { background: rgba(20, 45, 80, .45); border: 1px solid rgba(89, 126, 247, .35);
+  color: #8fa9c4; padding: 6px 18px; border-radius: 4px; cursor: pointer;
+  font-size: 14px; letter-spacing: 1px; font-family: inherit; transition: all .15s; }
+.tab:hover { border-color: #36cfc9; color: #c9d6e5; }
+.tab.on { background: rgba(54, 207, 201, .16); border-color: #36cfc9; color: #36cfc9; font-weight: 600; }
+.tab-no { display: inline-block; width: 16px; height: 16px; line-height: 16px; margin-right: 7px;
+  border-radius: 50%; background: rgba(255, 255, 255, .1); font-size: 10px; text-align: center; }
+.tab.on .tab-no { background: #36cfc9; color: #04121f; }
+.tab-desc { flex: 1 1 auto; color: #6d89a6; font-size: 13px; letter-spacing: .5px; padding-left: 6px; }
+.tab.auto { padding: 6px 14px; font-size: 13px; }
+.tab-hint { color: #4d6785; font-size: 11px; }
+
+.grid { flex: 1 1 auto; min-height: 0; display: grid; gap: 14px;
   grid-template-columns: repeat(6, 1fr); grid-auto-rows: 1fr; }
-.g { min-height: 0; grid-column: span 1; }
-.g.wide { grid-column: span 2; }
+.g { min-height: 0; }
 
 .global-err { flex: 1 1 auto; display: flex; flex-direction: column; align-items: center;
   justify-content: center; gap: 12px; color: #ff7875; font-size: 16px; }

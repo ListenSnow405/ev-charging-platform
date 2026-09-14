@@ -1,0 +1,289 @@
+{
+  "generated_at": "2026-09-14 23:33:09",
+  "model_version": "gbt-20260914-233309",
+  "framework": "Spark MLlib GBTRegressor（Spark 3.5.9）",
+  "loss": "absolute",
+  "split": "按时间切分：测试末 12 天，验证为训练段末 8 天",
+  "feature_count": 24,
+  "features": [
+    "station_id",
+    "pile_total",
+    "pile_fast",
+    "pile_slow",
+    "power_total",
+    "hour",
+    "weekday",
+    "is_weekend",
+    "hour_sin",
+    "hour_cos",
+    "dow_sin",
+    "dow_cos",
+    "load_seas_mean",
+    "sess_seas_mean",
+    "load_lag_1",
+    "load_lag_24",
+    "load_lag_168",
+    "load_roll_24",
+    "load_roll_168",
+    "sess_lag_1",
+    "sess_lag_24",
+    "sess_lag_168",
+    "sess_roll_24",
+    "sess_roll_168"
+  ],
+  "grid": [
+    {
+      "maxIter": 300,
+      "maxDepth": 5,
+      "stepSize": 0.1,
+      "subsamplingRate": 1.0,
+      "featureSubsetStrategy": "all"
+    },
+    {
+      "maxIter": 150,
+      "maxDepth": 5,
+      "stepSize": 0.1,
+      "subsamplingRate": 1.0,
+      "featureSubsetStrategy": "all"
+    },
+    {
+      "maxIter": 300,
+      "maxDepth": 3,
+      "stepSize": 0.05,
+      "subsamplingRate": 0.7,
+      "featureSubsetStrategy": "sqrt"
+    },
+    {
+      "maxIter": 300,
+      "maxDepth": 4,
+      "stepSize": 0.05,
+      "subsamplingRate": 0.8,
+      "featureSubsetStrategy": "onethird"
+    },
+    {
+      "maxIter": 400,
+      "maxDepth": 3,
+      "stepSize": 0.03,
+      "subsamplingRate": 0.7,
+      "featureSubsetStrategy": "sqrt"
+    }
+  ],
+  "results": [
+    {
+      "target": "y_load_kw",
+      "horizon": 1,
+      "params": {
+        "maxIter": 300,
+        "maxDepth": 5,
+        "stepSize": 0.1,
+        "subsamplingRate": 1.0,
+        "featureSubsetStrategy": "all"
+      },
+      "n_train": 5892,
+      "n_valid": 1152,
+      "n_test": 1734,
+      "train": {
+        "mae": 26.9199,
+        "rmse": 37.972,
+        "r2": 0.3338
+      },
+      "test": {
+        "mae": 30.6804,
+        "rmse": 42.6171,
+        "r2": 0.2139
+      },
+      "baseline_a": {
+        "mae": 31.6048,
+        "rmse": 41.6422,
+        "r2": 0.2494
+      },
+      "baseline_b": {
+        "mae": 30.9954,
+        "rmse": 40.7315,
+        "r2": 0.2819
+      },
+      "gain_vs_a_pct": 2.92,
+      "gain_vs_b_pct": 1.02
+    },
+    {
+      "target": "y_load_kw",
+      "horizon": 6,
+      "params": {
+        "maxIter": 300,
+        "maxDepth": 5,
+        "stepSize": 0.1,
+        "subsamplingRate": 1.0,
+        "featureSubsetStrategy": "all"
+      },
+      "n_train": 5862,
+      "n_valid": 1152,
+      "n_test": 1734,
+      "train": {
+        "mae": 28.4256,
+        "rmse": 38.915,
+        "r2": 0.3022
+      },
+      "test": {
+        "mae": 31.9526,
+        "rmse": 42.8326,
+        "r2": 0.2059
+      },
+      "baseline_a": {
+        "mae": 31.5959,
+        "rmse": 41.6439,
+        "r2": 0.2494
+      },
+      "baseline_b": {
+        "mae": 31.0115,
+        "rmse": 40.7857,
+        "r2": 0.28
+      },
+      "gain_vs_a_pct": -1.13,
+      "gain_vs_b_pct": -3.03
+    },
+    {
+      "target": "y_load_kw",
+      "horizon": 24,
+      "params": {
+        "maxIter": 300,
+        "maxDepth": 5,
+        "stepSize": 0.1,
+        "subsamplingRate": 1.0,
+        "featureSubsetStrategy": "all"
+      },
+      "n_train": 5754,
+      "n_valid": 1152,
+      "n_test": 1734,
+      "train": {
+        "mae": 27.642,
+        "rmse": 38.4794,
+        "r2": 0.3163
+      },
+      "test": {
+        "mae": 31.6487,
+        "rmse": 42.2364,
+        "r2": 0.2278
+      },
+      "baseline_a": {
+        "mae": 31.6009,
+        "rmse": 41.6557,
+        "r2": 0.2489
+      },
+      "baseline_b": {
+        "mae": 31.7214,
+        "rmse": 41.8533,
+        "r2": 0.2418
+      },
+      "gain_vs_a_pct": -0.15,
+      "gain_vs_b_pct": 0.23
+    },
+    {
+      "target": "y_sessions",
+      "horizon": 1,
+      "params": {
+        "maxIter": 300,
+        "maxDepth": 3,
+        "stepSize": 0.05,
+        "subsamplingRate": 0.7,
+        "featureSubsetStrategy": "sqrt"
+      },
+      "n_train": 5892,
+      "n_valid": 1152,
+      "n_test": 1734,
+      "train": {
+        "mae": 0.5157,
+        "rmse": 0.6774,
+        "r2": 0.456
+      },
+      "test": {
+        "mae": 0.6142,
+        "rmse": 0.7713,
+        "r2": 0.3389
+      },
+      "baseline_a": {
+        "mae": 0.6792,
+        "rmse": 0.826,
+        "r2": 0.2419
+      },
+      "baseline_b": {
+        "mae": 0.6669,
+        "rmse": 0.8125,
+        "r2": 0.2663
+      },
+      "gain_vs_a_pct": 9.57,
+      "gain_vs_b_pct": 7.9
+    },
+    {
+      "target": "y_sessions",
+      "horizon": 6,
+      "params": {
+        "maxIter": 300,
+        "maxDepth": 4,
+        "stepSize": 0.05,
+        "subsamplingRate": 0.8,
+        "featureSubsetStrategy": "onethird"
+      },
+      "n_train": 5862,
+      "n_valid": 1152,
+      "n_test": 1734,
+      "train": {
+        "mae": 0.4817,
+        "rmse": 0.6443,
+        "r2": 0.5087
+      },
+      "test": {
+        "mae": 0.6911,
+        "rmse": 0.8453,
+        "r2": 0.2061
+      },
+      "baseline_a": {
+        "mae": 0.6788,
+        "rmse": 0.826,
+        "r2": 0.2419
+      },
+      "baseline_b": {
+        "mae": 0.6655,
+        "rmse": 0.8119,
+        "r2": 0.2675
+      },
+      "gain_vs_a_pct": -1.81,
+      "gain_vs_b_pct": -3.85
+    },
+    {
+      "target": "y_sessions",
+      "horizon": 24,
+      "params": {
+        "maxIter": 300,
+        "maxDepth": 3,
+        "stepSize": 0.05,
+        "subsamplingRate": 0.7,
+        "featureSubsetStrategy": "sqrt"
+      },
+      "n_train": 5754,
+      "n_valid": 1152,
+      "n_test": 1734,
+      "train": {
+        "mae": 0.5776,
+        "rmse": 0.7365,
+        "r2": 0.359
+      },
+      "test": {
+        "mae": 0.6966,
+        "rmse": 0.8553,
+        "r2": 0.187
+      },
+      "baseline_a": {
+        "mae": 0.6791,
+        "rmse": 0.8264,
+        "r2": 0.2411
+      },
+      "baseline_b": {
+        "mae": 0.6823,
+        "rmse": 0.8326,
+        "r2": 0.2297
+      },
+      "gain_vs_a_pct": -2.58,
+      "gain_vs_b_pct": -2.1
+    }
+  ]
+}
