@@ -1,0 +1,21 @@
+{
+  "name": "ecp-bigdata-screen",
+  "version": "1.0.0",
+  "private": true,
+  "description": "充电桩大数据可视化大屏（第二阶段 T6）",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview --port 4173"
+  },
+  "dependencies": {
+    "@kjgl77/datav-vue3": "^1.7.4",
+    "echarts": "^5.5.0",
+    "vue": "^3.5.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.2.0",
+    "vite": "^6.0.0"
+  }
+}

@@ -1,0 +1,10 @@
+/* 大屏基础样式。固定 1920×1080 设计稿，用 transform 缩放适配实际分辨率——
+   投影仪分辨率五花八门，按比例缩放比响应式断点更可靠。 */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body, #app { width: 100%; height: 100%; overflow: hidden; }
+body {
+  background: #050d1a;
+  color: #c9d6e5;
+  font-family: "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
