@@ -37,6 +37,8 @@ __pycache__/
 *.py[cod]
 .venv/
 venv/
+# 第二阶段独立虚拟环境（Python 3.11 + PySpark）；与一阶段的 .venv（3.10）并存
+.venv-phase2/
 *.pkl
 *.joblib
 

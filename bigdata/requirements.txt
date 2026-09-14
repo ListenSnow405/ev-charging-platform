@@ -1,0 +1,16 @@
+# 第二阶段大数据子系统依赖　归属 L5
+# 安装：python3.11 -m venv .venv-phase2 && .venv-phase2/bin/pip install -r bigdata/requirements.txt
+#
+# 与第一阶段的 ml/requirements.txt 互不相干：那边是 Python 3.10 + scikit-learn，
+# 这边是 Python 3.11 + PySpark。两个 venv 并存，不要混装（CLAUDE.md 第 1、2.2 节）。
+#
+# 版本依据：PySpark 3.5.x 的 PyPI classifiers 只声明支持到 Python 3.11（实测，非记忆），
+# 故锁 3.5 线 + Python 3.11。若将来升 Python 3.12，PySpark 必须同步升到 4.x。
+# 境内安装建议加 -i https://pypi.tuna.tsinghua.edu.cn/simple（官方源实测会断流）。
+
+pyspark==3.5.*      # 数据清洗 + 多维分析 + MLlib 建模
+flask               # 只读 API 层（CLAUDE.md 5.2 第 8 条：不写业务库）
+flask-cors          # Vue 开发服务器跨域
+pymysql             # Flask 读 MySQL 分析结果
+pandas              # 小结果集落地与核对
+pyarrow             # Spark ↔ pandas 高效转换
