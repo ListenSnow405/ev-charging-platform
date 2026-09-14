@@ -1,0 +1,20 @@
+{
+  "dimension": "d6_order_status",
+  "description": "订单终态（总 8292 单）",
+  "generated_at": "2026-09-14 13:18:10",
+  "row_count": 2,
+  "rows": [
+    {
+      "status": 3,
+      "status_label": "已结算",
+      "order_cnt": 6477,
+      "ratio_pct": 78.11
+    },
+    {
+      "status": 4,
+      "status_label": "已取消",
+      "order_cnt": 1815,
+      "ratio_pct": 21.89
+    }
+  ]
+}

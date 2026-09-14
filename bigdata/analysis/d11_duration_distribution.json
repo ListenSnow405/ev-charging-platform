@@ -1,0 +1,116 @@
+{
+  "dimension": "d11_duration_distribution",
+  "description": "充电时长分桶 × 快慢充",
+  "generated_at": "2026-09-14 13:18:10",
+  "row_count": 18,
+  "rows": [
+    {
+      "minutes_from": 0,
+      "type_label": "快充",
+      "order_cnt": 1344,
+      "minutes_to": 30
+    },
+    {
+      "minutes_from": 0,
+      "type_label": "慢充",
+      "order_cnt": 1,
+      "minutes_to": 30
+    },
+    {
+      "minutes_from": 30,
+      "type_label": "快充",
+      "order_cnt": 3483,
+      "minutes_to": 60
+    },
+    {
+      "minutes_from": 30,
+      "type_label": "慢充",
+      "order_cnt": 3,
+      "minutes_to": 60
+    },
+    {
+      "minutes_from": 60,
+      "type_label": "快充",
+      "order_cnt": 2,
+      "minutes_to": 90
+    },
+    {
+      "minutes_from": 60,
+      "type_label": "慢充",
+      "order_cnt": 2,
+      "minutes_to": 90
+    },
+    {
+      "minutes_from": 120,
+      "type_label": "慢充",
+      "order_cnt": 159,
+      "minutes_to": 150
+    },
+    {
+      "minutes_from": 150,
+      "type_label": "慢充",
+      "order_cnt": 185,
+      "minutes_to": 180
+    },
+    {
+      "minutes_from": 180,
+      "type_label": "慢充",
+      "order_cnt": 151,
+      "minutes_to": 210
+    },
+    {
+      "minutes_from": 210,
+      "type_label": "慢充",
+      "order_cnt": 158,
+      "minutes_to": 240
+    },
+    {
+      "minutes_from": 240,
+      "type_label": "慢充",
+      "order_cnt": 154,
+      "minutes_to": 270
+    },
+    {
+      "minutes_from": 270,
+      "type_label": "慢充",
+      "order_cnt": 139,
+      "minutes_to": 300
+    },
+    {
+      "minutes_from": 300,
+      "type_label": "慢充",
+      "order_cnt": 125,
+      "minutes_to": 330
+    },
+    {
+      "minutes_from": 330,
+      "type_label": "慢充",
+      "order_cnt": 132,
+      "minutes_to": 360
+    },
+    {
+      "minutes_from": 360,
+      "type_label": "慢充",
+      "order_cnt": 104,
+      "minutes_to": 390
+    },
+    {
+      "minutes_from": 390,
+      "type_label": "慢充",
+      "order_cnt": 101,
+      "minutes_to": 420
+    },
+    {
+      "minutes_from": 420,
+      "type_label": "慢充",
+      "order_cnt": 119,
+      "minutes_to": 450
+    },
+    {
+      "minutes_from": 450,
+      "type_label": "慢充",
+      "order_cnt": 115,
+      "minutes_to": 480
+    }
+  ]
+}

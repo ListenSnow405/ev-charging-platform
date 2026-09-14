@@ -1,0 +1,488 @@
+{
+  "dimension": "d9_carbon_daily",
+  "description": "每日碳排放与峰平谷构成",
+  "generated_at": "2026-09-14 13:18:10",
+  "row_count": 60,
+  "rows": [
+    {
+      "stat_date": "2026-07-07",
+      "emission_g": 5280558,
+      "kwh_x100": 908874,
+      "peak_kwh_x100": 413065,
+      "flat_kwh_x100": 393679,
+      "valley_kwh_x100": 102130
+    },
+    {
+      "stat_date": "2026-07-08",
+      "emission_g": 4786429,
+      "kwh_x100": 823826,
+      "peak_kwh_x100": 366640,
+      "flat_kwh_x100": 339048,
+      "valley_kwh_x100": 118138
+    },
+    {
+      "stat_date": "2026-07-09",
+      "emission_g": 4341395,
+      "kwh_x100": 747228,
+      "peak_kwh_x100": 268215,
+      "flat_kwh_x100": 324564,
+      "valley_kwh_x100": 154449
+    },
+    {
+      "stat_date": "2026-07-10",
+      "emission_g": 5065134,
+      "kwh_x100": 871796,
+      "peak_kwh_x100": 366353,
+      "flat_kwh_x100": 381683,
+      "valley_kwh_x100": 123760
+    },
+    {
+      "stat_date": "2026-07-11",
+      "emission_g": 4420590,
+      "kwh_x100": 760859,
+      "peak_kwh_x100": 367111,
+      "flat_kwh_x100": 294904,
+      "valley_kwh_x100": 98844
+    },
+    {
+      "stat_date": "2026-07-12",
+      "emission_g": 3194954,
+      "kwh_x100": 549906,
+      "peak_kwh_x100": 251107,
+      "flat_kwh_x100": 183812,
+      "valley_kwh_x100": 114987
+    },
+    {
+      "stat_date": "2026-07-13",
+      "emission_g": 3459965,
+      "kwh_x100": 595519,
+      "peak_kwh_x100": 268282,
+      "flat_kwh_x100": 226280,
+      "valley_kwh_x100": 100957
+    },
+    {
+      "stat_date": "2026-07-14",
+      "emission_g": 3231122,
+      "kwh_x100": 556131,
+      "peak_kwh_x100": 233761,
+      "flat_kwh_x100": 231420,
+      "valley_kwh_x100": 90950
+    },
+    {
+      "stat_date": "2026-07-15",
+      "emission_g": 2638054,
+      "kwh_x100": 454054,
+      "peak_kwh_x100": 176661,
+      "flat_kwh_x100": 164848,
+      "valley_kwh_x100": 112545
+    },
+    {
+      "stat_date": "2026-07-16",
+      "emission_g": 2335422,
+      "kwh_x100": 401966,
+      "peak_kwh_x100": 179816,
+      "flat_kwh_x100": 161150,
+      "valley_kwh_x100": 61000
+    },
+    {
+      "stat_date": "2026-07-17",
+      "emission_g": 3468633,
+      "kwh_x100": 597011,
+      "peak_kwh_x100": 248109,
+      "flat_kwh_x100": 301200,
+      "valley_kwh_x100": 47702
+    },
+    {
+      "stat_date": "2026-07-18",
+      "emission_g": 2101826,
+      "kwh_x100": 361760,
+      "peak_kwh_x100": 162244,
+      "flat_kwh_x100": 160700,
+      "valley_kwh_x100": 38816
+    },
+    {
+      "stat_date": "2026-07-19",
+      "emission_g": 2407896,
+      "kwh_x100": 414440,
+      "peak_kwh_x100": 221613,
+      "flat_kwh_x100": 149787,
+      "valley_kwh_x100": 43040
+    },
+    {
+      "stat_date": "2026-07-20",
+      "emission_g": 3225066,
+      "kwh_x100": 555089,
+      "peak_kwh_x100": 238870,
+      "flat_kwh_x100": 237099,
+      "valley_kwh_x100": 79120
+    },
+    {
+      "stat_date": "2026-07-21",
+      "emission_g": 3777849,
+      "kwh_x100": 650232,
+      "peak_kwh_x100": 336315,
+      "flat_kwh_x100": 249674,
+      "valley_kwh_x100": 64243
+    },
+    {
+      "stat_date": "2026-07-22",
+      "emission_g": 3379044,
+      "kwh_x100": 581591,
+      "peak_kwh_x100": 258915,
+      "flat_kwh_x100": 211303,
+      "valley_kwh_x100": 111373
+    },
+    {
+      "stat_date": "2026-07-23",
+      "emission_g": 2476542,
+      "kwh_x100": 426255,
+      "peak_kwh_x100": 179419,
+      "flat_kwh_x100": 206936,
+      "valley_kwh_x100": 39900
+    },
+    {
+      "stat_date": "2026-07-24",
+      "emission_g": 2604722,
+      "kwh_x100": 448317,
+      "peak_kwh_x100": 224689,
+      "flat_kwh_x100": 173237,
+      "valley_kwh_x100": 50391
+    },
+    {
+      "stat_date": "2026-07-25",
+      "emission_g": 2445295,
+      "kwh_x100": 420877,
+      "peak_kwh_x100": 235804,
+      "flat_kwh_x100": 161596,
+      "valley_kwh_x100": 23477
+    },
+    {
+      "stat_date": "2026-07-26",
+      "emission_g": 2183949,
+      "kwh_x100": 375895,
+      "peak_kwh_x100": 196517,
+      "flat_kwh_x100": 134031,
+      "valley_kwh_x100": 45347
+    },
+    {
+      "stat_date": "2026-07-27",
+      "emission_g": 2766198,
+      "kwh_x100": 476110,
+      "peak_kwh_x100": 238909,
+      "flat_kwh_x100": 175546,
+      "valley_kwh_x100": 61655
+    },
+    {
+      "stat_date": "2026-07-28",
+      "emission_g": 2503383,
+      "kwh_x100": 430875,
+      "peak_kwh_x100": 205178,
+      "flat_kwh_x100": 131924,
+      "valley_kwh_x100": 93773
+    },
+    {
+      "stat_date": "2026-07-29",
+      "emission_g": 3020266,
+      "kwh_x100": 519839,
+      "peak_kwh_x100": 227760,
+      "flat_kwh_x100": 188187,
+      "valley_kwh_x100": 103892
+    },
+    {
+      "stat_date": "2026-07-30",
+      "emission_g": 4339262,
+      "kwh_x100": 746861,
+      "peak_kwh_x100": 301557,
+      "flat_kwh_x100": 316037,
+      "valley_kwh_x100": 129267
+    },
+    {
+      "stat_date": "2026-07-31",
+      "emission_g": 4312356,
+      "kwh_x100": 742230,
+      "peak_kwh_x100": 304493,
+      "flat_kwh_x100": 318128,
+      "valley_kwh_x100": 119609
+    },
+    {
+      "stat_date": "2026-08-01",
+      "emission_g": 4122491,
+      "kwh_x100": 709551,
+      "peak_kwh_x100": 323583,
+      "flat_kwh_x100": 260550,
+      "valley_kwh_x100": 125418
+    },
+    {
+      "stat_date": "2026-08-02",
+      "emission_g": 3062480,
+      "kwh_x100": 527105,
+      "peak_kwh_x100": 230669,
+      "flat_kwh_x100": 200264,
+      "valley_kwh_x100": 96172
+    },
+    {
+      "stat_date": "2026-08-03",
+      "emission_g": 3911698,
+      "kwh_x100": 673270,
+      "peak_kwh_x100": 300557,
+      "flat_kwh_x100": 279310,
+      "valley_kwh_x100": 93403
+    },
+    {
+      "stat_date": "2026-08-04",
+      "emission_g": 5036073,
+      "kwh_x100": 866794,
+      "peak_kwh_x100": 381373,
+      "flat_kwh_x100": 369088,
+      "valley_kwh_x100": 116333
+    },
+    {
+      "stat_date": "2026-08-05",
+      "emission_g": 4787725,
+      "kwh_x100": 824049,
+      "peak_kwh_x100": 399187,
+      "flat_kwh_x100": 280411,
+      "valley_kwh_x100": 144451
+    },
+    {
+      "stat_date": "2026-08-06",
+      "emission_g": 4163289,
+      "kwh_x100": 716573,
+      "peak_kwh_x100": 324031,
+      "flat_kwh_x100": 316446,
+      "valley_kwh_x100": 76096
+    },
+    {
+      "stat_date": "2026-08-07",
+      "emission_g": 3186623,
+      "kwh_x100": 548472,
+      "peak_kwh_x100": 268397,
+      "flat_kwh_x100": 232215,
+      "valley_kwh_x100": 47860
+    },
+    {
+      "stat_date": "2026-08-08",
+      "emission_g": 2750471,
+      "kwh_x100": 473403,
+      "peak_kwh_x100": 243048,
+      "flat_kwh_x100": 187341,
+      "valley_kwh_x100": 43014
+    },
+    {
+      "stat_date": "2026-08-09",
+      "emission_g": 2554860,
+      "kwh_x100": 439735,
+      "peak_kwh_x100": 211460,
+      "flat_kwh_x100": 170066,
+      "valley_kwh_x100": 58209
+    },
+    {
+      "stat_date": "2026-08-10",
+      "emission_g": 3553780,
+      "kwh_x100": 611666,
+      "peak_kwh_x100": 309649,
+      "flat_kwh_x100": 235253,
+      "valley_kwh_x100": 66764
+    },
+    {
+      "stat_date": "2026-08-11",
+      "emission_g": 2731130,
+      "kwh_x100": 470074,
+      "peak_kwh_x100": 197107,
+      "flat_kwh_x100": 226486,
+      "valley_kwh_x100": 46481
+    },
+    {
+      "stat_date": "2026-08-12",
+      "emission_g": 2925609,
+      "kwh_x100": 503547,
+      "peak_kwh_x100": 228582,
+      "flat_kwh_x100": 181971,
+      "valley_kwh_x100": 92994
+    },
+    {
+      "stat_date": "2026-08-13",
+      "emission_g": 3210287,
+      "kwh_x100": 552545,
+      "peak_kwh_x100": 228524,
+      "flat_kwh_x100": 253038,
+      "valley_kwh_x100": 70983
+    },
+    {
+      "stat_date": "2026-08-14",
+      "emission_g": 3638798,
+      "kwh_x100": 626299,
+      "peak_kwh_x100": 291992,
+      "flat_kwh_x100": 242660,
+      "valley_kwh_x100": 91647
+    },
+    {
+      "stat_date": "2026-08-15",
+      "emission_g": 3231540,
+      "kwh_x100": 556203,
+      "peak_kwh_x100": 259750,
+      "flat_kwh_x100": 210859,
+      "valley_kwh_x100": 85594
+    },
+    {
+      "stat_date": "2026-08-16",
+      "emission_g": 2953810,
+      "kwh_x100": 508401,
+      "peak_kwh_x100": 289558,
+      "flat_kwh_x100": 154013,
+      "valley_kwh_x100": 64830
+    },
+    {
+      "stat_date": "2026-08-17",
+      "emission_g": 4816797,
+      "kwh_x100": 829053,
+      "peak_kwh_x100": 357615,
+      "flat_kwh_x100": 365709,
+      "valley_kwh_x100": 105729
+    },
+    {
+      "stat_date": "2026-08-18",
+      "emission_g": 3434036,
+      "kwh_x100": 591056,
+      "peak_kwh_x100": 253123,
+      "flat_kwh_x100": 222589,
+      "valley_kwh_x100": 115344
+    },
+    {
+      "stat_date": "2026-08-19",
+      "emission_g": 4214115,
+      "kwh_x100": 725321,
+      "peak_kwh_x100": 270984,
+      "flat_kwh_x100": 347065,
+      "valley_kwh_x100": 107272
+    },
+    {
+      "stat_date": "2026-08-20",
+      "emission_g": 3658551,
+      "kwh_x100": 629699,
+      "peak_kwh_x100": 286654,
+      "flat_kwh_x100": 262491,
+      "valley_kwh_x100": 80554
+    },
+    {
+      "stat_date": "2026-08-21",
+      "emission_g": 4636263,
+      "kwh_x100": 797980,
+      "peak_kwh_x100": 332033,
+      "flat_kwh_x100": 345894,
+      "valley_kwh_x100": 120053
+    },
+    {
+      "stat_date": "2026-08-22",
+      "emission_g": 4378654,
+      "kwh_x100": 753641,
+      "peak_kwh_x100": 370092,
+      "flat_kwh_x100": 285489,
+      "valley_kwh_x100": 98060
+    },
+    {
+      "stat_date": "2026-08-23",
+      "emission_g": 3942138,
+      "kwh_x100": 678509,
+      "peak_kwh_x100": 320460,
+      "flat_kwh_x100": 270922,
+      "valley_kwh_x100": 87127
+    },
+    {
+      "stat_date": "2026-08-24",
+      "emission_g": 4722751,
+      "kwh_x100": 812866,
+      "peak_kwh_x100": 346771,
+      "flat_kwh_x100": 313788,
+      "valley_kwh_x100": 152307
+    },
+    {
+      "stat_date": "2026-08-25",
+      "emission_g": 3463976,
+      "kwh_x100": 596209,
+      "peak_kwh_x100": 252848,
+      "flat_kwh_x100": 257083,
+      "valley_kwh_x100": 86278
+    },
+    {
+      "stat_date": "2026-08-26",
+      "emission_g": 4214603,
+      "kwh_x100": 725405,
+      "peak_kwh_x100": 350289,
+      "flat_kwh_x100": 298567,
+      "valley_kwh_x100": 76549
+    },
+    {
+      "stat_date": "2026-08-27",
+      "emission_g": 3880993,
+      "kwh_x100": 667985,
+      "peak_kwh_x100": 312167,
+      "flat_kwh_x100": 259194,
+      "valley_kwh_x100": 96624
+    },
+    {
+      "stat_date": "2026-08-28",
+      "emission_g": 3596025,
+      "kwh_x100": 618937,
+      "peak_kwh_x100": 292152,
+      "flat_kwh_x100": 240461,
+      "valley_kwh_x100": 86324
+    },
+    {
+      "stat_date": "2026-08-29",
+      "emission_g": 3539574,
+      "kwh_x100": 609221,
+      "peak_kwh_x100": 291166,
+      "flat_kwh_x100": 260036,
+      "valley_kwh_x100": 58019
+    },
+    {
+      "stat_date": "2026-08-30",
+      "emission_g": 3552559,
+      "kwh_x100": 611456,
+      "peak_kwh_x100": 326828,
+      "flat_kwh_x100": 232545,
+      "valley_kwh_x100": 52083
+    },
+    {
+      "stat_date": "2026-08-31",
+      "emission_g": 3523068,
+      "kwh_x100": 606380,
+      "peak_kwh_x100": 252865,
+      "flat_kwh_x100": 295483,
+      "valley_kwh_x100": 58032
+    },
+    {
+      "stat_date": "2026-09-01",
+      "emission_g": 3466275,
+      "kwh_x100": 596605,
+      "peak_kwh_x100": 280350,
+      "flat_kwh_x100": 236209,
+      "valley_kwh_x100": 80046
+    },
+    {
+      "stat_date": "2026-09-02",
+      "emission_g": 4425745,
+      "kwh_x100": 761746,
+      "peak_kwh_x100": 352162,
+      "flat_kwh_x100": 306566,
+      "valley_kwh_x100": 103018
+    },
+    {
+      "stat_date": "2026-09-03",
+      "emission_g": 2649087,
+      "kwh_x100": 455953,
+      "peak_kwh_x100": 198842,
+      "flat_kwh_x100": 191696,
+      "valley_kwh_x100": 65415
+    },
+    {
+      "stat_date": "2026-09-04",
+      "emission_g": 3165201,
+      "kwh_x100": 544785,
+      "peak_kwh_x100": 239867,
+      "flat_kwh_x100": 221928,
+      "valley_kwh_x100": 82990
+    }
+  ]
+}

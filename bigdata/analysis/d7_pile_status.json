@@ -1,0 +1,26 @@
+{
+  "dimension": "d7_pile_status",
+  "description": "电桩三态分布与在线率",
+  "generated_at": "2026-09-14 13:18:10",
+  "row_count": 3,
+  "rows": [
+    {
+      "status_label": "在用",
+      "pile_cnt": 8,
+      "online_cnt": 8,
+      "online_pct": 100.0
+    },
+    {
+      "status_label": "故障",
+      "pile_cnt": 4,
+      "online_cnt": 4,
+      "online_pct": 100.0
+    },
+    {
+      "status_label": "闲置",
+      "pile_cnt": 12,
+      "online_cnt": 11,
+      "online_pct": 91.67
+    }
+  ]
+}

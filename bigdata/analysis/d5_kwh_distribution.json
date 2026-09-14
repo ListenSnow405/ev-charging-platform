@@ -1,0 +1,44 @@
+{
+  "dimension": "d5_kwh_distribution",
+  "description": "充电量分桶（每 20 度一档）",
+  "generated_at": "2026-09-14 13:18:10",
+  "row_count": 6,
+  "rows": [
+    {
+      "kwh_from": 0,
+      "order_cnt": 463,
+      "avg_unit_price_fen": 147,
+      "kwh_to": 20
+    },
+    {
+      "kwh_from": 20,
+      "order_cnt": 1435,
+      "avg_unit_price_fen": 147,
+      "kwh_to": 40
+    },
+    {
+      "kwh_from": 40,
+      "order_cnt": 1796,
+      "avg_unit_price_fen": 147,
+      "kwh_to": 60
+    },
+    {
+      "kwh_from": 60,
+      "order_cnt": 1389,
+      "avg_unit_price_fen": 147,
+      "kwh_to": 80
+    },
+    {
+      "kwh_from": 80,
+      "order_cnt": 1152,
+      "avg_unit_price_fen": 146,
+      "kwh_to": 100
+    },
+    {
+      "kwh_from": 100,
+      "order_cnt": 242,
+      "avg_unit_price_fen": 147,
+      "kwh_to": 120
+    }
+  ]
+}

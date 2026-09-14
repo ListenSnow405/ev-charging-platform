@@ -1,0 +1,152 @@
+{
+  "dimension": "d4_hourly_load",
+  "description": "24 小时下单分布",
+  "generated_at": "2026-09-14 13:18:10",
+  "row_count": 24,
+  "rows": [
+    {
+      "order_hour": 0,
+      "order_cnt": 97,
+      "kwh_x100": 608544,
+      "revenue_fen": 876796
+    },
+    {
+      "order_hour": 1,
+      "order_cnt": 76,
+      "kwh_x100": 436827,
+      "revenue_fen": 628196
+    },
+    {
+      "order_hour": 2,
+      "order_cnt": 76,
+      "kwh_x100": 379255,
+      "revenue_fen": 545061
+    },
+    {
+      "order_hour": 3,
+      "order_cnt": 72,
+      "kwh_x100": 376874,
+      "revenue_fen": 543510
+    },
+    {
+      "order_hour": 4,
+      "order_cnt": 82,
+      "kwh_x100": 367336,
+      "revenue_fen": 530810
+    },
+    {
+      "order_hour": 5,
+      "order_cnt": 100,
+      "kwh_x100": 476938,
+      "revenue_fen": 698904
+    },
+    {
+      "order_hour": 6,
+      "order_cnt": 139,
+      "kwh_x100": 767329,
+      "revenue_fen": 1127603
+    },
+    {
+      "order_hour": 7,
+      "order_cnt": 252,
+      "kwh_x100": 1427994,
+      "revenue_fen": 2125061
+    },
+    {
+      "order_hour": 8,
+      "order_cnt": 436,
+      "kwh_x100": 2435412,
+      "revenue_fen": 3625958
+    },
+    {
+      "order_hour": 9,
+      "order_cnt": 388,
+      "kwh_x100": 2248302,
+      "revenue_fen": 3356331
+    },
+    {
+      "order_hour": 10,
+      "order_cnt": 325,
+      "kwh_x100": 1886340,
+      "revenue_fen": 2810849
+    },
+    {
+      "order_hour": 11,
+      "order_cnt": 301,
+      "kwh_x100": 1711389,
+      "revenue_fen": 2542333
+    },
+    {
+      "order_hour": 12,
+      "order_cnt": 285,
+      "kwh_x100": 1626662,
+      "revenue_fen": 2402397
+    },
+    {
+      "order_hour": 13,
+      "order_cnt": 319,
+      "kwh_x100": 1864250,
+      "revenue_fen": 2772326
+    },
+    {
+      "order_hour": 14,
+      "order_cnt": 309,
+      "kwh_x100": 1823571,
+      "revenue_fen": 2707553
+    },
+    {
+      "order_hour": 15,
+      "order_cnt": 307,
+      "kwh_x100": 1784528,
+      "revenue_fen": 2642316
+    },
+    {
+      "order_hour": 16,
+      "order_cnt": 330,
+      "kwh_x100": 1978012,
+      "revenue_fen": 2917454
+    },
+    {
+      "order_hour": 17,
+      "order_cnt": 391,
+      "kwh_x100": 2266000,
+      "revenue_fen": 3333749
+    },
+    {
+      "order_hour": 18,
+      "order_cnt": 434,
+      "kwh_x100": 2513789,
+      "revenue_fen": 3698707
+    },
+    {
+      "order_hour": 19,
+      "order_cnt": 505,
+      "kwh_x100": 2799739,
+      "revenue_fen": 4090118
+    },
+    {
+      "order_hour": 20,
+      "order_cnt": 435,
+      "kwh_x100": 2504516,
+      "revenue_fen": 3644941
+    },
+    {
+      "order_hour": 21,
+      "order_cnt": 378,
+      "kwh_x100": 2047035,
+      "revenue_fen": 2970774
+    },
+    {
+      "order_hour": 22,
+      "order_cnt": 253,
+      "kwh_x100": 1354660,
+      "revenue_fen": 1957201
+    },
+    {
+      "order_hour": 23,
+      "order_cnt": 187,
+      "kwh_x100": 952733,
+      "revenue_fen": 1387331
+    }
+  ]
+}

@@ -1,0 +1,30 @@
+{
+  "dimension": "c1_fast_vs_slow",
+  "description": "快充 vs 慢充：量价时长与取消率",
+  "generated_at": "2026-09-14 13:18:10",
+  "row_count": 2,
+  "rows": [
+    {
+      "type_label": "慢充",
+      "order_cnt": 1648,
+      "avg_amount_fen": 4134,
+      "avg_unit_price_fen": 147,
+      "avg_minutes": 282.5,
+      "revenue_fen": 6812596,
+      "kwh_x100": 4625184,
+      "cancel_cnt": 803,
+      "cancel_rate_pct": 32.76
+    },
+    {
+      "type_label": "快充",
+      "order_cnt": 4829,
+      "avg_amount_fen": 9758,
+      "avg_unit_price_fen": 147,
+      "avg_minutes": 38.5,
+      "revenue_fen": 47123683,
+      "kwh_x100": 32012851,
+      "cancel_cnt": 1012,
+      "cancel_rate_pct": 17.33
+    }
+  ]
+}

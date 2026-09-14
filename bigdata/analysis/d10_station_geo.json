@@ -1,0 +1,56 @@
+{
+  "dimension": "d10_station_geo",
+  "description": "站点经纬度 + 营收气泡（供地图）",
+  "generated_at": "2026-09-14 13:18:10",
+  "row_count": 6,
+  "rows": [
+    {
+      "station_id": 1,
+      "station_name": "福田CBD充电站",
+      "lng": 114.0579,
+      "lat": 22.541,
+      "order_cnt": 966,
+      "revenue_fen": 8103462
+    },
+    {
+      "station_id": 3,
+      "station_name": "深圳市民中心充电站",
+      "lng": 114.065,
+      "lat": 22.547,
+      "order_cnt": 1179,
+      "revenue_fen": 10569530
+    },
+    {
+      "station_id": 4,
+      "station_name": "深圳湾公园充电站",
+      "lng": 113.972,
+      "lat": 22.513,
+      "order_cnt": 1260,
+      "revenue_fen": 10373345
+    },
+    {
+      "station_id": 5,
+      "station_name": "宝安中心充电站",
+      "lng": 113.883,
+      "lat": 22.555,
+      "order_cnt": 1046,
+      "revenue_fen": 8347033
+    },
+    {
+      "station_id": 2,
+      "station_name": "南山科技园充电站",
+      "lng": 113.9455,
+      "lat": 22.539,
+      "order_cnt": 981,
+      "revenue_fen": 8229033
+    },
+    {
+      "station_id": 6,
+      "station_name": "龙岗大运充电站",
+      "lng": 114.218,
+      "lat": 22.69,
+      "order_cnt": 1045,
+      "revenue_fen": 8313876
+    }
+  ]
+}

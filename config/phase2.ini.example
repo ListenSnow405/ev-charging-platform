@@ -1,0 +1,9 @@
+; 第二阶段大数据子系统配置模板　归属 L5
+; 用法：cp config/phase2.ini.example config/phase2.ini 后填入真实值
+; config/ 整个目录在 .gitignore 内（只放行 *.example），凭据永不进仓库
+[mysql]
+host = 127.0.0.1
+port = 3306
+database = ecp_bigdata
+user = ecp
+password = 填入你的密码

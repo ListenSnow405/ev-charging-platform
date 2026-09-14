@@ -1,0 +1,22 @@
+{
+  "generated_at": "2026-09-14 13:18:10",
+  "dimension_count": 11,
+  "comparison_count": 3,
+  "dimensions": {
+    "d1_revenue_trend": "按日营收 / 订单量 / 电量",
+    "d2_station_rank": "6 站营收横向排行",
+    "d3_pile_utilization": "24 桩利用率（统计期 86368 分钟）",
+    "d4_hourly_load": "24 小时下单分布",
+    "d5_kwh_distribution": "充电量分桶（每 20 度一档）",
+    "d6_order_status": "订单终态（总 8292 单）",
+    "d7_pile_status": "电桩三态分布与在线率",
+    "d8_device_events": "设备事件时序（已剔除无信息的状态变更）",
+    "d9_carbon_daily": "每日碳排放与峰平谷构成",
+    "d10_station_geo": "站点经纬度 + 营收气泡（供地图）",
+    "d11_duration_distribution": "充电时长分桶 × 快慢充",
+    "c1_fast_vs_slow": "快充 vs 慢充：量价时长与取消率",
+    "c2_weekday_vs_weekend": "工作日 vs 周末：日均单量与营收",
+    "c2_weekday_weekend_hourly": "工作日 vs 周末：24 小时曲线形态",
+    "c3_station_radar": "站点多指标对标（归一 0-100，取消率已取反）"
+  }
+}

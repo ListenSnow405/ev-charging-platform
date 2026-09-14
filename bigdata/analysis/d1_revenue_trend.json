@@ -1,0 +1,368 @@
+{
+  "dimension": "d1_revenue_trend",
+  "description": "按日营收 / 订单量 / 电量",
+  "generated_at": "2026-09-14 13:18:10",
+  "row_count": 60,
+  "rows": [
+    {
+      "order_date": "2026-07-07",
+      "order_cnt": 168,
+      "revenue_fen": 1411542,
+      "kwh_x100": 950374
+    },
+    {
+      "order_date": "2026-07-08",
+      "order_cnt": 140,
+      "revenue_fen": 1228315,
+      "kwh_x100": 828786
+    },
+    {
+      "order_date": "2026-07-09",
+      "order_cnt": 127,
+      "revenue_fen": 1089712,
+      "kwh_x100": 738861
+    },
+    {
+      "order_date": "2026-07-10",
+      "order_cnt": 152,
+      "revenue_fen": 1308151,
+      "kwh_x100": 881092
+    },
+    {
+      "order_date": "2026-07-11",
+      "order_cnt": 129,
+      "revenue_fen": 1134283,
+      "kwh_x100": 768635
+    },
+    {
+      "order_date": "2026-07-12",
+      "order_cnt": 98,
+      "revenue_fen": 798235,
+      "kwh_x100": 545280
+    },
+    {
+      "order_date": "2026-07-13",
+      "order_cnt": 101,
+      "revenue_fen": 874715,
+      "kwh_x100": 590141
+    },
+    {
+      "order_date": "2026-07-14",
+      "order_cnt": 101,
+      "revenue_fen": 827027,
+      "kwh_x100": 557215
+    },
+    {
+      "order_date": "2026-07-15",
+      "order_cnt": 81,
+      "revenue_fen": 648600,
+      "kwh_x100": 437391
+    },
+    {
+      "order_date": "2026-07-16",
+      "order_cnt": 72,
+      "revenue_fen": 576703,
+      "kwh_x100": 390612
+    },
+    {
+      "order_date": "2026-07-17",
+      "order_cnt": 112,
+      "revenue_fen": 894610,
+      "kwh_x100": 611175
+    },
+    {
+      "order_date": "2026-07-18",
+      "order_cnt": 64,
+      "revenue_fen": 520259,
+      "kwh_x100": 358024
+    },
+    {
+      "order_date": "2026-07-19",
+      "order_cnt": 79,
+      "revenue_fen": 597180,
+      "kwh_x100": 408609
+    },
+    {
+      "order_date": "2026-07-20",
+      "order_cnt": 102,
+      "revenue_fen": 822852,
+      "kwh_x100": 558737
+    },
+    {
+      "order_date": "2026-07-21",
+      "order_cnt": 116,
+      "revenue_fen": 979716,
+      "kwh_x100": 666961
+    },
+    {
+      "order_date": "2026-07-22",
+      "order_cnt": 96,
+      "revenue_fen": 834988,
+      "kwh_x100": 566369
+    },
+    {
+      "order_date": "2026-07-23",
+      "order_cnt": 76,
+      "revenue_fen": 638152,
+      "kwh_x100": 423969
+    },
+    {
+      "order_date": "2026-07-24",
+      "order_cnt": 79,
+      "revenue_fen": 659269,
+      "kwh_x100": 444357
+    },
+    {
+      "order_date": "2026-07-25",
+      "order_cnt": 79,
+      "revenue_fen": 612939,
+      "kwh_x100": 421713
+    },
+    {
+      "order_date": "2026-07-26",
+      "order_cnt": 73,
+      "revenue_fen": 559794,
+      "kwh_x100": 380123
+    },
+    {
+      "order_date": "2026-07-27",
+      "order_cnt": 86,
+      "revenue_fen": 727565,
+      "kwh_x100": 488563
+    },
+    {
+      "order_date": "2026-07-28",
+      "order_cnt": 80,
+      "revenue_fen": 642920,
+      "kwh_x100": 431896
+    },
+    {
+      "order_date": "2026-07-29",
+      "order_cnt": 94,
+      "revenue_fen": 749865,
+      "kwh_x100": 511184
+    },
+    {
+      "order_date": "2026-07-30",
+      "order_cnt": 130,
+      "revenue_fen": 1103559,
+      "kwh_x100": 755666
+    },
+    {
+      "order_date": "2026-07-31",
+      "order_cnt": 135,
+      "revenue_fen": 1133525,
+      "kwh_x100": 770841
+    },
+    {
+      "order_date": "2026-08-01",
+      "order_cnt": 122,
+      "revenue_fen": 996127,
+      "kwh_x100": 683119
+    },
+    {
+      "order_date": "2026-08-02",
+      "order_cnt": 90,
+      "revenue_fen": 743678,
+      "kwh_x100": 508179
+    },
+    {
+      "order_date": "2026-08-03",
+      "order_cnt": 121,
+      "revenue_fen": 1040077,
+      "kwh_x100": 698724
+    },
+    {
+      "order_date": "2026-08-04",
+      "order_cnt": 151,
+      "revenue_fen": 1270819,
+      "kwh_x100": 862052
+    },
+    {
+      "order_date": "2026-08-05",
+      "order_cnt": 151,
+      "revenue_fen": 1219346,
+      "kwh_x100": 828099
+    },
+    {
+      "order_date": "2026-08-06",
+      "order_cnt": 125,
+      "revenue_fen": 1041899,
+      "kwh_x100": 707868
+    },
+    {
+      "order_date": "2026-08-07",
+      "order_cnt": 99,
+      "revenue_fen": 819050,
+      "kwh_x100": 560855
+    },
+    {
+      "order_date": "2026-08-08",
+      "order_cnt": 75,
+      "revenue_fen": 651007,
+      "kwh_x100": 450173
+    },
+    {
+      "order_date": "2026-08-09",
+      "order_cnt": 83,
+      "revenue_fen": 638514,
+      "kwh_x100": 439442
+    },
+    {
+      "order_date": "2026-08-10",
+      "order_cnt": 110,
+      "revenue_fen": 896931,
+      "kwh_x100": 613229
+    },
+    {
+      "order_date": "2026-08-11",
+      "order_cnt": 85,
+      "revenue_fen": 685043,
+      "kwh_x100": 468747
+    },
+    {
+      "order_date": "2026-08-12",
+      "order_cnt": 88,
+      "revenue_fen": 751024,
+      "kwh_x100": 514572
+    },
+    {
+      "order_date": "2026-08-13",
+      "order_cnt": 99,
+      "revenue_fen": 809144,
+      "kwh_x100": 546496
+    },
+    {
+      "order_date": "2026-08-14",
+      "order_cnt": 115,
+      "revenue_fen": 945272,
+      "kwh_x100": 645660
+    },
+    {
+      "order_date": "2026-08-15",
+      "order_cnt": 94,
+      "revenue_fen": 800906,
+      "kwh_x100": 549074
+    },
+    {
+      "order_date": "2026-08-16",
+      "order_cnt": 86,
+      "revenue_fen": 719731,
+      "kwh_x100": 488581
+    },
+    {
+      "order_date": "2026-08-17",
+      "order_cnt": 148,
+      "revenue_fen": 1243327,
+      "kwh_x100": 849562
+    },
+    {
+      "order_date": "2026-08-18",
+      "order_cnt": 98,
+      "revenue_fen": 837597,
+      "kwh_x100": 568639
+    },
+    {
+      "order_date": "2026-08-19",
+      "order_cnt": 127,
+      "revenue_fen": 1066347,
+      "kwh_x100": 721238
+    },
+    {
+      "order_date": "2026-08-20",
+      "order_cnt": 117,
+      "revenue_fen": 961405,
+      "kwh_x100": 650324
+    },
+    {
+      "order_date": "2026-08-21",
+      "order_cnt": 145,
+      "revenue_fen": 1194055,
+      "kwh_x100": 807396
+    },
+    {
+      "order_date": "2026-08-22",
+      "order_cnt": 124,
+      "revenue_fen": 1093572,
+      "kwh_x100": 750724
+    },
+    {
+      "order_date": "2026-08-23",
+      "order_cnt": 115,
+      "revenue_fen": 978297,
+      "kwh_x100": 668451
+    },
+    {
+      "order_date": "2026-08-24",
+      "order_cnt": 141,
+      "revenue_fen": 1202154,
+      "kwh_x100": 820425
+    },
+    {
+      "order_date": "2026-08-25",
+      "order_cnt": 105,
+      "revenue_fen": 865523,
+      "kwh_x100": 589879
+    },
+    {
+      "order_date": "2026-08-26",
+      "order_cnt": 130,
+      "revenue_fen": 1077489,
+      "kwh_x100": 729902
+    },
+    {
+      "order_date": "2026-08-27",
+      "order_cnt": 121,
+      "revenue_fen": 951053,
+      "kwh_x100": 645614
+    },
+    {
+      "order_date": "2026-08-28",
+      "order_cnt": 109,
+      "revenue_fen": 917179,
+      "kwh_x100": 625430
+    },
+    {
+      "order_date": "2026-08-29",
+      "order_cnt": 113,
+      "revenue_fen": 917929,
+      "kwh_x100": 625614
+    },
+    {
+      "order_date": "2026-08-30",
+      "order_cnt": 102,
+      "revenue_fen": 892234,
+      "kwh_x100": 603480
+    },
+    {
+      "order_date": "2026-08-31",
+      "order_cnt": 106,
+      "revenue_fen": 903874,
+      "kwh_x100": 610105
+    },
+    {
+      "order_date": "2026-09-01",
+      "order_cnt": 112,
+      "revenue_fen": 905472,
+      "kwh_x100": 615959
+    },
+    {
+      "order_date": "2026-09-02",
+      "order_cnt": 129,
+      "revenue_fen": 1110670,
+      "kwh_x100": 748140
+    },
+    {
+      "order_date": "2026-09-03",
+      "order_cnt": 79,
+      "revenue_fen": 666552,
+      "kwh_x100": 447972
+    },
+    {
+      "order_date": "2026-09-04",
+      "order_cnt": 92,
+      "revenue_fen": 748506,
+      "kwh_x100": 507737
+    }
+  ]
+}

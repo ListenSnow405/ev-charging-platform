@@ -1,0 +1,56 @@
+{
+  "dimension": "d2_station_rank",
+  "description": "6 站营收横向排行",
+  "generated_at": "2026-09-14 13:18:10",
+  "row_count": 6,
+  "rows": [
+    {
+      "station_id": 3,
+      "station_name": "深圳市民中心充电站",
+      "order_cnt": 1179,
+      "revenue_fen": 10569530,
+      "kwh_x100": 6605952,
+      "avg_amount_fen": 8965
+    },
+    {
+      "station_id": 4,
+      "station_name": "深圳湾公园充电站",
+      "order_cnt": 1260,
+      "revenue_fen": 10373345,
+      "kwh_x100": 7154000,
+      "avg_amount_fen": 8233
+    },
+    {
+      "station_id": 5,
+      "station_name": "宝安中心充电站",
+      "order_cnt": 1046,
+      "revenue_fen": 8347033,
+      "kwh_x100": 5962167,
+      "avg_amount_fen": 7980
+    },
+    {
+      "station_id": 6,
+      "station_name": "龙岗大运充电站",
+      "order_cnt": 1045,
+      "revenue_fen": 8313876,
+      "kwh_x100": 6024539,
+      "avg_amount_fen": 7956
+    },
+    {
+      "station_id": 2,
+      "station_name": "南山科技园充电站",
+      "order_cnt": 981,
+      "revenue_fen": 8229033,
+      "kwh_x100": 5560153,
+      "avg_amount_fen": 8388
+    },
+    {
+      "station_id": 1,
+      "station_name": "福田CBD充电站",
+      "order_cnt": 966,
+      "revenue_fen": 8103462,
+      "kwh_x100": 5331224,
+      "avg_amount_fen": 8389
+    }
+  ]
+}

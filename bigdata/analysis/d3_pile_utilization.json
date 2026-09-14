@@ -1,0 +1,224 @@
+{
+  "dimension": "d3_pile_utilization",
+  "description": "24 桩利用率（统计期 86368 分钟）",
+  "generated_at": "2026-09-14 13:18:10",
+  "row_count": 24,
+  "rows": [
+    {
+      "pile_id": 16,
+      "pile_code": "SZ004-04",
+      "type_label": "慢充",
+      "order_cnt": 157,
+      "charge_minutes": 43077,
+      "revenue_fen": 620189,
+      "utilization_pct": 49.88
+    },
+    {
+      "pile_id": 15,
+      "pile_code": "SZ004-03",
+      "type_label": "慢充",
+      "order_cnt": 152,
+      "charge_minutes": 42895,
+      "revenue_fen": 615132,
+      "utilization_pct": 49.67
+    },
+    {
+      "pile_id": 11,
+      "pile_code": "SZ003-03",
+      "type_label": "慢充",
+      "order_cnt": 147,
+      "charge_minutes": 42310,
+      "revenue_fen": 675746,
+      "utilization_pct": 48.99
+    },
+    {
+      "pile_id": 12,
+      "pile_code": "SZ003-04",
+      "type_label": "慢充",
+      "order_cnt": 152,
+      "charge_minutes": 41194,
+      "revenue_fen": 659382,
+      "utilization_pct": 47.7
+    },
+    {
+      "pile_id": 24,
+      "pile_code": "SZ006-04",
+      "type_label": "慢充",
+      "order_cnt": 129,
+      "charge_minutes": 38996,
+      "revenue_fen": 541662,
+      "utilization_pct": 45.15
+    },
+    {
+      "pile_id": 23,
+      "pile_code": "SZ006-03",
+      "type_label": "慢充",
+      "order_cnt": 142,
+      "charge_minutes": 38589,
+      "revenue_fen": 528371,
+      "utilization_pct": 44.68
+    },
+    {
+      "pile_id": 19,
+      "pile_code": "SZ005-03",
+      "type_label": "慢充",
+      "order_cnt": 131,
+      "charge_minutes": 38123,
+      "revenue_fen": 523657,
+      "utilization_pct": 44.14
+    },
+    {
+      "pile_id": 7,
+      "pile_code": "SZ002-03",
+      "type_label": "慢充",
+      "order_cnt": 133,
+      "charge_minutes": 37563,
+      "revenue_fen": 547823,
+      "utilization_pct": 43.49
+    },
+    {
+      "pile_id": 4,
+      "pile_code": "SZ001-04",
+      "type_label": "慢充",
+      "order_cnt": 131,
+      "charge_minutes": 36203,
+      "revenue_fen": 548673,
+      "utilization_pct": 41.92
+    },
+    {
+      "pile_id": 8,
+      "pile_code": "SZ002-04",
+      "type_label": "慢充",
+      "order_cnt": 124,
+      "charge_minutes": 36065,
+      "revenue_fen": 534543,
+      "utilization_pct": 41.76
+    },
+    {
+      "pile_id": 20,
+      "pile_code": "SZ005-04",
+      "type_label": "慢充",
+      "order_cnt": 128,
+      "charge_minutes": 35572,
+      "revenue_fen": 491384,
+      "utilization_pct": 41.19
+    },
+    {
+      "pile_id": 3,
+      "pile_code": "SZ001-03",
+      "type_label": "慢充",
+      "order_cnt": 122,
+      "charge_minutes": 34967,
+      "revenue_fen": 526034,
+      "utilization_pct": 40.49
+    },
+    {
+      "pile_id": 14,
+      "pile_code": "SZ004-02",
+      "type_label": "快充",
+      "order_cnt": 484,
+      "charge_minutes": 18563,
+      "revenue_fen": 4637388,
+      "utilization_pct": 21.49
+    },
+    {
+      "pile_id": 13,
+      "pile_code": "SZ004-01",
+      "type_label": "快充",
+      "order_cnt": 467,
+      "charge_minutes": 18091,
+      "revenue_fen": 4500636,
+      "utilization_pct": 20.95
+    },
+    {
+      "pile_id": 10,
+      "pile_code": "SZ003-02",
+      "type_label": "快充",
+      "order_cnt": 450,
+      "charge_minutes": 16974,
+      "revenue_fen": 4688869,
+      "utilization_pct": 19.65
+    },
+    {
+      "pile_id": 9,
+      "pile_code": "SZ003-01",
+      "type_label": "快充",
+      "order_cnt": 430,
+      "charge_minutes": 16499,
+      "revenue_fen": 4545533,
+      "utilization_pct": 19.1
+    },
+    {
+      "pile_id": 22,
+      "pile_code": "SZ006-02",
+      "type_label": "快充",
+      "order_cnt": 391,
+      "charge_minutes": 15286,
+      "revenue_fen": 3643676,
+      "utilization_pct": 17.7
+    },
+    {
+      "pile_id": 17,
+      "pile_code": "SZ005-01",
+      "type_label": "快充",
+      "order_cnt": 400,
+      "charge_minutes": 15274,
+      "revenue_fen": 3686598,
+      "utilization_pct": 17.68
+    },
+    {
+      "pile_id": 18,
+      "pile_code": "SZ005-02",
+      "type_label": "快充",
+      "order_cnt": 387,
+      "charge_minutes": 15180,
+      "revenue_fen": 3645394,
+      "utilization_pct": 17.58
+    },
+    {
+      "pile_id": 21,
+      "pile_code": "SZ006-01",
+      "type_label": "快充",
+      "order_cnt": 383,
+      "charge_minutes": 15158,
+      "revenue_fen": 3600167,
+      "utilization_pct": 17.55
+    },
+    {
+      "pile_id": 5,
+      "pile_code": "SZ002-01",
+      "type_label": "快充",
+      "order_cnt": 364,
+      "charge_minutes": 14131,
+      "revenue_fen": 3593281,
+      "utilization_pct": 16.36
+    },
+    {
+      "pile_id": 6,
+      "pile_code": "SZ002-02",
+      "type_label": "快充",
+      "order_cnt": 360,
+      "charge_minutes": 13990,
+      "revenue_fen": 3553386,
+      "utilization_pct": 16.2
+    },
+    {
+      "pile_id": 2,
+      "pile_code": "SZ001-02",
+      "type_label": "快充",
+      "order_cnt": 365,
+      "charge_minutes": 13726,
+      "revenue_fen": 3589587,
+      "utilization_pct": 15.89
+    },
+    {
+      "pile_id": 1,
+      "pile_code": "SZ001-01",
+      "type_label": "快充",
+      "order_cnt": 348,
+      "charge_minutes": 13138,
+      "revenue_fen": 3439168,
+      "utilization_pct": 15.21
+    }
+  ]
+}

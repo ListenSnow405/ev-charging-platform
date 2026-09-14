@@ -1,0 +1,344 @@
+{
+  "dimension": "c2_weekday_weekend_hourly",
+  "description": "工作日 vs 周末：24 小时曲线形态",
+  "generated_at": "2026-09-14 13:18:10",
+  "row_count": 48,
+  "rows": [
+    {
+      "is_weekend": false,
+      "order_hour": 0,
+      "order_cnt": 73,
+      "day_cnt": 37,
+      "orders_per_day": 1.97
+    },
+    {
+      "is_weekend": false,
+      "order_hour": 1,
+      "order_cnt": 61,
+      "day_cnt": 34,
+      "orders_per_day": 1.79
+    },
+    {
+      "is_weekend": false,
+      "order_hour": 2,
+      "order_cnt": 66,
+      "day_cnt": 34,
+      "orders_per_day": 1.94
+    },
+    {
+      "is_weekend": false,
+      "order_hour": 3,
+      "order_cnt": 60,
+      "day_cnt": 31,
+      "orders_per_day": 1.94
+    },
+    {
+      "is_weekend": false,
+      "order_hour": 4,
+      "order_cnt": 67,
+      "day_cnt": 33,
+      "orders_per_day": 2.03
+    },
+    {
+      "is_weekend": false,
+      "order_hour": 5,
+      "order_cnt": 75,
+      "day_cnt": 38,
+      "orders_per_day": 1.97
+    },
+    {
+      "is_weekend": false,
+      "order_hour": 6,
+      "order_cnt": 115,
+      "day_cnt": 40,
+      "orders_per_day": 2.88
+    },
+    {
+      "is_weekend": false,
+      "order_hour": 7,
+      "order_cnt": 214,
+      "day_cnt": 42,
+      "orders_per_day": 5.1
+    },
+    {
+      "is_weekend": false,
+      "order_hour": 8,
+      "order_cnt": 374,
+      "day_cnt": 44,
+      "orders_per_day": 8.5
+    },
+    {
+      "is_weekend": false,
+      "order_hour": 9,
+      "order_cnt": 312,
+      "day_cnt": 44,
+      "orders_per_day": 7.09
+    },
+    {
+      "is_weekend": false,
+      "order_hour": 10,
+      "order_cnt": 235,
+      "day_cnt": 44,
+      "orders_per_day": 5.34
+    },
+    {
+      "is_weekend": false,
+      "order_hour": 11,
+      "order_cnt": 201,
+      "day_cnt": 44,
+      "orders_per_day": 4.57
+    },
+    {
+      "is_weekend": false,
+      "order_hour": 12,
+      "order_cnt": 198,
+      "day_cnt": 43,
+      "orders_per_day": 4.6
+    },
+    {
+      "is_weekend": false,
+      "order_hour": 13,
+      "order_cnt": 225,
+      "day_cnt": 44,
+      "orders_per_day": 5.11
+    },
+    {
+      "is_weekend": false,
+      "order_hour": 14,
+      "order_cnt": 211,
+      "day_cnt": 43,
+      "orders_per_day": 4.91
+    },
+    {
+      "is_weekend": false,
+      "order_hour": 15,
+      "order_cnt": 213,
+      "day_cnt": 43,
+      "orders_per_day": 4.95
+    },
+    {
+      "is_weekend": false,
+      "order_hour": 16,
+      "order_cnt": 227,
+      "day_cnt": 44,
+      "orders_per_day": 5.16
+    },
+    {
+      "is_weekend": false,
+      "order_hour": 17,
+      "order_cnt": 287,
+      "day_cnt": 44,
+      "orders_per_day": 6.52
+    },
+    {
+      "is_weekend": false,
+      "order_hour": 18,
+      "order_cnt": 350,
+      "day_cnt": 44,
+      "orders_per_day": 7.95
+    },
+    {
+      "is_weekend": false,
+      "order_hour": 19,
+      "order_cnt": 393,
+      "day_cnt": 44,
+      "orders_per_day": 8.93
+    },
+    {
+      "is_weekend": false,
+      "order_hour": 20,
+      "order_cnt": 340,
+      "day_cnt": 44,
+      "orders_per_day": 7.73
+    },
+    {
+      "is_weekend": false,
+      "order_hour": 21,
+      "order_cnt": 302,
+      "day_cnt": 44,
+      "orders_per_day": 6.86
+    },
+    {
+      "is_weekend": false,
+      "order_hour": 22,
+      "order_cnt": 207,
+      "day_cnt": 42,
+      "orders_per_day": 4.93
+    },
+    {
+      "is_weekend": false,
+      "order_hour": 23,
+      "order_cnt": 145,
+      "day_cnt": 43,
+      "orders_per_day": 3.37
+    },
+    {
+      "is_weekend": true,
+      "order_hour": 0,
+      "order_cnt": 24,
+      "day_cnt": 13,
+      "orders_per_day": 1.85
+    },
+    {
+      "is_weekend": true,
+      "order_hour": 1,
+      "order_cnt": 15,
+      "day_cnt": 8,
+      "orders_per_day": 1.88
+    },
+    {
+      "is_weekend": true,
+      "order_hour": 2,
+      "order_cnt": 10,
+      "day_cnt": 7,
+      "orders_per_day": 1.43
+    },
+    {
+      "is_weekend": true,
+      "order_hour": 3,
+      "order_cnt": 12,
+      "day_cnt": 9,
+      "orders_per_day": 1.33
+    },
+    {
+      "is_weekend": true,
+      "order_hour": 4,
+      "order_cnt": 15,
+      "day_cnt": 10,
+      "orders_per_day": 1.5
+    },
+    {
+      "is_weekend": true,
+      "order_hour": 5,
+      "order_cnt": 25,
+      "day_cnt": 13,
+      "orders_per_day": 1.92
+    },
+    {
+      "is_weekend": true,
+      "order_hour": 6,
+      "order_cnt": 24,
+      "day_cnt": 11,
+      "orders_per_day": 2.18
+    },
+    {
+      "is_weekend": true,
+      "order_hour": 7,
+      "order_cnt": 38,
+      "day_cnt": 15,
+      "orders_per_day": 2.53
+    },
+    {
+      "is_weekend": true,
+      "order_hour": 8,
+      "order_cnt": 62,
+      "day_cnt": 16,
+      "orders_per_day": 3.88
+    },
+    {
+      "is_weekend": true,
+      "order_hour": 9,
+      "order_cnt": 76,
+      "day_cnt": 16,
+      "orders_per_day": 4.75
+    },
+    {
+      "is_weekend": true,
+      "order_hour": 10,
+      "order_cnt": 90,
+      "day_cnt": 16,
+      "orders_per_day": 5.63
+    },
+    {
+      "is_weekend": true,
+      "order_hour": 11,
+      "order_cnt": 100,
+      "day_cnt": 16,
+      "orders_per_day": 6.25
+    },
+    {
+      "is_weekend": true,
+      "order_hour": 12,
+      "order_cnt": 87,
+      "day_cnt": 16,
+      "orders_per_day": 5.44
+    },
+    {
+      "is_weekend": true,
+      "order_hour": 13,
+      "order_cnt": 94,
+      "day_cnt": 16,
+      "orders_per_day": 5.88
+    },
+    {
+      "is_weekend": true,
+      "order_hour": 14,
+      "order_cnt": 98,
+      "day_cnt": 16,
+      "orders_per_day": 6.13
+    },
+    {
+      "is_weekend": true,
+      "order_hour": 15,
+      "order_cnt": 94,
+      "day_cnt": 16,
+      "orders_per_day": 5.88
+    },
+    {
+      "is_weekend": true,
+      "order_hour": 16,
+      "order_cnt": 103,
+      "day_cnt": 16,
+      "orders_per_day": 6.44
+    },
+    {
+      "is_weekend": true,
+      "order_hour": 17,
+      "order_cnt": 104,
+      "day_cnt": 16,
+      "orders_per_day": 6.5
+    },
+    {
+      "is_weekend": true,
+      "order_hour": 18,
+      "order_cnt": 84,
+      "day_cnt": 16,
+      "orders_per_day": 5.25
+    },
+    {
+      "is_weekend": true,
+      "order_hour": 19,
+      "order_cnt": 112,
+      "day_cnt": 16,
+      "orders_per_day": 7.0
+    },
+    {
+      "is_weekend": true,
+      "order_hour": 20,
+      "order_cnt": 95,
+      "day_cnt": 16,
+      "orders_per_day": 5.94
+    },
+    {
+      "is_weekend": true,
+      "order_hour": 21,
+      "order_cnt": 76,
+      "day_cnt": 16,
+      "orders_per_day": 4.75
+    },
+    {
+      "is_weekend": true,
+      "order_hour": 22,
+      "order_cnt": 46,
+      "day_cnt": 15,
+      "orders_per_day": 3.07
+    },
+    {
+      "is_weekend": true,
+      "order_hour": 23,
+      "order_cnt": 42,
+      "day_cnt": 14,
+      "orders_per_day": 3.0
+    }
+  ]
+}

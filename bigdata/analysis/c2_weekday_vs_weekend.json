@@ -1,0 +1,26 @@
+{
+  "dimension": "c2_weekday_vs_weekend",
+  "description": "工作日 vs 周末：日均单量与营收",
+  "generated_at": "2026-09-14 13:18:10",
+  "row_count": 2,
+  "rows": [
+    {
+      "is_weekend": false,
+      "order_cnt": 4951,
+      "day_cnt": 44,
+      "revenue_fen": 41281594,
+      "avg_amount_fen": 8338,
+      "orders_per_day": 112.5,
+      "revenue_per_day_fen": 938218
+    },
+    {
+      "is_weekend": true,
+      "order_cnt": 1526,
+      "day_cnt": 16,
+      "revenue_fen": 12654685,
+      "avg_amount_fen": 8293,
+      "orders_per_day": 95.4,
+      "revenue_per_day_fen": 790918
+    }
+  ]
+}
