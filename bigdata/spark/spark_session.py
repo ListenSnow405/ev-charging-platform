@@ -20,7 +20,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 #  ODS 原始层：本地开发是目录，答辩换成 hdfs:// 前缀即可。
 #  CLAUDE.md 5.2 第 10 条——代码只认路径不认介质。
-ODS_ROOT = os.environ.get("ECP_ODS_ROOT", str(REPO_ROOT / "bigdata" / "ods"))
+ODS_ROOT = Path(os.environ.get("ECP_ODS_ROOT", REPO_ROOT / "bigdata" / "ods"))
 
 
 def _pin_worker_python() -> None:

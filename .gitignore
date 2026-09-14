@@ -39,6 +39,15 @@ __pycache__/
 venv/
 # 第二阶段独立虚拟环境（Python 3.11 + PySpark）；与一阶段的 .venv（3.10）并存
 .venv-phase2/
+
+# ---- 第二阶段数据分层产物（均由脚本重生成，不入库）----
+# ODS 原始层：bigdata/spark/export_ods.py 从 charging.db 导出，产物为 444 只读
+bigdata/ods/*.csv
+bigdata/ods/_manifest.json
+# DWD 清洗层与质量报告产物
+bigdata/dwd/
+bigdata/quality/*.csv
+bigdata/quality/*.json
 *.pkl
 *.joblib
 
