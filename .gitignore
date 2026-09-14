@@ -44,10 +44,13 @@ venv/
 # ODS 原始层：bigdata/spark/export_ods.py 从 charging.db 导出，产物为 444 只读
 bigdata/ods/*.csv
 bigdata/ods/_manifest.json
-# DWD 清洗层与质量报告产物
+# DWD 清洗层：parquet 体量大且可由 cleaning.py 重生成
 bigdata/dwd/
-bigdata/quality/*.csv
-bigdata/quality/*.json
+#
+# 注意：bigdata/quality/** 与 bigdata/analysis/** **刻意不忽略**。
+# SOP 第 8 节要求归档「规则清单、清洗脚本、执行日志、待核记录、清洗结果和质量报告」，
+# 这些就是那份归档本身——是答辩证据，不是临时产物。体量也小（最大 60 行）。
+# 代价是每次重跑会因 generated_at 变化产生 diff，可接受。
 *.pkl
 *.joblib
 
