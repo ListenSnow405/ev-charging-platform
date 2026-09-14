@@ -216,14 +216,35 @@ MySQL 的 `SUM()` 经 pymysql 返回 `Decimal`，Flask 默认序列化成**字�
 
 第一阶段已有 scikit-learn 的 6 个模型与完整评估报告 [ml/reports/forecast_eval.md](ml/reports/forecast_eval.md)。按已决事项 2，**改用 Spark MLlib 重做**。
 
-| 任务 | 内容 |
-| --- | --- |
-| T7.1 | 特征工程迁移到 Spark（第一阶段 35 列口径 + 滞后无穿越自检可复用） |
-| T7.2 | MLlib 回归模型训练（负荷 / 并发数，1h / 6h / 24h） |
-| T7.3 | 模型评估：MAE / RMSE / R²，**保留双基线对照** |
-| T7.4 | 预测结果回写 MySQL，供大屏展示 |
+> ✅ **T7 已于 2026-09-14 完成。** 评估报告 [bigdata/quality/07_forecast_eval.md](bigdata/quality/07_forecast_eval.md)，
+> 模型版本 `gbt-20260914-233309`。
+
+| 任务 | 内容 | 状态 |
+| --- | --- | --- |
+| T7.1 | 特征工程迁移到 Spark | ✅ `features.py`，站-小时面板 8640 行 × **24 特征**，**电量守恒自检偏差 0.0000 度** |
+| T7.2 | MLlib 回归训练（负荷 / 并发数 × 1h / 6h / 24h） | ✅ `train.py`，6 个 `GBTRegressor`，并集网格 5 组 |
+| T7.3 | 模型评估：MAE / RMSE / R² + 双基线 | ✅ `report.py` 由 `eval.json` 程序生成，不手写 |
+| T7.4 | 预测回写 MySQL | ✅ `predict.py` → `d12_load_forecast`（18 行），大屏第 4 页 |
+
+**最终结果：6 个模型 3 个跑赢基线 B**（负荷 1h +1.0%、负荷 24h +0.2%、并发 1h +7.9%），
+其余三个为负（−2.1% ~ −3.9%）。这是如实结果，报告第 4 节主动说明了原因，未作修饰。
+
+> **验证段的选择出现了有意义的分化**：负荷类三个 horizon 全选无正则档，并发数三个全选正则化档。
+> 这是数据自己给出的，不是人为指定——网格里两档并存，由验证段各自挑。
 
 > **方法论务必沿用第一阶段**，这是第二阶段最省力也最值钱的继承项：按时间切分（绝不随机切）、双基线对照、验证段选超参（绝不用测试段调参）、主动说明三条限制。这套东西比模型分数本身更能扛住答辩提问。
+
+### T7 踩到并已修复的四个坑
+
+| # | 问题 | 根因与修法 |
+| --- | --- | --- |
+| 1 | 训练跑了 3.5 小时「没动静」 | **等待器 `pgrep -f "mllib/train.py"` 匹配到了自己**——它的命令行里就含这个字符串，条件永远不成立。训练其实早已崩溃。**不要用 pgrep 模式判断自己启动的进程状态**，用任务通知或 PID 文件 |
+| 2 | JVM 启动即崩（`Py4JNetworkError`） | 用 `nohup ... &` 在普通 Bash 调用里起的进程，随该次调用一起被回收。改用工具自带的后台机制 |
+| 3 | `java.lang.StackOverflowError` | GBT 每轮在上一轮 RDD 上叠加，血缘线性增长，任务序列化递归爆栈。`checkpointInterval` **不设检查点目录就静默不生效**——`maxIter≤120` 能过、500 必崩。已加 `setCheckpointDir` |
+| 4 | 三个 horizon 的 `predict_time` 全是同一时刻 | 起报样本取自监督学习样本，而那份数据**要求标签存在**，于是目标都落在数据末尾。**那不是预测，是报一个已有观测值的时刻**。改为从特征面板末尾起报 |
+
+> 第 1 条最值得记：它让我在三个半小时里持续报告「训练在跑」，而实际早已死亡。
+> **自建的状态检测若会匹配自身，得到的永远是假阳性。**
 
 ## 11. 已知限制（答辩时主动讲，别等被问）
 
@@ -231,6 +252,13 @@ MySQL 的 `SUM()` 经 pymysql 返回 `Decimal`，Flask 默认序列化成**字�
 2. **`t_wallet_tx`（1 行）、`t_station_review`（0 行）、`t_admin_oplog`（3 行）数据量不足**，不纳入分析。
 3. **`t_load_forecast` 仅 18 行**，够做拥堵度快照，不够做预测趋势对比。
 4. 数据为 `ml/gen_history.py` 合成，绝对精度不宜外推到真实部署（第一阶段评估报告已有同样声明）。
+5. **D8 设备事件维度被实测推翻后降级。** `t_pile_log` 1800 行中，`event=4` 故障上报 **0 行**、
+   1763 条「状态变更」的前后状态字段全空，真正有内容的仅 **37 条**。原设计的「故障分析」不成立，
+   已改为事件类型与时序分布。
+6. **MLlib 模型 6 个中只有 3 个跑赢基线**，且相对第一阶段全面偏低。两个真实原因：
+   少了天气特征（按 5.2 第 10 条只用 ODS 层数据）、框架差异（sklearn HistGB 在小样本上更抗过拟合）。
+   详见 [07_forecast_eval.md](bigdata/quality/07_forecast_eval.md) 第 4 节。
+7. **Flask 无鉴权，只监听回环地址。** 答辩演示足够，但不可暴露到局域网（`[说明书]` 2.2）。
 
 ## 12. 任务依赖与建议顺序
 
@@ -239,20 +267,97 @@ T0 契约变更 ─→ T1 环境 ─→ T2 数据层 ─→ T3 清洗 ─→ T4 
                                                               └─→ T7 MLlib ────────↗
 ```
 
-T0–T6 均已完成（2026-09-14）。**仅剩 T7 Spark MLlib**。T1 的版本兼容性是最大的不确定项，建议**第一天就把 JDK + Python + PySpark 三件套跑通一个最小 job**，不要拖到后面。
+**T0–T7 全部完成（2026-09-14）。** 剩余工作只有 HDFS 部署，见第 13 节。
+
+> 回头看，T1 的版本兼容性确实是最大的不确定项——`PySpark 3.5.x` 只支持到 Python 3.11 这一条
+> 决定了整条技术栈的版本组合。**先跑通最小 `SparkSession` 再写业务代码**这个纪律值得保留。
 
 ## 13. 验收对照表（老师六条要求 → 任务 → 证据）
 
-| 要求 | 对应任务 | 验收证据 |
-| --- | --- | --- |
-| 1 Python 3.11/3.12 | T1 | `python -V` 截图 + 环境自检脚本输出 |
-| 2 Hadoop 3.x 存储 | T1 / T2 | `hdfs dfs -ls` 输出 + 原始数据在 HDFS |
-| 3 Spark 清洗 + 分析，**维度 ≥ 8**，**≥ 2 组对比** | T3 / T4 | 10 个维度 + 3 组对比（第 7 节），六阶段清洗产出物 |
-| 3 Flask 处理 web 请求 | T5 | 接口清单 + 实际调用 |
-| 4 Node 23+ / Vue3 | T6 | `node -v` + 前端工程源码 |
-| 5 DataV 大屏，图表不单一 | T6 | 9 类图表（第 9 节） |
-| 6 机器学习预测 + **模型评估** | T7 | MLlib 模型 + 评估报告（MAE/RMSE/R² + 双基线） |
+| # | 要求 | 达标情况（实测） | 证据 |
+| --- | --- | --- | --- |
+| 1 | Python **3.11 或 3.12** | ✅ **3.11.15** @ `.venv-phase2` | `bash scripts/check-env-phase2.sh` |
+| 2 | 文件存储 **Hadoop 3.x** | ◐ **本地 ODS 目录已跑通，HDFS 未部署** | `bigdata/ods/` 14 表 10524 行、444 只读、`_manifest.json` 血缘 |
+| 3 | **PySpark** 数据清洗 | ✅ SOP 六阶段全部产出 | `bigdata/quality/01`~`06` |
+| 3 | 分析维度 **≥ 8** | ✅ **13 个**（D1–D14，D12 为预测） | `/api/dimensions` 返回 `dimension_count` |
+| 3 | **≥ 2 组**对比分析 | ✅ **3 组**（C1 快慢充 / C2 工作日周末 / C3 站点对标） | 大屏第 3 页；`comparison_count` |
+| 3 | **Flask** 处理 web 请求 | ✅ 4 个只读接口，冒烟 14/14 | `bigdata/api/README.md`、`scripts/smoke-api-phase2.py` |
+| 4 | **Node 23+** / **Vue 3** | ✅ Node **v24.1.0**（LTS）/ Vue **3.5.42** / Vite 6.4.3 | `bigdata/web/package.json` |
+| 5 | **DataV** 大屏，图表不单一 | ✅ **5 页 17 面板**，DataV 5 类组件 + ECharts **9 类图表** + 3 张表格 | `bigdata/web/README.md`；渲染冒烟逐页 PASS |
+| 6 | 机器学习预测 + **模型评估** | ✅ 6 个 MLlib 模型，MAE/RMSE/R² + **双基线对照** | `bigdata/quality/07_forecast_eval.md` |
 
-## 14. 归属与更新
+**唯一未达标项是第 2 条的 HDFS。** 老师原话是「代码测试过程在本地，答辩尽量放到 hadoop 上存储」，
+当前按此执行到第一半。剩余工作见下节。
+
+### 尚未完成：HDFS 部署
+
+代码侧已经准备好：ODS 路径走 `ECP_ODS_ROOT` 环境变量，`spark_session.py` 里
+**代码只认路径不认介质**（CLAUDE.md 5.2 第 10 条）。部署 Hadoop 3.x 伪分布式后，
+把该变量改成 `hdfs://...` 前缀、重跑 `export_ods.py` 即可，**业务代码一行不用改**。
+
+> 这条是**有意留到最后**的：先用本地目录把清洗、分析、API、大屏、建模全链路跑通，
+> 再换存储介质，比一开始就背着 Hadoop 调试要省事得多。
+
+## 14. 阶段性收尾（2026-09-14）
+
+### 交付物清单
+
+| 类别 | 位置 | 说明 |
+| --- | --- | --- |
+| 环境 | `scripts/install-phase2-env.sh`　`scripts/check-env-phase2.sh` | 一个装（需 root），一个自检（**实际建一次 SparkSession**，不只看 `pip list`） |
+| 契约 | `CLAUDE.md` v2.0 | 第 2.2 节二阶段基线、第 5.2 节五条硬性规则 |
+| ODS | `bigdata/spark/export_ods.py` → `bigdata/ods/` | 源库 `mode=ro` 只读、产物 `chmod 444`、`_manifest.json` 血缘 |
+| 清洗 | `bigdata/spark/{profiling,cleaning,validation,quality_report}.py` | SOP 六阶段，产出 `bigdata/quality/01`~`06` |
+| 分析 | `bigdata/spark/analysis.py` → `bigdata/dwd/`、MySQL | 13 维度 + 3 组对比 |
+| API | `bigdata/api/app.py` + `README.md` | 4 个只读接口 |
+| 大屏 | `bigdata/web/` + `README.md` | Vue3 + DataV，5 页 17 面板 |
+| 建模 | `bigdata/mllib/{features,train,predict,report}.py` | 6 个 GBT 模型 + `quality/07_forecast_eval.md` |
+| 测试 | `scripts/smoke-api-phase2.py`　`scripts/smoke-screen-phase2.py` | 接口 14 项、渲染逐页断言，**含 SQL 注入与真实截图** |
+
+### 全链路复现
+
+```bash
+bash scripts/install-phase2-env.sh          # 需 root：JDK / Python 3.11 / MySQL
+bash scripts/init-mysql-phase2.sh           # 需 root：建库建账号 → config/phase2.ini
+python3.11 -m venv .venv-phase2 && .venv-phase2/bin/pip install -r bigdata/requirements.txt
+bash scripts/check-env-phase2.sh            # 应全绿（Hadoop 为 [注] 属预期）
+
+.venv-phase2/bin/python bigdata/spark/export_ods.py        # ODS
+.venv-phase2/bin/python bigdata/spark/profiling.py         # 清洗 1+2
+.venv-phase2/bin/python bigdata/spark/cleaning.py          # 清洗 4
+.venv-phase2/bin/python bigdata/spark/validation.py        # 清洗 5（14/14 必须全过）
+.venv-phase2/bin/python bigdata/spark/quality_report.py    # 清洗 6
+.venv-phase2/bin/python bigdata/spark/analysis.py          # 分析 → MySQL
+.venv-phase2/bin/python bigdata/mllib/features.py          # 特征（守恒自检必须 0.0000）
+.venv-phase2/bin/python bigdata/mllib/train.py             # 训练，约 80 分钟
+.venv-phase2/bin/python bigdata/mllib/report.py            # 评估报告
+.venv-phase2/bin/python bigdata/mllib/predict.py           # 预测 → MySQL
+
+.venv-phase2/bin/python bigdata/api/app.py &               # API :5000
+cd bigdata/web && npm install && npm run dev                # 大屏 :5173
+```
+
+> **境内安装务必加 `-i https://pypi.tuna.tsinghua.edu.cn/simple`**，
+> 官方源下 PySpark（318MB sdist）实测会断流。npm 同理，`bigdata/web/.npmrc` 已配 npmmirror。
+
+### 贯穿全程的一条硬校验
+
+营收 **53,936,279 分**、电量 **36,638,035**（×100 度）这两个数字，
+在 T3 校验、T4 的 7 个维度、MySQL 落库后、T7 特征面板守恒自检**逐环节对账一致**，
+其中电量还与第一阶段碳排放对拍脚本独立算出的数字相同。
+
+口径在环节间漂移是这类项目最常见的暗伤（第一阶段就踩过：大屏与管理端显示成两个形状），
+所以每一环都显式做了对账，而不是"应该没问题"。
+
+### 答辩时建议主动讲的三件事
+
+1. **数据清洗全程零删除。** SOP 把删除列为最后手段；实测发现的问题要么可标记、
+   要么属正常业务、要么是分析范围问题而非数据错误——都不需要动行。
+2. **D8 维度被实测推翻。** 原设计的「设备故障分析」在数据层面是空的（故障事件 0 行），
+   如实降级并在报告中记录，比硬凑一个图有说服力。
+3. **模型 6 个只赢 3 个，原因讲得清。** 少天气特征 + 框架差异，都是真实差异不是没调好；
+   并发 24h 两个阶段收敛到同一数量级，佐证该 horizon 信号本就接近零。
+
+## 15. 归属与更新
 
 本文件属 **L5（SCML，配置管理与文档归档）** 维护。任务状态变化时更新本文件，重大变更另在 [docs/conventions.md](docs/conventions.md) 3.1 记一条。
