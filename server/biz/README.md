@@ -17,7 +17,7 @@
 | `user_management_service.cpp` | 2201–2202 | 1.4 手机号模糊搜索、冻结/解冻（冻结即踢会话，CR-003）|
 | `statistics_service.cpp` | 2301–2303 · 2305 | 1.4 营收三指标、近 7/30 日趋势、电桩状态分布、负荷预测 |
 | `admin_service.cpp` | 2001 | 1.4 管理员登录 |
-| `ext_08_carbon_calc.{h,cpp}` `ext_08_carbon_service.cpp` | 3740–3747 | 扩展模块 08 碳减排与能源报告（**实现方 L5**）|
+| `ext_08_carbon_calc.{h,cpp}` `ext_08_carbon_service.cpp` | 3740–3748 | 扩展模块 08 碳减排与能源报告（**实现方 L5**）|
 
 设备侧 9001–9006 在 `server/net/`（归属 L1），见 [../net/README.md](../net/README.md)。
 
