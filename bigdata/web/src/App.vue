@@ -218,7 +218,58 @@ const tables = {
         : `<span style="color:#ffc53d">${r.completeness}%</span>`,
       r.factor_version
     ]))
-  }))
+  })),
+  // ---- 智能运营建议页（A1 / A3）----
+  dispatchAdvice: computed(() => {
+    const rows = dim.d16_dispatch_advice || []
+    const dash = '—'
+    const short = n => (n || '').replace('充电站', '')
+    return {
+      header: ['级别', '拥堵站点', '拥堵度', '空闲', '推荐站点', '距离', '预测空闲', '拥堵度'],
+      columnWidth: [56, 140, 70, 60],
+      align: ['center', 'left', 'center', 'center', 'left', 'right', 'center', 'center'],
+      rowNum: 4,
+      rows: rows.length
+        ? rows.map(r => ([
+            // 分流=已达预警线；引导=预防性建议（每站只有 4 桩，拥堵度按 25% 跳）
+            r.advice_level === '分流'
+              ? '<span style="color:#ff7875;font-weight:600">分流</span>'
+              : '<span style="color:#ffc53d;font-weight:600">引导</span>',
+            short(r.from_station_name),
+            `${r.from_congestion_pct}%`,
+            `${r.from_idle}/${r.from_pile_total}`,
+            r.to1_station_name ? short(r.to1_station_name) : '暂无更空闲站点',
+            r.to1_distance_km != null ? `${r.to1_distance_km} km` : dash,
+            r.to1_idle != null ? String(r.to1_idle) : dash,
+            r.to1_congestion_pct != null ? `${r.to1_congestion_pct}%` : dash
+          ]))
+        // 没有站点达到分流阈值时给一行提示——空数据时滚动板连表头都不画
+        : [[dash, '暂无需要分流的站点', dash, dash, dash, dash, dash, dash]]
+    }
+  }),
+  alertActions: computed(() => {
+    const rows = dim.d17_alert_actions || []
+    const dash = '—'
+    const color = { '高': '#73d13d', '中': '#ffc53d', '低': '#ff7875' }
+    const short = n => (n || '').replace('充电站', '')
+    return {
+      header: ['站点', '预警', '预测时刻', '建议动作', '可信度'],
+      columnWidth: [130, 70, 140],
+      align: ['left', 'center', 'left', 'left', 'center'],
+      rowNum: 8,
+      rows: rows.length
+        ? rows.map(r => ([
+            short(r.station_name),
+            r.alert_type,
+            String(r.predict_time || '').slice(5, 16),
+            r.action,
+            // 可信度：来自模型各 horizon 相对基线的增益，高的先处置、低的只作参考
+            `<span style="color:${color[r.confidence] || '#c9d6e5'};font-weight:600">`
+              + `${r.confidence}</span>`
+          ]))
+        : [['暂无预警', dash, dash, dash, dash]]
+    }
+  })
 }
 
 // 键名对应 pages.js 里的 panel.opt
@@ -233,6 +284,7 @@ const opt = {
   d10: () => B.d10StationGeo(dim.d10_station_geo),
   d11: () => B.d11Duration(dim.d11_duration_distribution),
   d12: () => B.d12Forecast(dim.d12_load_forecast),
+  duty: () => B.d12DutyHeat(dim.d12_load_forecast),
   c1: () => B.c1FastVsSlow(dim.c1_fast_vs_slow),
   c2: () => B.c2WeekdayHourly(dim.c2_weekday_weekend_hourly),
   c3: () => B.c3StationRadar(dim.c3_station_radar)
