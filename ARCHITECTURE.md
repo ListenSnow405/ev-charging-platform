@@ -121,8 +121,8 @@ flowchart TB
 | `user-client/` | L4 | 充电用户端 | 7 文件 · 2,167 行 |
 | `ml/` | L5 | 历史数据生成、特征工程、时序建模、预测回写、独立对拍 | 9 文件 · 3,234 行 |
 | `dataviz/` | L5 | 运营大屏与碳排放大屏 | 2 文件 · 593 行 |
-| `bigdata/` | L5 | **第二阶段**：ODS 导出、Spark 清洗与分析、MLlib 建模、Flask 只读 API、Vue3+DataV 大屏 | 26 文件 · 3,568 行 |
-| `scripts/*phase2*`　`*hadoop*`　`hdfs-ctl.sh` | L5 | **第二阶段**：环境安装与自检、Hadoop 起停、ODS 推 HDFS、接口与大屏冒烟 | 8 文件 · 904 行 |
+| `bigdata/` | L5 | **第二阶段**：ODS 导出、Spark 清洗与分析、MLlib 建模、Flask 只读 API、Vue3+DataV 大屏 | 28 文件 · 4,583 行 |
+| `scripts/*phase2*`　`*hadoop*`　`hdfs-ctl.sh` | L5 | **第二阶段**：环境安装与自检、Hadoop 起停、ODS 推 HDFS、接口与大屏冒烟、结项数据集打包 | 9 文件 · 1,857 行 |
 
 ## 5. 跨目录协作
 
@@ -216,7 +216,7 @@ flowchart TB
 | 层 | 目录 | 职责 | 硬边界 |
 | --- | --- | --- | --- |
 | ODS 原始层 | `bigdata/ods/` 或 HDFS | `charging.db` 的只读快照 | **任何清洗都不在此层做**，原始快照一个字节不改 |
-| DWD 加工层 | `bigdata/dwd/` | 清洗、类型转换、派生字段 | 删除/修正/填充**必须留痕**，无法判定的进待核清单 |
+| DWD 加工层 | `bigdata/dwd/` | 清洗、类型转换、派生字段 | 删除/修正/填充**必须留痕**，无法判定的进待核清单；列序/类型/可空由 `bigdata/spark/dwd_schema.py` 的 **Schema 契约**声明并逐表断言 |
 | 分析与建模 | `bigdata/spark/`　`mllib/` | 多维分析、MLlib 训练与预测 | **不得直连 `charging.db`**，一律走 ODS |
 | 结果层 | MySQL | 只存分析结果 | 不存明细，否则 Flask 查询压力不可控 |
 | Web 层 | `bigdata/api/` | 只读接口 | 不写任何业务库，不现场触发 Spark job |

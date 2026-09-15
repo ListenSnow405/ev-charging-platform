@@ -81,8 +81,9 @@ Ubuntu 22.04+（VMware 17）、Qt **6.2.4**、g++ / C++17、Python 3.10（数据
 │   ├── api/                  # Flask 只读接口
 │   ├── web/                  # Vue3 + DataV 大屏
 │   ├── ods/  dwd/  analysis/ # 数据分层产物（可重跑生成）
-│   └── quality/              # 清洗六阶段产物与评估报告
+│   └── quality/              # 清洗六阶段产物、数据字典、清洗后画像与评估报告
 ├── tools/pile-simulator/     # 电桩模拟器         L1
+├── export/                   # 结项数据集等导出产物（不入库，可重跑生成）
 ├── config/                   # 本地配置模板（app.ini 不入库）
 ├── scripts/                  # 构建、环境自检、冒烟与集成测试
 ├── ev-charging-platform.pro  # 顶层 qmake 工程

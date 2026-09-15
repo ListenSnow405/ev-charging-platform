@@ -197,6 +197,12 @@ set -a; . config/phase2-hdfs.env; set +a                # 下游切到 HDFS
 .venv-phase2/bin/python bigdata/spark/analysis.py       # 13 维度 + 3 组对比 → MySQL
 ```
 
+清洗六阶段跑完后，可一键打出结项数据集（六阶段全部产物 + 可重跑脚本 + Excel 副本）：
+
+```bash
+.venv-phase2/bin/python scripts/pack-dataset-phase2.py  # → export/第二阶段数据清洗数据集.zip
+```
+
 建模（可与分析并行，训练约 80 分钟）：
 
 ```bash

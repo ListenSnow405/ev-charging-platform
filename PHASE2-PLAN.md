@@ -103,7 +103,7 @@ Qt 平台继续作为业务系统（纯 Socket 不变），新建的大数据子
 | `t_station_review` | 0 | ❌ 空表 |
 | `t_admin_oplog` | 3 | ❌ 数据量不足 |
 
-## 6. 数据清洗（T3，依赖 T2）—— 当前完成度为零
+## 6. 数据清洗（T3，依赖 T2）
 
 必须按 [数据清洗基本流程-操作SOP.md](数据清洗基本流程-操作SOP.md) 的六阶段走，**每阶段都有规定的必须产出**：
 
@@ -112,12 +112,20 @@ Qt 平台继续作为业务系统（纯 Socket 不变），新建的大数据子
 | 1 数据探查 | 数据概况与初始统计 | ✅ `quality/01_profile.json` |
 | 2 质量评估 | 六维度（完整/准确/一致/时效/唯一/有效）问题清单 | ✅ `quality/02_issues.csv`，**11 条** |
 | 3 制定规则 | 规则清单，每条含编号/作用对象/检测条件/处理动作/处理依据/影响评估/异常去向/验证方式 **八个字段** | ✅ `quality/03_rules.md`，**R001–R011** |
-| 4 执行清洗 | 清洗数据 + 异常记录 + 执行日志 | ✅ `dwd/*.parquet` + `quality/pending/` + `04_clean_log.json` |
+| 4 执行清洗 | 清洗数据 + 异常记录 + 执行日志 | ✅ `dwd/*.parquet`（按 Schema 契约定型）+ `quality/pending/` **14 份** + `04_clean_log.json` |
 | 5 清洗校验 | 前后指标对比 + 抽样复核 + 业务断言对账 + **Schema 契约断言** | ✅ `quality/05_validation.json`，**82/82 PASS** |
-| 6 报告存档 | 数据质量报告 + 脚本/规则/日志/血缘归档 | ✅ `quality/06_quality_report.md`（由前五份产物程序生成） |
+| 6 报告存档 | 数据质量报告 + 脚本/规则/日志/血缘归档 | ✅ `quality/06_quality_report.md`（由前五份产物程序生成，含数据字典与合理缺失登记） |
+| — 附加产出 | 数据字典、清洗后画像、结项数据集 | ✅ `quality/09_dwd_schema.json`　`10_dwd_profile.json`　`export/第二阶段数据清洗数据集.zip` |
 
-> ✅ **T3 已于 2026-09-14 完成。** 全程**零删除、零修改值**：1 条标记待核（非法手机号）、剔除 2 列（近乎全空）、
-> 订单 8292 → 8292 不变。可重复性已实测——重跑后行数/营收/总时长逐项一致。
+> ✅ **T3 已于 2026-09-14 完成，2026-09-15 按结项数据集评审意见补强三轮。** 全程**零删除、零修改值**：
+> 1 条标记待核（非法手机号）、剔除 2 列（近乎全空）、订单 8292 → 8292 不变。可重复性已实测——重跑后逐项一致。
+>
+> 补强要点（详见 [03_rules.md](bigdata/quality/03_rules.md) 末尾三节处置表）：
+> **① Schema 契约** `dwd_schema.py` 声明 11 表 132 列的列序/类型/可空，清洗按它定型、校验按它断言、报告按它出数据字典——
+> 此前碳排放/钱包/预测等表只做伪缺失归一就落盘，金额与电量列全是字符串；
+> **② 校验覆盖面** 20 → **82 项**，补上 11 表主键、12 条外键、45 条取值范围、2 组时间连续性与关键分布前后对比；
+> **③ 合理缺失登记**全量落盘并进报告 3.1 节；**⑤ 报告去硬编码**，遗留问题整节改为数据驱动；
+> **⑥⑦ 归档**：修包内失效链接、补登 README、另出两份 Excel 副本治 CSV 中文乱码。
 
 > ⚠ **不要拿第一阶段的 `ml/check_signal.py` 顶替阶段 2。** 它做的是「信号体检」（判断特征对模型有无信息量），与 SOP 要的「六维度数据质量评估」是两件事，答辩时会被问穿。
 
@@ -278,7 +286,7 @@ T0 契约变更 ─→ T1 环境 ─→ T2 数据层 ─→ T3 清洗 ─→ T4 
 | --- | --- | --- | --- |
 | 1 | Python **3.11 或 3.12** | ✅ **3.11.15** @ `.venv-phase2` | `bash scripts/check-env-phase2.sh` |
 | 2 | 文件存储 **Hadoop 3.x** | ✅ **Hadoop 3.3.6 伪分布式，ODS 已落 HDFS** | `bash scripts/check-env-phase2.sh`；`bigdata/quality/08_hdfs_deploy.json` 逐文件 MD5 |
-| 3 | **PySpark** 数据清洗 | ✅ SOP 六阶段全部产出 | `bigdata/quality/01`~`06` |
+| 3 | **PySpark** 数据清洗 | ✅ SOP 六阶段全部产出 + 数据字典与清洗后画像 | `bigdata/quality/01`~`06`、`09`、`10` |
 | 3 | 分析维度 **≥ 8** | ✅ **13 个**（D1–D14，D12 为预测） | `/api/dimensions` 返回 `dimension_count` |
 | 3 | **≥ 2 组**对比分析 | ✅ **3 组**（C1 快慢充 / C2 工作日周末 / C3 站点对标） | 大屏第 3 页；`comparison_count` |
 | 3 | **Flask** 处理 web 请求 | ✅ 4 个只读接口，冒烟 14/14 | `bigdata/api/README.md`、`scripts/smoke-api-phase2.py` |
@@ -365,7 +373,7 @@ unset ECP_ODS_ROOT                       # 切回本地目录
 | HDFS | `scripts/install-hadoop-phase2.sh`　`hdfs-ctl.sh`　`ods-to-hdfs.sh` | 装 / 起停 / 推 ODS 并校验；留痕 `bigdata/quality/08_hdfs_deploy.json` |
 | 契约 | `CLAUDE.md` v2.0 | 第 2.2 节二阶段基线、第 5.2 节五条硬性规则 |
 | ODS | `bigdata/spark/export_ods.py` → `bigdata/ods/` → `hdfs:///ecp/ods` | 源库 `mode=ro` 只读、产物 `chmod 444`、`_manifest.json` 血缘；HDFS 侧属主 `ecp_ods`、444 |
-| 清洗 | `bigdata/spark/{profiling,cleaning,validation,quality_report}.py` | SOP 六阶段，产出 `bigdata/quality/01`~`06` |
+| 清洗 | `bigdata/spark/{dwd_schema,profiling,cleaning,validation,quality_report}.py` | SOP 六阶段，产出 `bigdata/quality/01`~`06`；`dwd_schema.py` 是 **DWD 列序/类型/可空契约**，清洗、校验、报告三处共用 |
 | 分析 | `bigdata/spark/analysis.py` → `bigdata/dwd/`、MySQL | 13 维度 + 3 组对比 |
 | API | `bigdata/api/app.py` + `README.md` | 4 个只读接口 |
 | 大屏 | `bigdata/web/` + `README.md` | Vue3 + DataV，5 页 18 面板 |
