@@ -5,7 +5,7 @@
 
 产出：
   bigdata/dwd/<表>.parquet          清洗后数据
-  bigdata/quality/pending/*.csv     待核清单（按规则分文件）
+  bigdata/quality/pending/*.json    待核清单（按规则/表分文件，空清单也留文件）
   bigdata/quality/04_clean_log.json 执行日志
 
 不改 ODS（444 只读），不碰 charging.db。
@@ -74,6 +74,39 @@ def to_ts(c: str):
     return F.to_timestamp(F.col(f"`{c}`"), TS_FMT)
 
 
+def to_dbl(c: str):
+    return F.col(f"`{c}`").cast(T.DoubleType())
+
+
+def cast_with_capture(df, key: str, int_cols=(), ts_cols=(), dbl_cols=()):
+    """按列转强类型，并把「原值非空、转换后为空」的行整行抓出来。
+
+    SOP 6.2：「类型转换失败的值不要静默变为空值，应输出失败记录与原始值供复核。」
+    关键在于**先写影子列 `_col`、比对完再替换回来**——直接原地 withColumn 会把原值盖掉，
+    失败行就再也拿不到「原始值」，待核清单也就失去了意义。
+
+    返回 (转换后的 df, 失败行 df)。失败行带业务键 `key` 与全部参与转换的**原始字符串值**。
+    """
+    plan = ([(c, to_int) for c in int_cols]
+            + [(c, to_ts) for c in ts_cols]
+            + [(c, to_dbl) for c in dbl_cols])
+    plan = [(c, fn) for c, fn in plan if c in df.columns]
+    cols = [c for c, _ in plan]
+
+    typed = df
+    for c, fn in plan:
+        typed = typed.withColumn(f"_{c}", fn(c))
+
+    fail = typed.filter(
+        F.array_max(F.array(*[
+            F.when(F.col(f"`{c}`").isNotNull() & F.col(f"_{c}").isNull(), 1).otherwise(0)
+            for c in cols])) == 1).select(key, *cols)
+
+    for c in cols:
+        typed = typed.drop(c).withColumnRenamed(f"_{c}", c)
+    return typed, fail
+
+
 def main() -> int:
     spark = build_spark("ecp-cleaning")
     if DWD_ROOT.exists():
@@ -94,24 +127,12 @@ def main() -> int:
                 "price", "kwh_x100", "amount"]
     TS_COLS = ["reserve_time", "start_time", "end_time", "settle_time"]
 
-    # R002/R003：先留下原始列用于比对转换是否失败
-    typed = o
-    for c in INT_COLS:
-        typed = typed.withColumn(f"_{c}", to_int(c))
-    for c in TS_COLS:
-        typed = typed.withColumn(f"_{c}", to_ts(c))
-
-    cast_fail = typed.filter(
-        F.array_max(F.array(*[
-            F.when(F.col(f"`{c}`").isNotNull() & F.col(f"_{c}").isNull(), 1).otherwise(0)
-            for c in INT_COLS + TS_COLS])) == 1)
-    n_fail = save_pending(cast_fail.select("order_no", *INT_COLS, *TS_COLS),
-                          "type_cast_failed", "R002/R003")
-    note("R002", "整数列类型转换", 列数=len(INT_COLS), 失败行=n_fail)
-    note("R003", "时间列转 timestamp", 列数=len(TS_COLS), 失败行=n_fail)
-
-    for c in INT_COLS + TS_COLS:
-        typed = typed.drop(c).withColumnRenamed(f"_{c}", c)
+    # R002/R003：转换失败的行整行进待核，不静默变 NULL
+    typed, cast_fail = cast_with_capture(o, "order_no",
+                                         int_cols=INT_COLS, ts_cols=TS_COLS)
+    n_fail = save_pending(cast_fail, "type_cast_failed", "R002/R003")
+    note("R002", "整数列类型转换", 表="t_order", 列数=len(INT_COLS), 失败行=n_fail)
+    note("R003", "时间列转 timestamp", 表="t_order", 列数=len(TS_COLS), 失败行=n_fail)
 
     # R004：三列必须是整数型，这里断言而非"尽量"
     for c in ["amount", "price", "kwh_x100"]:
@@ -178,24 +199,26 @@ def main() -> int:
 
     # ---------------- t_pile / t_station 维表 ----------------
     p, _ = apply_r001(read_ods(spark, "t_pile"))
-    p = (p.withColumn("pile_id", to_int("pile_id"))
-          .withColumn("station_id", to_int("station_id"))
-          .withColumn("type", to_int("type"))
-          .withColumn("status", to_int("status"))
-          .withColumn("online", to_int("online"))
-          .withColumn("power", F.col("power").cast("double"))
-          .withColumn("last_heartbeat", to_ts("last_heartbeat"))
-          .withColumn("type_label", F.when(F.col("type") == 0, "快充").otherwise("慢充"))
+    p, p_fail = cast_with_capture(
+        p, "pile_code",
+        int_cols=["pile_id", "station_id", "type", "status", "online"],
+        ts_cols=["last_heartbeat"], dbl_cols=["power"])
+    n_pfail = save_pending(p_fail, "type_cast_failed_pile", "R002/R003")
+    p = (p.withColumn("type_label", F.when(F.col("type") == 0, "快充").otherwise("慢充"))
           .withColumn("status_label", F.when(F.col("status") == 0, "在用")
                       .when(F.col("status") == 1, "闲置").otherwise("故障")))
     p.write.mode("overwrite").parquet(str(DWD_ROOT / "dwd_pile.parquet"))
+    note("R002/R003·t_pile", "维表类型转换（失败进待核）",
+         列数=7, 失败行=n_pfail, 表行数=p.count())
 
     s, _ = apply_r001(read_ods(spark, "t_station"))
-    s = (s.withColumn("station_id", to_int("station_id"))
-          .withColumn("price", to_int("price"))
-          .withColumn("lng", F.col("lng").cast("double"))
-          .withColumn("lat", F.col("lat").cast("double")))
+    s, s_fail = cast_with_capture(s, "name",
+                                  int_cols=["station_id", "price", "status"],
+                                  dbl_cols=["lng", "lat"])
+    n_sfail = save_pending(s_fail, "type_cast_failed_station", "R002/R003")
     s.write.mode("overwrite").parquet(str(DWD_ROOT / "dwd_station.parquet"))
+    note("R002/R003·t_station", "维表类型转换（失败进待核）",
+         列数=5, 失败行=n_sfail, 表行数=s.count())
     note("R005", "电桩类型/状态码表归一", 电桩=p.count(), 站点=s.count())
 
     # ---------------- t_pile_log：R008 列级剔除 ----------------
@@ -203,11 +226,13 @@ def main() -> int:
     dropped = [c for c in ("old_status", "new_status") if c in pl.columns]
     EV = {0: "上线", 1: "离线", 2: "状态变更", 3: "远程重启", 4: "故障上报"}
     evmap = F.create_map([F.lit(x) for kv in EV.items() for x in kv])
-    pl = (pl.drop(*dropped)
-            .withColumn("pile_id", to_int("pile_id"))
-            .withColumn("event", to_int("event"))
-            .withColumn("create_time", to_ts("create_time"))
-            .withColumn("event_label", F.coalesce(evmap[F.col("event")], F.lit("未知"))))
+    pl, pl_fail = cast_with_capture(pl.drop(*dropped), "log_id",
+                                    int_cols=["pile_id", "event"],
+                                    ts_cols=["create_time"])
+    n_plfail = save_pending(pl_fail, "type_cast_failed_pile_log", "R002/R003")
+    pl = pl.withColumn("event_label", F.coalesce(evmap[F.col("event")], F.lit("未知")))
+    note("R002/R003·t_pile_log", "事件表类型转换（失败进待核）",
+         列数=3, 失败行=n_plfail)
     pl.write.mode("overwrite").parquet(str(DWD_ROOT / "dwd_pile_log.parquet"))
     note("R008", "剔除近乎全空的状态列", 剔除列=dropped, 保留行=pl.count(),
          有效事件=pl.filter(F.col("event") != 2).count())
@@ -225,6 +250,8 @@ def main() -> int:
         "本轮删除行数": 0,
         "本轮修改值": 0,
         "标记待核": n_bad,
+        "类型转换失败": {"t_order": n_fail, "t_pile": n_pfail,
+                   "t_station": n_sfail, "t_pile_log": n_plfail},
         "剔除列": dropped,
         "订单行数": f"{n_in} → {n_out}（不变）",
     }

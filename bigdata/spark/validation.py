@@ -61,6 +61,37 @@ def main() -> int:
             drift.append(f"{c}: {a}→{b}")
     check("时间列非空数无漂移", not drift, "、".join(drift) if drift else "四列逐列一致")
 
+    # 维表同样不许静默置空。R002/R003 的失败捕获补齐后，这里做两件事：
+    #   ① 三份待核清单必须存在且为 0 行——「查过且为空」要能证明；
+    #   ② 参与转换的列，非空数在 ODS 与 DWD 之间逐列一致。
+    # ② 才是真正的静默置空探测器：清单为空但非空数掉了，说明捕获逻辑本身漏了。
+    DIM_CAST = {
+        "t_pile": ("dwd_pile.parquet", "type_cast_failed_pile",
+                   ["pile_id", "station_id", "type", "status", "online",
+                    "power", "last_heartbeat"]),
+        "t_station": ("dwd_station.parquet", "type_cast_failed_station",
+                      ["station_id", "price", "status", "lng", "lat"]),
+        "t_pile_log": ("dwd_pile_log.parquet", "type_cast_failed_pile_log",
+                       ["pile_id", "event", "create_time"]),
+    }
+    for tbl, (pq, pend, cast_cols) in DIM_CAST.items():
+        src = spark.read.csv(ods_file(f"{tbl}.csv"), header=True, inferSchema=False)
+        out = spark.read.parquet(str(DWD_ROOT / pq))
+
+        f = QUALITY_DIR / "pending" / f"{pend}.json"
+        listed = json.loads(f.read_text(encoding="utf-8"))["行数"] if f.exists() else None
+        check(f"{tbl} 转换失败清单已落地且为空（R002/R003）", listed == 0,
+              f"{pend}.json 行数 {listed}" if listed is not None else "清单文件缺失")
+
+        gap = []
+        for c in cast_cols:
+            a = src.filter(F.col(c).isNotNull() & (F.trim(F.col(c)) != "")).count()
+            b = out.filter(F.col(c).isNotNull()).count()
+            if a != b:
+                gap.append(f"{c}: {a}→{b}")
+        check(f"{tbl} 转换列非空数无漂移", not gap,
+              "、".join(gap) if gap else f"{len(cast_cols)} 列逐列一致")
+
     # 营收合计必须逐分相等：这是最硬的对账
     rev_ods = (ods.filter(F.col("status") == "3")
                   .agg(F.sum(F.col("amount").cast("long"))).collect()[0][0])

@@ -113,7 +113,7 @@ Qt 平台继续作为业务系统（纯 Socket 不变），新建的大数据子
 | 2 质量评估 | 六维度（完整/准确/一致/时效/唯一/有效）问题清单 | ✅ `quality/02_issues.csv`，**11 条** |
 | 3 制定规则 | 规则清单，每条含编号/作用对象/检测条件/处理动作/处理依据/影响评估/异常去向/验证方式 **八个字段** | ✅ `quality/03_rules.md`，**R001–R011** |
 | 4 执行清洗 | 清洗数据 + 异常记录 + 执行日志 | ✅ `dwd/*.parquet` + `quality/pending/` + `04_clean_log.json` |
-| 5 清洗校验 | 前后指标对比 + 抽样复核 + 业务断言对账 | ✅ `quality/05_validation.json`，**14/14 PASS** |
+| 5 清洗校验 | 前后指标对比 + 抽样复核 + 业务断言对账 | ✅ `quality/05_validation.json`，**20/20 PASS** |
 | 6 报告存档 | 数据质量报告 + 脚本/规则/日志/血缘归档 | ✅ `quality/06_quality_report.md`（由前五份产物程序生成） |
 
 > ✅ **T3 已于 2026-09-14 完成。** 全程**零删除、零修改值**：1 条标记待核（非法手机号）、剔除 2 列（近乎全空）、
@@ -308,7 +308,7 @@ T0 契约变更 ─→ T1 环境 ─→ T2 数据层 ─→ T3 清洗 ─→ T4 
 | ODS 路径 | `hdfs://localhost:9000/ecp/ods`，15 个文件（14 表 + `_manifest.json`） |
 | 搬运校验 | **逐文件 MD5** 与本地快照字节级一致（比内容，不比 HDFS 的块级 CRC） |
 | 只读保证 | 属主 `ecp_ods`、目录 555 / 文件 444，分析侧以 `ecp_analyst` 身份连 |
-| 下游验证 | HDFS 为源重跑 profiling → cleaning → validation，**14/14 PASS**，营收仍为 **53,936,279 分** |
+| 下游验证 | HDFS 为源重跑 profiling → cleaning → validation，**当时 14/14 PASS**，营收仍为 **53,936,279 分**（2026-09-15 补齐维表转换捕获后校验项增至 20，本地重跑 20/20；HDFS 侧未再重跑，介质无关的断言不受影响） |
 
 ### 只读这件事在 HDFS 上会打折，得单独处理
 
@@ -389,7 +389,7 @@ bash scripts/ods-to-hdfs.sh                                # 推 HDFS + 逐文�
 set -a; . config/phase2-hdfs.env; set +a                   # 下游数据源切到 HDFS
 .venv-phase2/bin/python bigdata/spark/profiling.py         # 清洗 1+2
 .venv-phase2/bin/python bigdata/spark/cleaning.py          # 清洗 4
-.venv-phase2/bin/python bigdata/spark/validation.py        # 清洗 5（14/14 必须全过）
+.venv-phase2/bin/python bigdata/spark/validation.py        # 清洗 5（20/20 必须全过）
 .venv-phase2/bin/python bigdata/spark/quality_report.py    # 清洗 6
 .venv-phase2/bin/python bigdata/spark/analysis.py          # 分析 → MySQL
 .venv-phase2/bin/python bigdata/mllib/features.py          # 特征（守恒自检必须 0.0000）

@@ -30,13 +30,14 @@
 
 | 项 | 内容 |
 | --- | --- |
-| 作用对象 | `t_order`(order_id/user_id/pile_id/station_id/status/price/kwh_x100/amount)、`t_pile`(pile_id/station_id/type/status/power/online)、`t_station`(station_id/price/status) |
+| 作用对象 | 四张表，共 27 列，与 R003 的时间列合并判定：<br>`t_order` 8 整数列 + 4 时间列　`t_pile` 5 整数列 + `power`(double) + `last_heartbeat`<br>`t_station` 3 整数列(station_id/price/status) + `lng`/`lat`(double)　`t_pile_log` `pile_id`/`event` + `create_time` |
+| 实现方式 | `cleaning.py` 的 `cast_with_capture()` 统一承担：先把转换结果写影子列 `_col`，比对完再替换回来。**不能原地 `withColumn`**——那会盖掉原值，待核清单就拿不到「原始值」，等于没查 |
 | 检测条件 | 转换为 int/double 后为 NULL，但原值非 NULL |
 | 处理动作 | 主体转换为强类型；**失败行整行写入待核清单**，不置空 |
 | 处理依据 | SOP 6.2「类型转换失败的值不要静默变为空值，应输出失败记录与原始值供复核」 |
 | 影响评估 | 探查显示各列取值规整，预计 0 行失败 |
-| 异常去向 | `bigdata/quality/pending/type_cast_failed.csv` |
-| 验证方式 | DWD 各列类型符合预期，且失败清单行数 + 成功行数 = ODS 行数 |
+| 异常去向 | 按表分文件：`pending/type_cast_failed.json`(t_order)、`type_cast_failed_pile.json`、`type_cast_failed_station.json`、`type_cast_failed_pile_log.json`。**四份均落地，空清单也留文件** |
+| 验证方式 | `validation.py` 每张表两条断言：① 待核清单**存在**且为 0 行；② 参与转换的列，非空数在 ODS 与 DWD 之间**逐列一致**。②才是真正的静默置空探测器——清单为空但非空数掉了，说明捕获逻辑自己漏了。实测 4 表 27 列全部一致，失败合计 0 行 |
 
 ## R003 · 时间统一为 `yyyy-MM-dd HH:mm:ss`
 
@@ -68,10 +69,10 @@
 | --- | --- |
 | 作用对象 | `t_order.status`、`t_pile.status`、`t_pile.type`、`t_user.status`、`t_pile_log.event` |
 | 检测条件 | 取值不在码表内 |
-| 处理动作 | 按码表新增标签列（**保留原始码值列**，不覆盖）；越界值标为「未知」并进待核 |
+| 处理动作 | 按码表新增标签列（**保留原始码值列**，不覆盖）；越界值标为「未知」并计数 |
 | 处理依据 | SOP 6.6「使用码表统一同义表示」；码表取自 CLAUDE.md 第 6 节与 `db-schema.sql` 注释 |
 | 影响评估 | 探查显示枚举全部合法，预计 0 行越界 |
-| 异常去向 | `pending/enum_out_of_range.csv` |
+| 异常去向 | 越界条数记入 `04_clean_log.json` 的 R005 条目（实测 `越界=0`）。**当前未落独立待核文件**——其余规则均遵守「空清单也留痕」，此处是唯一例外；一旦越界数 > 0，须补落 `pending/enum_out_of_range.json` |
 | 验证方式 | 标签列无「未知」，且各标签计数与原码值计数逐一相等 |
 
 ## R006 · 非法手机号：标记待核，**不删不改**　← Q001
@@ -83,7 +84,7 @@
 | 处理动作 | 新增 `phone_valid=false` 标记，**保留原行原值** |
 | 处理依据 | SOP 第 5 节「关键字段的缺失、冲突或重复不得用通用规则一刀切」。手机号是用户端登录主键（[说明书] 1.4 免密登录），删除会连带毁掉其关联数据；改写则是**凭空编造**业务事实 |
 | 影响评估 | 1 行（`12345678901`），占 t_user 20% |
-| 异常去向 | `pending/invalid_phone.csv` |
+| 异常去向 | `pending/invalid_phone.json` |
 | 验证方式 | 待核清单恰好 1 行；`t_user` 行数清洗前后均为 5 |
 
 ## R007 · 冻结用户的历史订单：保留　← Q002
@@ -94,7 +95,7 @@
 | 检测条件 | 订单所属用户当前为冻结态 |
 | 处理动作 | **不处理**，仅在质量报告中说明口径 |
 | 处理依据 | 冻结是**后置管理动作**（[说明书]：管理员可手动冻结解冻），历史订单发生在冻结之前，本就应当存在。按「一致性冲突」删除会抹掉 4136 笔真实交易，是典型的误删 |
-| 影响评估 | 4136 行（49.88%），**零改动** |
+| 影响评估 | 4136 行（49.88%），**零改动**。该数字取自 2026-09-15 实测（`02_issues.csv` Q002）；`cleaning.py` 的 R007 日志里它是**硬编码字面量而非实时统计**，换数据集重跑不会自动更新，核对时以 Q002 为准 |
 | 异常去向 | 无 |
 | 验证方式 | 清洗前后订单数均为 8292 |
 
@@ -116,11 +117,11 @@
 | --- | --- |
 | 作用对象 | `t_station_review`(0)、`t_wallet_tx`(1)、`t_admin_oplog`(3)、`t_carbon_report`(5)、`t_load_forecast`(18) |
 | 检测条件 | 事实表行数为 0 或 < 100 |
-| 处理动作 | 仍导入 DWD（**不删数据**），但在维度设计中排除；`t_load_forecast` 仅用于快照类展示 |
+| 处理动作 | `t_station_review`、`t_wallet_tx`、`t_carbon_report`、`t_load_forecast` 仍导入 DWD（**不删数据**），但在维度设计中排除；`t_load_forecast` 仅用于快照类展示。`t_admin_oplog` 例外——它与 `t_sys_config`/`t_admin` 同属**平台运维表，不进 DWD**，只在 ODS 留存 |
 | 处理依据 | SOP 第 5 节「删除是最后手段」。数据量不足是**分析范围问题**，不是数据错误，不该用删除来解决 |
 | 影响评估 | 0 行被删 |
 | 异常去向 | 无 |
-| 验证方式 | DWD 表数与 ODS 一致；质量报告列明被排除的维度及原因 |
+| 验证方式 | DWD 落地 **11 张**业务表 = ODS 14 张扣除 `t_sys_config`/`t_admin`/`t_admin_oplog` 三张运维表（有意不导，非删除，ODS 侧原样保留）；质量报告列明被排除的维度及原因 |
 
 ## R010 · 派生分析字段
 
@@ -128,10 +129,10 @@
 | --- | --- |
 | 作用对象 | `t_order` |
 | 检测条件 | — |
-| 处理动作 | 派生：`charge_minutes`(end−start)、`wait_minutes`(start−reserve)、`unit_price_fen`(amount×100÷kwh_x100，整数分/度)、`order_date`、`order_hour`、`is_weekend`、`pile_type_label` |
+| 处理动作 | 派生 6 列：`charge_minutes`(end−start)、`wait_minutes`(start−reserve)、`unit_price_fen`(amount×100÷kwh_x100，整数分/度)、`order_date`、`order_hour`、`is_weekend`。**不含电桩类型标签**——快充/慢充是 `t_pile` 的属性，由 R005 在 `dwd_pile` 上出 `type_label`，分析时 join 取用，不在订单表冗余一份 |
 | 处理依据 | 支撑 PHASE2-PLAN 第 7 节的 D1–D10 与 C1–C3；派生一律在 DWD 层做，ODS 不动（CLAUDE.md 5.2 第 6 条） |
-| 影响评估 | 8292 行新增 7 列；取消单的时长类字段为 NULL（合理缺失，不填充） |
-| 异常去向 | 时长为负者进 `pending/negative_duration.csv` |
+| 影响评估 | 8292 行新增 7 列 = 本条 6 列 + R005 的 `status_label`（执行日志 `新增列=7` 即按此口径）；取消单的时长类字段为 NULL（合理缺失，不填充） |
+| 异常去向 | 时长为负者进 `pending/negative_duration.json` |
 | 验证方式 | 时长非负；`unit_price_fen` 与 `price` 的偏差在 1 分内 |
 
 ## R011 · 外键完整性
@@ -143,7 +144,7 @@
 | 处理动作 | 孤儿记录**保留**并标记，进待核 |
 | 处理依据 | SOP 7.1「主键非空且唯一，外键关联完整」；删除会丢失真实交易 |
 | 影响评估 | 探查阶段实测孤儿订单 0 行 |
-| 异常去向 | `pending/orphan_fk.csv` |
+| 异常去向 | `pending/orphan_fk.json` |
 | 验证方式 | 待核清单为空 |
 
 ---
@@ -161,3 +162,35 @@
 | R011 | SOP 7.1 | 校验 |
 
 **本轮无任何删除动作。** Q003（数据滞后）属合成数据集的固有属性，无规则可施，在质量报告中说明。
+
+---
+
+## 文档与代码一致性核对（2026-09-15）
+
+本清单成文于阶段 3（清洗执行之前），部分表述与 `cleaning.py` 的最终实现有出入。
+按「**以代码实测为准**」逐条回填如下，**未改动任何代码，也未重跑清洗**——
+故 `04_clean_log.json` / `05_validation.json` / `06_quality_report.md` 的数字全部不受影响。
+
+| # | 原表述 | 实际实现 | 处置 |
+| --- | --- | --- | --- |
+| 1 | 待核清单为 `pending/*.csv` | `cleaning.py` 的 `save_pending()` 写 `.json`（含规则号、行数、样例） | 四处扩展名已改正 |
+| 2 | R005 越界进 `pending/enum_out_of_range.csv` | 只 `count()` 计数写入执行日志，未落文件 | 如实记为「唯一未遵守空清单留痕的规则」，并注明 > 0 时须补落 |
+| 3 | R002 覆盖 `t_order` + `t_pile` + `t_station` | 失败捕获原**仅 `t_order`**；两张维表直接 `cast`，失败会静默变 NULL | **已改代码修复**（见下），覆盖面反而比原表述更大，另含 `t_pile_log` |
+| 4 | R010 派生 7 列含 `pile_type_label` | 实际派生 6 列，日志的 `新增列=7` 含 R005 的 `status_label`；类型标签在 `dwd_pile` 上，分析时 join | 改为 6 列并写明口径与 join 取用理由 |
+| 5 | R007 影响 4136 行 | 数字对，但在 `cleaning.py` 中是硬编码字面量，不随数据集更新 | 注明以 `02_issues.csv` Q002 为准 |
+| 6 | R009「DWD 表数与 ODS 一致」、`t_admin_oplog` 仍导入 | DWD 11 张，`t_sys_config`/`t_admin`/`t_admin_oplog` 三张运维表有意不导 | 改为准确表述，并说明是「不导」而非「删除」，ODS 侧原样保留 |
+
+其中 #1 #2 #4 #5 #6 为**文档回填，未动代码**；#3 是唯一有实质风险的一条（SOP 6.2 明令禁止静默置空），已按下述方式**修复代码**。
+
+### #3 的修复（2026-09-15，同日）
+
+1. `cleaning.py` 抽出 `cast_with_capture()`，订单表原有的影子列比对逻辑改由它承担（行为不变），
+   再套用到 `t_pile`、`t_station`、`t_pile_log` 三张表——**覆盖面比原规则表述还多一张 `t_pile_log`**，
+   因为 R003 明文点名了 `t_pile_log.create_time`。
+2. `validation.py` 新增 6 条断言（三表 × 清单为空 / 非空数无漂移），校验项 **14 → 20，仍全过**。
+3. `quality_report.py` 在处理动作后补一行**逐表转换失败对账**，四表合计 0 行。
+4. 重跑 `cleaning → validation → quality_report`：订单仍 8292 → 8292，
+   营收仍 **53,936,279 分**，电量仍 **36,638,035**（×100 度），无任何数值漂移。
+
+唯一的 schema 变化是 `dwd_station.status` 由 `string` 变 `bigint`（R002 本就点名该列，此前漏转）。
+已确认 `analysis.py` 与 `mllib/` 只取 `station_id`/`name`/`lng`/`lat`，不读该列，下游无影响。
