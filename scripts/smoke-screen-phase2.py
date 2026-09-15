@@ -118,7 +118,14 @@ def main() -> int:
             check(f"第 {i+1} 页「{tabs[i]}」", st["panels"] >= 1 and not stuck,
                   f"{st['panels']} 个面板　{st['canvas']} 个非空 canvas"
                   + (f"　空数据 {len(st['stuck'])} 格" if st["stuck"] else ""))
-        check("面板总数 = 17", total_panels == 17, f"实际 {total_panels} 个")
+        #  **不要写死面板总数。** 这里原本是 `total_panels == 17`：
+        #  T7 加了「负荷预测」页的 2 块面板后总数变成 18，而这行常量没跟着改，
+        #  于是这条断言从那次提交起一直在失败——直到 2026-09-15 补测试用例时重跑才发现。
+        #  写死一个会随开发自然增长的数，等于给自己埋一条必然过期的断言。
+        #  真正要守的是**维度不能掉**：13 个分析维度 + D12 预测 = 14，每个至少占一块面板。
+        #  加面板不会让它失败，删维度会。
+        check("面板数覆盖全部维度（≥14）", total_panels >= 14,
+              f"实际 {total_panels} 个面板")
         n_panel = total_panels
 
         # （原整屏级「无面板卡在空数据」断言已删：分页后它只作用于当前页，

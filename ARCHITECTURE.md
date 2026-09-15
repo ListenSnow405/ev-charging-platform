@@ -194,7 +194,7 @@ flowchart TB
 
     MY[("MySQL · 分析结果层<br/>只存结果，不存明细")]
     API["Flask 只读 API &nbsp; bigdata/api &nbsp; L5<br/>4 个接口 · 只监听 127.0.0.1"]
-    WEB["Vue3 + DataV 大屏 &nbsp; bigdata/web &nbsp; L5<br/>5 页 17 面板 · 9 类图表"]
+    WEB["Vue3 + DataV 大屏 &nbsp; bigdata/web &nbsp; L5<br/>5 页 18 面板 · 9 类图表"]
 
     DB -->|export_ods.py&nbsp;mode=ro| O
     O --> C

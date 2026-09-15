@@ -283,7 +283,7 @@ T0 契约变更 ─→ T1 环境 ─→ T2 数据层 ─→ T3 清洗 ─→ T4 
 | 3 | **≥ 2 组**对比分析 | ✅ **3 组**（C1 快慢充 / C2 工作日周末 / C3 站点对标） | 大屏第 3 页；`comparison_count` |
 | 3 | **Flask** 处理 web 请求 | ✅ 4 个只读接口，冒烟 14/14 | `bigdata/api/README.md`、`scripts/smoke-api-phase2.py` |
 | 4 | **Node 23+** / **Vue 3** | ✅ Node **v24.1.0**（LTS）/ Vue **3.5.42** / Vite 6.4.3 | `bigdata/web/package.json` |
-| 5 | **DataV** 大屏，图表不单一 | ✅ **5 页 17 面板**，DataV 5 类组件 + ECharts **9 类图表** + 3 张表格 | `bigdata/web/README.md`；渲染冒烟逐页 PASS |
+| 5 | **DataV** 大屏，图表不单一 | ✅ **5 页 18 面板**，DataV 5 类组件 + ECharts **9 类图表** + 3 张表格 | `bigdata/web/README.md`；渲染冒烟 15/15 PASS |
 | 6 | 机器学习预测 + **模型评估** | ✅ 6 个 MLlib 模型，MAE/RMSE/R² + **双基线对照** | `bigdata/quality/07_forecast_eval.md` |
 
 **六条要求全部达标。** 第 2 条原先只完成一半（老师原话是「代码测试过程在本地，
@@ -368,9 +368,10 @@ unset ECP_ODS_ROOT                       # 切回本地目录
 | 清洗 | `bigdata/spark/{profiling,cleaning,validation,quality_report}.py` | SOP 六阶段，产出 `bigdata/quality/01`~`06` |
 | 分析 | `bigdata/spark/analysis.py` → `bigdata/dwd/`、MySQL | 13 维度 + 3 组对比 |
 | API | `bigdata/api/app.py` + `README.md` | 4 个只读接口 |
-| 大屏 | `bigdata/web/` + `README.md` | Vue3 + DataV，5 页 17 面板 |
+| 大屏 | `bigdata/web/` + `README.md` | Vue3 + DataV，5 页 18 面板 |
 | 建模 | `bigdata/mllib/{features,train,predict,report}.py` | 6 个 GBT 模型 + `quality/07_forecast_eval.md` |
-| 测试 | `scripts/smoke-api-phase2.py`　`scripts/smoke-screen-phase2.py` | 接口 14 项、渲染逐页断言，**含 SQL 注入与真实截图** |
+| 测试 | `scripts/smoke-api-phase2.py`　`scripts/smoke-screen-phase2.py` | 接口 14 项、渲染 15 项逐页断言，**含 SQL 注入与真实截图** |
+| 用例集 | `第二阶段测试用例.xlsx` ← `scripts/gen-testcases-phase2.py` | 9 表 **130 条用例** + 缺陷 8 条；表格由脚本生成，不手工维护 |
 
 ### 全链路复现
 
