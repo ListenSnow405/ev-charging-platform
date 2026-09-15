@@ -14,6 +14,9 @@
 #include <QGridLayout>
 #include <QHBoxLayout>
 #include <QFileDialog>
+#include <QFileInfo>
+#include <QPixmap>
+#include <QRegion>
 #include <QInputDialog>
 #include <QIcon>
 #include <QJsonDocument>
@@ -32,6 +35,7 @@
 #include <QTableWidgetItem>
 #include <QVector>
 #include <QSizePolicy>
+#include <QStringList>
 #include <QFont>
 #include <QUrl>
 #include <QUrlQuery>
@@ -44,6 +48,9 @@
 #endif
 
 namespace {
+// 预测拥堵度的分级阈值（与管理端 2305 的预警口径保持一致）
+constexpr double CONGESTION_BUSY_THRESHOLD = 0.8;
+
 static QString textOrEmpty(const QJsonObject &obj, const char *key)
 {
     return obj.value(QLatin1String(key)).toString();
@@ -1322,11 +1329,24 @@ void MainWindow::renderChargePiles()
 
         auto *btn = new QPushButton(QStringLiteral("预约"), m_chargePileTable);
         btn->setObjectName(QStringLiteral("Primary"));
+        // 表格行内的操作按钮只影响本表格：更小的字号与内边距，避免撑高行、显得臃肿。
+        btn->setStyleSheet(QStringLiteral(
+            "QPushButton { background: #2563eb; color: #ffffff; border: none;"
+            " border-radius: 8px; padding: 2px 10px; font-size: 12px; }"
+            "QPushButton:hover { background: #1d4ed8; }"));
+        btn->setFixedHeight(26);
         connect(btn, &QPushButton::clicked, this, [this, pileId] {
             m_selectedChargePileId = pileId;
             reserveChargePile(pileId);
         });
-        m_chargePileTable->setCellWidget(row, 4, btn);
+        // 用带 stretch 的容器居中，避免按钮被拉伸填满整列宽度。
+        auto *cell = new QWidget(m_chargePileTable);
+        auto *cellLay = new QHBoxLayout(cell);
+        cellLay->setContentsMargins(4, 2, 4, 2);
+        cellLay->addStretch();
+        cellLay->addWidget(btn);
+        cellLay->addStretch();
+        m_chargePileTable->setCellWidget(row, 4, cell);
         ++row;
     }
     if (m_chargeHint) {
@@ -1441,6 +1461,66 @@ void MainWindow::reserveChargePile(qint64 pileId)
     if (!m_net || !m_net->isConnected()) {
         setStatus(QStringLiteral("未连接到服务器"), true);
         return;
+    }
+    // 机器学习提示：所选站点预测拥堵度高时先提醒，并给出更空闲的替代站点。
+    for (const QJsonValue &value : m_nearbyStations) {
+        const QJsonObject station = value.toObject();
+        if (station.value(QStringLiteral("stationId")).toVariant().toLongLong()
+                != m_selectedNearbyStationId) {
+            continue;
+        }
+        const double congestion = stationCongestion(station);
+        if (congestion < CONGESTION_BUSY_THRESHOLD) break;
+
+        QVector<QJsonObject> candidates;
+        for (const QJsonValue &other : m_nearbyStations) {
+            const QJsonObject item = other.toObject();
+            if (item.value(QStringLiteral("stationId")).toVariant().toLongLong()
+                    == m_selectedNearbyStationId) {
+                continue;
+            }
+            if (item.value(QStringLiteral("congestion")).toDouble(-1.0) < 0.0) continue;
+            candidates.append(item);
+        }
+        std::sort(candidates.begin(), candidates.end(),
+                  [](const QJsonObject &a, const QJsonObject &b) {
+            const double ca = a.value(QStringLiteral("congestion")).toDouble(1.0);
+            const double cb = b.value(QStringLiteral("congestion")).toDouble(1.0);
+            if (ca != cb) return ca < cb;
+            return a.value(QStringLiteral("distance")).toVariant().toLongLong()
+                 < b.value(QStringLiteral("distance")).toVariant().toLongLong();
+        });
+
+        QStringList alternatives;
+        for (int i = 0; i < candidates.size() && i < 2; ++i) {
+            const QJsonObject &item = candidates.at(i);
+            alternatives << QStringLiteral("· %1（%2，预测空闲 %3 桩，拥堵 %4%）")
+                                .arg(item.value(QStringLiteral("name")).toString())
+                                .arg(formatDistance(item.value(QStringLiteral("distance"))
+                                                        .toVariant().toLongLong()))
+                                .arg(item.value(QStringLiteral("idleForecast"))
+                                         .toVariant().toLongLong())
+                                .arg(qRound(item.value(QStringLiteral("congestion"))
+                                                .toDouble() * 100.0));
+        }
+
+        const qint64 idleForecast = station.value(QStringLiteral("idleForecast"))
+                                        .toVariant().toLongLong();
+        QString text = QStringLiteral(
+            "该站点预测较拥挤：拥堵度 %1%（1 小时后预计空闲 %2 桩）。")
+                           .arg(qRound(congestion * 100.0))
+                           .arg(idleForecast < 0 ? QStringLiteral("-")
+                                                 : QString::number(idleForecast));
+        if (!alternatives.isEmpty())
+            text += QStringLiteral("\n\n更空闲的替代站点：\n")
+                    + alternatives.join(QLatin1Char('\n'));
+        text += QStringLiteral("\n\n仍要预约这个站点吗？");
+
+        const QMessageBox::StandardButton answer = QMessageBox::question(
+            this, QStringLiteral("负荷预测提示"), text,
+            QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+        if (answer != QMessageBox::Yes) return;
+        break;
     }
     m_pendingChargeReservePileId = pileId;
     m_suppressChargeUnfinishedPrompt = false;
@@ -1641,8 +1721,25 @@ void MainWindow::setStatus(const QString &text, bool isError)
 void MainWindow::refreshAvatarBadge()
 {
     if (!m_avatar) return;
-    const QString avatarPath = profileName().left(1).toUpper();
-    m_avatar->setText(avatarPath.isEmpty() ? QStringLiteral("用") : avatarPath);
+    // 资料里存的是头像文件路径：路径有效就显示图片，否则退回显示昵称首字母。
+    const QString avatarPath = m_profile.value(QStringLiteral("avatar")).toString().trimmed();
+    if (!avatarPath.isEmpty() && QFileInfo::exists(avatarPath)) {
+        QPixmap pixmap(avatarPath);
+        if (!pixmap.isNull()) {
+            const int side = 56;
+            const QPixmap scaled = pixmap.scaled(side, side, Qt::KeepAspectRatioByExpanding,
+                                                 Qt::SmoothTransformation);
+            const int x = (scaled.width() - side) / 2;
+            const int y = (scaled.height() - side) / 2;
+            m_avatar->setPixmap(scaled.copy(x, y, side, side));
+            m_avatar->setMask(QRegion(QRect(0, 0, side, side), QRegion::Ellipse));
+            return;
+        }
+    }
+    m_avatar->clearMask();
+    m_avatar->setPixmap(QPixmap());
+    const QString initial = profileName().left(1).toUpper();
+    m_avatar->setText(initial.isEmpty() ? QStringLiteral("用") : initial);
 }
 
 QString MainWindow::profileName() const
