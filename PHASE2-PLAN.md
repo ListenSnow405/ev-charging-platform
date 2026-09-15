@@ -267,7 +267,7 @@ T0 契约变更 ─→ T1 环境 ─→ T2 数据层 ─→ T3 清洗 ─→ T4 
                                                               └─→ T7 MLlib ────────↗
 ```
 
-**T0–T7 全部完成（2026-09-14）。** 剩余工作只有 HDFS 部署，见第 13 节。
+**T0–T7 全部完成（2026-09-14）。T8 HDFS 部署完成（2026-09-15）**，见第 13 节。
 
 > 回头看，T1 的版本兼容性确实是最大的不确定项——`PySpark 3.5.x` 只支持到 Python 3.11 这一条
 > 决定了整条技术栈的版本组合。**先跑通最小 `SparkSession` 再写业务代码**这个纪律值得保留。
@@ -277,7 +277,7 @@ T0 契约变更 ─→ T1 环境 ─→ T2 数据层 ─→ T3 清洗 ─→ T4 
 | # | 要求 | 达标情况（实测） | 证据 |
 | --- | --- | --- | --- |
 | 1 | Python **3.11 或 3.12** | ✅ **3.11.15** @ `.venv-phase2` | `bash scripts/check-env-phase2.sh` |
-| 2 | 文件存储 **Hadoop 3.x** | ◐ **本地 ODS 目录已跑通，HDFS 未部署** | `bigdata/ods/` 14 表 10524 行、444 只读、`_manifest.json` 血缘 |
+| 2 | 文件存储 **Hadoop 3.x** | ✅ **Hadoop 3.3.6 伪分布式，ODS 已落 HDFS** | `bash scripts/check-env-phase2.sh`；`bigdata/quality/08_hdfs_deploy.json` 逐文件 MD5 |
 | 3 | **PySpark** 数据清洗 | ✅ SOP 六阶段全部产出 | `bigdata/quality/01`~`06` |
 | 3 | 分析维度 **≥ 8** | ✅ **13 个**（D1–D14，D12 为预测） | `/api/dimensions` 返回 `dimension_count` |
 | 3 | **≥ 2 组**对比分析 | ✅ **3 组**（C1 快慢充 / C2 工作日周末 / C3 站点对标） | 大屏第 3 页；`comparison_count` |
@@ -286,17 +286,74 @@ T0 契约变更 ─→ T1 环境 ─→ T2 数据层 ─→ T3 清洗 ─→ T4 
 | 5 | **DataV** 大屏，图表不单一 | ✅ **5 页 17 面板**，DataV 5 类组件 + ECharts **9 类图表** + 3 张表格 | `bigdata/web/README.md`；渲染冒烟逐页 PASS |
 | 6 | 机器学习预测 + **模型评估** | ✅ 6 个 MLlib 模型，MAE/RMSE/R² + **双基线对照** | `bigdata/quality/07_forecast_eval.md` |
 
-**唯一未达标项是第 2 条的 HDFS。** 老师原话是「代码测试过程在本地，答辩尽量放到 hadoop 上存储」，
-当前按此执行到第一半。剩余工作见下节。
+**六条要求全部达标。** 第 2 条原先只完成一半（老师原话是「代码测试过程在本地，
+答辩尽量放到 hadoop 上存储」），已于 2026-09-15 补齐，见下节。
 
-### 尚未完成：HDFS 部署
+## 13.5 T8 · HDFS 部署（2026-09-15 完成）
 
-代码侧已经准备好：ODS 路径走 `ECP_ODS_ROOT` 环境变量，`spark_session.py` 里
-**代码只认路径不认介质**（CLAUDE.md 5.2 第 10 条）。部署 Hadoop 3.x 伪分布式后，
-把该变量改成 `hdfs://...` 前缀、重跑 `export_ods.py` 即可，**业务代码一行不用改**。
+> **先更正上一版的一句错话。** 本节原先写着「把 `ECP_ODS_ROOT` 改成 `hdfs://` 前缀即可，
+> **业务代码一行不用改**」——实测不成立，见下面的坑表第 1、2 条。
+> 结论方向是对的（数据源确实靠一个环境变量切换），但**代价不是零**：
+> 改了 5 个文件才让这条通路真正成立。这种「看起来已经准备好了」的判断，
+> 不实际跑一次就写进验收文档，是会误导后续排期的。
 
-> 这条是**有意留到最后**的：先用本地目录把清洗、分析、API、大屏、建模全链路跑通，
-> 再换存储介质，比一开始就背着 Hadoop 调试要省事得多。
+### 部署结论
+
+| 项 | 实测 |
+| --- | --- |
+| Hadoop | **3.3.6** 伪分布式（仅 HDFS，不起 YARN——Spark 跑 `local[*]`，用不上资源调度） |
+| 选版理由 | PySpark 3.5.9 自带 `hadoop-client-api` **3.3.4**，服务端取同一条 3.3 线，不去赌跨版本 |
+| JDK | 沿用系统的 **17**。Hadoop 3.3.x 官方支持到 11，靠 `--add-opens` 放开强封装后 NameNode/DataNode 正常 |
+| 安装位置 | `~/opt/hadoop-3.3.6`，**不需要 root**（本机 sudo 需密码，单节点也无跨用户需求） |
+| ODS 路径 | `hdfs://localhost:9000/ecp/ods`，15 个文件（14 表 + `_manifest.json`） |
+| 搬运校验 | **逐文件 MD5** 与本地快照字节级一致（比内容，不比 HDFS 的块级 CRC） |
+| 只读保证 | 属主 `ecp_ods`、目录 555 / 文件 444，分析侧以 `ecp_analyst` 身份连 |
+| 下游验证 | HDFS 为源重跑 profiling → cleaning → validation，**14/14 PASS**，营收仍为 **53,936,279 分** |
+
+### 只读这件事在 HDFS 上会打折，得单独处理
+
+本地靠 `chmod 444` 就够了——属主自己也写不进去。**HDFS 上 444 挡不住超级用户**，
+而超级用户就是启动 NameNode 的那个系统账号，正是我们自己。照搬本地做法，
+CLAUDE.md 5.2 第 6 条在 HDFS 上就成了一句自觉。
+
+做法：ODS 交给独立的 HDFS 身份 `ecp_ods`，分析侧固定以 `ecp_analyst` 连
+（`spark_session._pin_hdfs_identity`，与 `_pin_worker_python` 同一套「不靠人记得」的思路）。
+`scripts/ods-to-hdfs.sh` 末尾会**以分析身份实际试写一次并期待它失败**——
+把这条保证验出来，而不是声称。
+
+### T8 踩到并已修复的三个坑
+
+| # | 问题 | 根因与修法 |
+| --- | --- | --- |
+| 1 | `hdfs://` 路径被悄悄改成 `hdfs:/` | `ODS_ROOT` 当初包成了 `pathlib.Path`，而 **pathlib 会折叠连续斜杠**。Spark 拿到 `hdfs:/localhost:9000/...` 当本地相对路径找，报「Path does not exist」，完全看不出根因。改为 `str` + `ods_file()` 拼接 |
+| 2 | `export_ods.py` 对 HDFS 根本不可用 | 它全程是 Python 文件 I/O（`mkdir`/`open`/`chmod`）。真按环境变量拼，只会在本地建出一个名叫 `hdfs:/localhost:9000` 的目录且无人察觉。改为显式拦截 + 分工：该脚本产出**本地权威快照**，`ods-to-hdfs.sh` 负责搬运与校验 |
+| 3 | `_manifest.json` 在 HDFS 上「不存在」 | Hadoop 的 `FileInputFormat` **默认过滤 `_` 与 `.` 开头的文件**（`_SUCCESS` 就是这么被忽略的），而清单恰好叫 `_manifest.json`。`hdfs dfs -cat` 读得到、Spark 读不到。改用 Hadoop `FileSystem.open` 直读，绕开 InputFormat 这层过滤 |
+
+> 三个坑有个共同点：**本地那条路径从来不经过 Hadoop 的抽象层**，所以问题一直藏着。
+> 「代码只认路径不认介质」是个好目标，但它不会自动成立——得真换一次介质才知道哪里不成立。
+
+> 部署顺序仍是**有意留到最后**的：先用本地目录把清洗、分析、API、大屏、建模全链路跑通，
+> 再换存储介质。这个判断经受住了检验——上面三个坑都只在换介质时暴露，
+> 一开始就背着 Hadoop 调试，它们会混在业务 bug 里一起出现。
+
+### 日常使用
+
+```bash
+bash scripts/install-hadoop-phase2.sh    # 一次性：下载、配置、格式化 NameNode
+bash scripts/hdfs-ctl.sh start           # 起 NameNode + DataNode（不走 ssh）
+bash scripts/ods-to-hdfs.sh              # 推 ODS 并校验，生成 config/phase2-hdfs.env
+
+set -a; . config/phase2-hdfs.env; set +a # 数据源切到 HDFS
+.venv-phase2/bin/python bigdata/spark/validation.py
+unset ECP_ODS_ROOT                       # 切回本地目录
+```
+
+每个 job 启动时会打印本次数据源，便于事后分辨某次结果跑的是哪一边：
+
+```text
+[ODS] HDFS　hdfs://localhost:9000/ecp/ods　身份 ecp_analyst
+[ODS] 本地　/home/bit/projects/ev-charging-platform/bigdata/ods
+```
 
 ## 14. 阶段性收尾（2026-09-14）
 
@@ -304,9 +361,10 @@ T0 契约变更 ─→ T1 环境 ─→ T2 数据层 ─→ T3 清洗 ─→ T4 
 
 | 类别 | 位置 | 说明 |
 | --- | --- | --- |
-| 环境 | `scripts/install-phase2-env.sh`　`scripts/check-env-phase2.sh` | 一个装（需 root），一个自检（**实际建一次 SparkSession**，不只看 `pip list`） |
+| 环境 | `scripts/install-phase2-env.sh`　`scripts/check-env-phase2.sh` | 一个装（需 root），一个自检（**实际建一次 SparkSession**、**实际连一次 NameNode**，不只看 `pip list`） |
+| HDFS | `scripts/install-hadoop-phase2.sh`　`hdfs-ctl.sh`　`ods-to-hdfs.sh` | 装 / 起停 / 推 ODS 并校验；留痕 `bigdata/quality/08_hdfs_deploy.json` |
 | 契约 | `CLAUDE.md` v2.0 | 第 2.2 节二阶段基线、第 5.2 节五条硬性规则 |
-| ODS | `bigdata/spark/export_ods.py` → `bigdata/ods/` | 源库 `mode=ro` 只读、产物 `chmod 444`、`_manifest.json` 血缘 |
+| ODS | `bigdata/spark/export_ods.py` → `bigdata/ods/` → `hdfs:///ecp/ods` | 源库 `mode=ro` 只读、产物 `chmod 444`、`_manifest.json` 血缘；HDFS 侧属主 `ecp_ods`、444 |
 | 清洗 | `bigdata/spark/{profiling,cleaning,validation,quality_report}.py` | SOP 六阶段，产出 `bigdata/quality/01`~`06` |
 | 分析 | `bigdata/spark/analysis.py` → `bigdata/dwd/`、MySQL | 13 维度 + 3 组对比 |
 | API | `bigdata/api/app.py` + `README.md` | 4 个只读接口 |
@@ -320,9 +378,14 @@ T0 契约变更 ─→ T1 环境 ─→ T2 数据层 ─→ T3 清洗 ─→ T4 
 bash scripts/install-phase2-env.sh          # 需 root：JDK / Python 3.11 / MySQL
 bash scripts/init-mysql-phase2.sh           # 需 root：建库建账号 → config/phase2.ini
 python3.11 -m venv .venv-phase2 && .venv-phase2/bin/pip install -r bigdata/requirements.txt
-bash scripts/check-env-phase2.sh            # 应全绿（Hadoop 为 [注] 属预期）
+bash scripts/check-env-phase2.sh            # 应全绿
 
-.venv-phase2/bin/python bigdata/spark/export_ods.py        # ODS
+bash scripts/install-hadoop-phase2.sh       # Hadoop 3.3.6，免 root，装到 ~/opt
+bash scripts/hdfs-ctl.sh start              # 起 NameNode + DataNode
+
+.venv-phase2/bin/python bigdata/spark/export_ods.py        # ODS 本地权威快照
+bash scripts/ods-to-hdfs.sh                                # 推 HDFS + 逐文件 MD5 校验
+set -a; . config/phase2-hdfs.env; set +a                   # 下游数据源切到 HDFS
 .venv-phase2/bin/python bigdata/spark/profiling.py         # 清洗 1+2
 .venv-phase2/bin/python bigdata/spark/cleaning.py          # 清洗 4
 .venv-phase2/bin/python bigdata/spark/validation.py        # 清洗 5（14/14 必须全过）

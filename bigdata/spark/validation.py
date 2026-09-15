@@ -14,7 +14,7 @@ from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from spark_session import build_spark, ODS_ROOT, REPO_ROOT   # noqa: E402
+from spark_session import build_spark, REPO_ROOT, ods_file     # noqa: E402
 
 from pyspark.sql import functions as F                        # noqa: E402
 
@@ -31,7 +31,7 @@ def check(name: str, passed: bool, detail: str) -> None:
 
 def main() -> int:
     spark = build_spark("ecp-validation")
-    ods = spark.read.csv(str(ODS_ROOT / "t_order.csv"), header=True, inferSchema=False)
+    ods = spark.read.csv(ods_file("t_order.csv"), header=True, inferSchema=False)
     dwd = spark.read.parquet(str(DWD_ROOT / "dwd_order.parquet"))
 
     print("== 7.1 结构与数量 ==\n")

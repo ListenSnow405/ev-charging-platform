@@ -16,7 +16,8 @@ from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from spark_session import build_spark, ODS_ROOT, REPO_ROOT   # noqa: E402
+from spark_session import (build_spark, REPO_ROOT,             # noqa: E402
+                           ods_file, read_ods_text)
 
 from pyspark.sql import functions as F                        # noqa: E402
 
@@ -48,7 +49,7 @@ def read(spark, table: str):
     而 SOP 6.2 明确要求「类型转换失败的值不要静默变为空值，应输出失败记录」。
     先原样读进来，转换是 DWD 层的事，失败的要能抓出来。
     """
-    return spark.read.csv(str(ODS_ROOT / f"{table}.csv"), header=True,
+    return spark.read.csv(ods_file(f"{table}.csv"), header=True,
                           inferSchema=False, encoding="utf-8")
 
 
@@ -96,7 +97,7 @@ def main() -> int:
     spark = build_spark("ecp-profiling")
     QUALITY_DIR.mkdir(parents=True, exist_ok=True)
 
-    manifest = json.loads((ODS_ROOT / "_manifest.json").read_text(encoding="utf-8"))
+    manifest = json.loads(read_ods_text(spark, "_manifest.json"))
     tables = list(manifest["tables"].keys())
 
     profile = {

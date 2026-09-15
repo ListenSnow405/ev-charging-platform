@@ -25,7 +25,15 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DB_PATH = REPO_ROOT / "charging.db"
-ODS_ROOT = Path(os.environ.get("ECP_ODS_ROOT", REPO_ROOT / "bigdata" / "ods"))
+
+#  **本脚本只写本地目录**，即使 ECP_ODS_ROOT 指向 HDFS 也不例外。
+#  它全程用 Python 文件 I/O（mkdir / open / chmod 444），对 hdfs:// 无效；
+#  真按环境变量去拼，只会在本地建出一个名叫 "hdfs:/localhost:9000" 的目录，
+#  而且没人会发现——所以下面显式拦截，指向上传脚本。
+#  分工：本脚本产出**本地权威快照**，scripts/ods-to-hdfs.sh 负责推到 HDFS 并校验。
+_ENV_ROOT = os.environ.get("ECP_ODS_ROOT", "")
+LOCAL_ODS_DEFAULT = REPO_ROOT / "bigdata" / "ods"
+ODS_ROOT = LOCAL_ODS_DEFAULT if "://" in _ENV_ROOT else Path(_ENV_ROOT or LOCAL_ODS_DEFAULT)
 
 #  导出全部业务表。ODS 是原始层，**不在这里做取舍**——
 #  「哪些表数据量不足、不进分析」是 T3 质量评估阶段的结论，不能提前在导出时就砍掉，
@@ -53,6 +61,13 @@ def make_writable(p: Path) -> None:
 
 
 def export() -> int:
+    if "://" in _ENV_ROOT:
+        print(f"[错误] ECP_ODS_ROOT 指向远端文件系统：{_ENV_ROOT}", file=sys.stderr)
+        print("       本脚本只产出本地权威快照，推 HDFS 请用："
+              " bash scripts/ods-to-hdfs.sh", file=sys.stderr)
+        print("       （先 unset ECP_ODS_ROOT 再跑本脚本）", file=sys.stderr)
+        return 2
+
     if not DB_PATH.exists():
         print(f"[错误] 源库不存在：{DB_PATH}", file=sys.stderr)
         return 1

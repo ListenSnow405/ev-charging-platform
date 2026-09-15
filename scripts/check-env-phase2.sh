@@ -94,16 +94,40 @@ else
     bad "Node" "未安装或未加载 → . ~/.nvm/nvm.sh && nvm use default"
 fi
 
-# ---- 7. Hadoop：按老师原话，本地开发期可缺 ----------------------------------
-if command -v hdfs >/dev/null; then
-    ok "Hadoop" "$(hadoop version 2>/dev/null | head -1)"
+# ---- 7. Hadoop / HDFS -------------------------------------------------------
+#  沿用本文件的总原则：**能实际跑一下的就不只看命令在不在**。
+#  装了不等于起着，起着不等于 ODS 在上面——所以这里一路查到能不能真读到数据。
+HADOOP_HOME="${HADOOP_HOME:-$HOME/opt/hadoop}"
+HDFS_BIN="$HADOOP_HOME/bin/hdfs"
+[ -x "$HDFS_BIN" ] || HDFS_BIN=$(command -v hdfs || true)
+
+if [ -n "$HDFS_BIN" ] && [ -x "$HDFS_BIN" ]; then
+    ok "Hadoop" "$("$HADOOP_HOME/bin/hadoop" version 2>/dev/null | head -1)"
+
+    if "$HDFS_BIN" dfs -ls / >/dev/null 2>&1; then
+        ok "NameNode" "hdfs://localhost:9000 可达"
+        ODS_HDFS="${ECP_HDFS_ODS:-/ecp/ods}"
+        if N=$("$HDFS_BIN" dfs -ls "$ODS_HDFS" 2>/dev/null | grep -c '^-') && [ "$N" -gt 0 ]; then
+            PERM=$("$HDFS_BIN" dfs -ls "$ODS_HDFS" | awk '$1 ~ /^-/ {print $1}' | sort -u)
+            if [ "$PERM" = "-r--r--r--" ]; then
+                ok "ODS on HDFS" "$ODS_HDFS　$N 个文件，全部 444 只读"
+            else
+                bad "ODS on HDFS" "$ODS_HDFS 权限为 $PERM，应为 444 → bash scripts/ods-to-hdfs.sh"
+            fi
+        else
+            warn "ODS on HDFS" "$ODS_HDFS 为空或不存在 → bash scripts/ods-to-hdfs.sh"
+        fi
+    else
+        warn "NameNode" "未运行 → bash scripts/hdfs-ctl.sh start"
+    fi
 else
     warn "Hadoop" "未安装。本地开发用 bigdata/ods 目录即可，**答辩前须落 HDFS**"
+    warn "" "安装：bash scripts/install-hadoop-phase2.sh"
 fi
 
 echo
 if [ "$FAIL" -eq 0 ]; then
-    echo "结论：第二阶段环境齐备（Hadoop 若为 [注] 属预期，见 CLAUDE.md 2.2）"
+    echo "结论：第二阶段环境齐备"
 else
     echo "结论：$FAIL 项未通过，按上面每行末尾的提示处理"
 fi

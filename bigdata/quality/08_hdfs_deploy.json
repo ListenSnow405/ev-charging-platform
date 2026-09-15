@@ -1,0 +1,102 @@
+{
+  "部署时间": "2026-09-15 09:31:13",
+  "ODS_URI": "hdfs://localhost:9000/ecp/ods",
+  "文件数": 15,
+  "内容不一致数": 0,
+  "属主": "ecp_ods:ecp",
+  "权限": "目录 555 / 文件 444",
+  "校验方式": "逐文件 MD5（hdfs dfs -cat 回本地计算，比字节内容而非块级 CRC）",
+  "分析侧身份": "ecp_analyst（非超级用户，写入应被 NameNode 拒绝）",
+  "文件清单": [
+    {
+      "文件": "_manifest.json",
+      "本地MD5": "5d2cdca7280896aec78f604a3b715ed3",
+      "HDFS_MD5": "5d2cdca7280896aec78f604a3b715ed3",
+      "一致": true
+    },
+    {
+      "文件": "t_admin.csv",
+      "本地MD5": "0ac2c553baec2489d41b7cb747c21f29",
+      "HDFS_MD5": "0ac2c553baec2489d41b7cb747c21f29",
+      "一致": true
+    },
+    {
+      "文件": "t_admin_oplog.csv",
+      "本地MD5": "afbbb8c515a792d74028c33cbb504ecd",
+      "HDFS_MD5": "afbbb8c515a792d74028c33cbb504ecd",
+      "一致": true
+    },
+    {
+      "文件": "t_carbon_daily.csv",
+      "本地MD5": "3608a1426d4868e215abc5c354eaef1c",
+      "HDFS_MD5": "3608a1426d4868e215abc5c354eaef1c",
+      "一致": true
+    },
+    {
+      "文件": "t_carbon_factor.csv",
+      "本地MD5": "05276d428f1a3b5dac9ac298c1095013",
+      "HDFS_MD5": "05276d428f1a3b5dac9ac298c1095013",
+      "一致": true
+    },
+    {
+      "文件": "t_carbon_report.csv",
+      "本地MD5": "789978b6e7d6bd179730740ae42a6968",
+      "HDFS_MD5": "789978b6e7d6bd179730740ae42a6968",
+      "一致": true
+    },
+    {
+      "文件": "t_load_forecast.csv",
+      "本地MD5": "4c56110fcdf5a6bc3bdf462927086d77",
+      "HDFS_MD5": "4c56110fcdf5a6bc3bdf462927086d77",
+      "一致": true
+    },
+    {
+      "文件": "t_order.csv",
+      "本地MD5": "930da31b88c5a0ae53b4221d08466f77",
+      "HDFS_MD5": "930da31b88c5a0ae53b4221d08466f77",
+      "一致": true
+    },
+    {
+      "文件": "t_pile.csv",
+      "本地MD5": "fa091e35138993f7d3e04a4f1870b0c9",
+      "HDFS_MD5": "fa091e35138993f7d3e04a4f1870b0c9",
+      "一致": true
+    },
+    {
+      "文件": "t_pile_log.csv",
+      "本地MD5": "7411e4d009a03ea10e7c05479af85c18",
+      "HDFS_MD5": "7411e4d009a03ea10e7c05479af85c18",
+      "一致": true
+    },
+    {
+      "文件": "t_station.csv",
+      "本地MD5": "7925ca2e9ddba086a76f3715a65b99dc",
+      "HDFS_MD5": "7925ca2e9ddba086a76f3715a65b99dc",
+      "一致": true
+    },
+    {
+      "文件": "t_station_review.csv",
+      "本地MD5": "4142abc09f3e9edae387d6f7b4507708",
+      "HDFS_MD5": "4142abc09f3e9edae387d6f7b4507708",
+      "一致": true
+    },
+    {
+      "文件": "t_sys_config.csv",
+      "本地MD5": "3e9af6f270e8ea02dbe8f003dc6cce42",
+      "HDFS_MD5": "3e9af6f270e8ea02dbe8f003dc6cce42",
+      "一致": true
+    },
+    {
+      "文件": "t_user.csv",
+      "本地MD5": "711156a0d99881a5cb5d16979d65fad2",
+      "HDFS_MD5": "711156a0d99881a5cb5d16979d65fad2",
+      "一致": true
+    },
+    {
+      "文件": "t_wallet_tx.csv",
+      "本地MD5": "1d28d9da61f6ed9fc41aab664c51c60b",
+      "HDFS_MD5": "1d28d9da61f6ed9fc41aab664c51c60b",
+      "一致": true
+    }
+  ]
+}

@@ -19,7 +19,7 @@ from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from spark_session import build_spark, ODS_ROOT, REPO_ROOT   # noqa: E402
+from spark_session import build_spark, REPO_ROOT, ods_file     # noqa: E402
 
 from pyspark.sql import functions as F                        # noqa: E402
 from pyspark.sql import types as T                            # noqa: E402
@@ -51,7 +51,7 @@ def save_pending(df, name: str, rule: str) -> int:
 
 
 def read_ods(spark, table: str):
-    return spark.read.csv(str(ODS_ROOT / f"{table}.csv"), header=True,
+    return spark.read.csv(ods_file(f"{table}.csv"), header=True,
                           inferSchema=False, encoding="utf-8")
 
 
