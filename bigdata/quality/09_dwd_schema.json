@@ -1,0 +1,820 @@
+{
+  "生成时间": "2026-09-15 15:19:37",
+  "说明": "DWD 层数据字典：列顺序、类型、可空与字段含义。由 bigdata/spark/dwd_schema.py 导出，勿手改。",
+  "表": {
+    "dwd_order": [
+      {
+        "列": "order_id",
+        "类型": "bigint",
+        "可空": false,
+        "说明": "源库自增主键"
+      },
+      {
+        "列": "order_no",
+        "类型": "string",
+        "可空": false,
+        "说明": "业务主键：ORD + yyyyMMddHHmmss + 4 位随机"
+      },
+      {
+        "列": "user_id",
+        "类型": "bigint",
+        "可空": false,
+        "说明": "外键 → t_user"
+      },
+      {
+        "列": "pile_id",
+        "类型": "bigint",
+        "可空": false,
+        "说明": "外键 → t_pile"
+      },
+      {
+        "列": "station_id",
+        "类型": "bigint",
+        "可空": false,
+        "说明": "外键 → t_station（源库冗余字段，便于按站统计）"
+      },
+      {
+        "列": "status",
+        "类型": "bigint",
+        "可空": false,
+        "说明": "0=已预约 1=充电中 2=待结算 3=已结算 4=已取消"
+      },
+      {
+        "列": "price",
+        "类型": "bigint",
+        "可空": false,
+        "说明": "下单时单价快照，单位**分/度**"
+      },
+      {
+        "列": "kwh_x100",
+        "类型": "bigint",
+        "可空": false,
+        "说明": "充电量 × 100，整数避免浮点"
+      },
+      {
+        "列": "amount",
+        "类型": "bigint",
+        "可空": false,
+        "说明": "应付金额，单位**分**"
+      },
+      {
+        "列": "reserve_time",
+        "类型": "timestamp",
+        "可空": false,
+        "说明": "预约时刻"
+      },
+      {
+        "列": "start_time",
+        "类型": "timestamp",
+        "可空": true,
+        "说明": "开始充电时刻；取消单为空（合理缺失）"
+      },
+      {
+        "列": "end_time",
+        "类型": "timestamp",
+        "可空": true,
+        "说明": "结束充电时刻；同上"
+      },
+      {
+        "列": "settle_time",
+        "类型": "timestamp",
+        "可空": true,
+        "说明": "结算时刻；同上"
+      },
+      {
+        "列": "status_label",
+        "类型": "string",
+        "可空": false,
+        "说明": "[派生] R005 码表归一，原码值保留在 status"
+      },
+      {
+        "列": "charge_minutes",
+        "类型": "bigint",
+        "可空": true,
+        "说明": "[派生] R010 end−start，整数分钟；取消单为空"
+      },
+      {
+        "列": "wait_minutes",
+        "类型": "bigint",
+        "可空": true,
+        "说明": "[派生] R010 start−reserve，整数分钟；取消单为空"
+      },
+      {
+        "列": "unit_price_fen",
+        "类型": "bigint",
+        "可空": true,
+        "说明": "[派生] R010 amount×100÷kwh_x100，整数分/度；电量为 0 时空"
+      },
+      {
+        "列": "order_date",
+        "类型": "date",
+        "可空": false,
+        "说明": "[派生] R010 预约日期，供按日聚合"
+      },
+      {
+        "列": "order_hour",
+        "类型": "bigint",
+        "可空": false,
+        "说明": "[派生] R010 预约小时 0–23，供负荷分析"
+      },
+      {
+        "列": "is_weekend",
+        "类型": "boolean",
+        "可空": false,
+        "说明": "[派生] R010 是否周末，供工作日/周末对比"
+      }
+    ],
+    "dwd_user": [
+      {
+        "列": "user_id",
+        "类型": "bigint",
+        "可空": false,
+        "说明": "源库自增主键"
+      },
+      {
+        "列": "phone",
+        "类型": "string",
+        "可空": false,
+        "说明": "11 位手机号，用户端免密登录主键"
+      },
+      {
+        "列": "nickname",
+        "类型": "string",
+        "可空": false,
+        "说明": "默认「用户」+ 后 4 位"
+      },
+      {
+        "列": "avatar",
+        "类型": "string",
+        "可空": true,
+        "说明": "图片路径。源库 NOT NULL DEFAULT ''，**空串=默认灰色头像**；空串经 R001 归一为 NULL，语义仍是「用默认头像」而非「未知」"
+      },
+      {
+        "列": "balance",
+        "类型": "bigint",
+        "可空": false,
+        "说明": "钱包余额，单位**分**"
+      },
+      {
+        "列": "status",
+        "类型": "bigint",
+        "可空": false,
+        "说明": "0=正常 1=冻结"
+      },
+      {
+        "列": "create_time",
+        "类型": "timestamp",
+        "可空": false,
+        "说明": "注册时间"
+      },
+      {
+        "列": "update_time",
+        "类型": "timestamp",
+        "可空": false,
+        "说明": "更新时间"
+      },
+      {
+        "列": "phone_valid",
+        "类型": "boolean",
+        "可空": false,
+        "说明": "[派生] R006 手机号是否合规；false 者进待核，不删不改"
+      },
+      {
+        "列": "status_label",
+        "类型": "string",
+        "可空": false,
+        "说明": "[派生] R005 正常 / 冻结"
+      }
+    ],
+    "dwd_pile": [
+      {
+        "列": "pile_id",
+        "类型": "bigint",
+        "可空": false,
+        "说明": "源库自增主键"
+      },
+      {
+        "列": "pile_code",
+        "类型": "string",
+        "可空": false,
+        "说明": "电桩编号，如 SZ001-03"
+      },
+      {
+        "列": "station_id",
+        "类型": "bigint",
+        "可空": false,
+        "说明": "外键 → t_station"
+      },
+      {
+        "列": "type",
+        "类型": "bigint",
+        "可空": false,
+        "说明": "0=快充 1=慢充"
+      },
+      {
+        "列": "power",
+        "类型": "double",
+        "可空": false,
+        "说明": "额定功率，单位 kW"
+      },
+      {
+        "列": "status",
+        "类型": "bigint",
+        "可空": false,
+        "说明": "0=在用 1=闲置 2=故障"
+      },
+      {
+        "列": "charge_count",
+        "类型": "bigint",
+        "可空": false,
+        "说明": "累计充电次数"
+      },
+      {
+        "列": "charge_duration",
+        "类型": "bigint",
+        "可空": false,
+        "说明": "累计充电时长，单位**秒**"
+      },
+      {
+        "列": "online",
+        "类型": "bigint",
+        "可空": false,
+        "说明": "0=离线 1=在线"
+      },
+      {
+        "列": "last_heartbeat",
+        "类型": "timestamp",
+        "可空": true,
+        "说明": "最近心跳；离线桩本就没有（合理缺失）"
+      },
+      {
+        "列": "create_time",
+        "类型": "timestamp",
+        "可空": false,
+        "说明": "建档时间"
+      },
+      {
+        "列": "type_label",
+        "类型": "string",
+        "可空": false,
+        "说明": "[派生] R005 快充 / 慢充"
+      },
+      {
+        "列": "status_label",
+        "类型": "string",
+        "可空": false,
+        "说明": "[派生] R005 在用 / 闲置 / 故障"
+      }
+    ],
+    "dwd_station": [
+      {
+        "列": "station_id",
+        "类型": "bigint",
+        "可空": false,
+        "说明": "源库自增主键"
+      },
+      {
+        "列": "name",
+        "类型": "string",
+        "可空": false,
+        "说明": "站名"
+      },
+      {
+        "列": "address",
+        "类型": "string",
+        "可空": false,
+        "说明": "详细地址"
+      },
+      {
+        "列": "lng",
+        "类型": "double",
+        "可空": false,
+        "说明": "经度"
+      },
+      {
+        "列": "lat",
+        "类型": "double",
+        "可空": false,
+        "说明": "纬度"
+      },
+      {
+        "列": "price",
+        "类型": "bigint",
+        "可空": false,
+        "说明": "充电价格，单位**分/度**"
+      },
+      {
+        "列": "status",
+        "类型": "bigint",
+        "可空": false,
+        "说明": "0=营业 1=停业"
+      },
+      {
+        "列": "create_time",
+        "类型": "timestamp",
+        "可空": false,
+        "说明": "建站时间"
+      }
+    ],
+    "dwd_pile_log": [
+      {
+        "列": "log_id",
+        "类型": "bigint",
+        "可空": false,
+        "说明": "源库自增主键"
+      },
+      {
+        "列": "pile_id",
+        "类型": "bigint",
+        "可空": false,
+        "说明": "外键 → t_pile"
+      },
+      {
+        "列": "event",
+        "类型": "bigint",
+        "可空": false,
+        "说明": "0=上线 1=离线 2=状态变更 3=远程重启 4=故障上报"
+      },
+      {
+        "列": "operator",
+        "类型": "string",
+        "可空": false,
+        "说明": "管理员账号或 system"
+      },
+      {
+        "列": "detail",
+        "类型": "string",
+        "可空": true,
+        "说明": "事件详情。源库 NOT NULL DEFAULT ''，空串经 R001 归一为 NULL"
+      },
+      {
+        "列": "create_time",
+        "类型": "timestamp",
+        "可空": false,
+        "说明": "事件时刻"
+      },
+      {
+        "列": "event_label",
+        "类型": "string",
+        "可空": false,
+        "说明": "[派生] R005 事件中文标签"
+      }
+    ],
+    "dwd_carbon_daily": [
+      {
+        "列": "daily_id",
+        "类型": "bigint",
+        "可空": false,
+        "说明": "源库自增主键"
+      },
+      {
+        "列": "station_id",
+        "类型": "bigint",
+        "可空": false,
+        "说明": "外键 → t_station"
+      },
+      {
+        "列": "stat_date",
+        "类型": "date",
+        "可空": false,
+        "说明": "统计日期"
+      },
+      {
+        "列": "total_kwh_x100",
+        "类型": "bigint",
+        "可空": false,
+        "说明": "当日总电量 × 100"
+      },
+      {
+        "列": "peak_kwh_x100",
+        "类型": "bigint",
+        "可空": false,
+        "说明": "峰段电量 × 100"
+      },
+      {
+        "列": "flat_kwh_x100",
+        "类型": "bigint",
+        "可空": false,
+        "说明": "平段电量 × 100"
+      },
+      {
+        "列": "valley_kwh_x100",
+        "类型": "bigint",
+        "可空": false,
+        "说明": "谷段电量 × 100"
+      },
+      {
+        "列": "unalloc_kwh_x100",
+        "类型": "bigint",
+        "可空": false,
+        "说明": "未分配到峰平谷的电量 × 100"
+      },
+      {
+        "列": "order_cnt",
+        "类型": "bigint",
+        "可空": false,
+        "说明": "当日订单数"
+      },
+      {
+        "列": "emission_g",
+        "类型": "bigint",
+        "可空": false,
+        "说明": "碳排放量，单位**克**"
+      },
+      {
+        "列": "intensity_g_per_kwh",
+        "类型": "bigint",
+        "可空": false,
+        "说明": "碳强度 克/度；-1 表示不可计算"
+      },
+      {
+        "列": "completeness",
+        "类型": "bigint",
+        "可空": false,
+        "说明": "数据完整度 0–100；-1 表示未知"
+      },
+      {
+        "列": "estimated_pct",
+        "类型": "bigint",
+        "可空": false,
+        "说明": "估算占比 0–100；-1 表示未知"
+      },
+      {
+        "列": "quality",
+        "类型": "string",
+        "可空": false,
+        "说明": "METER_INTERVAL / UNIFORM_ESTIMATE / UNAVAILABLE"
+      },
+      {
+        "列": "factor_version",
+        "类型": "string",
+        "可空": false,
+        "说明": "所用排放因子版本"
+      },
+      {
+        "列": "algo_version",
+        "类型": "string",
+        "可空": false,
+        "说明": "算法版本"
+      },
+      {
+        "列": "cutoff_time",
+        "类型": "timestamp",
+        "可空": false,
+        "说明": "数据截止时刻"
+      },
+      {
+        "列": "update_time",
+        "类型": "timestamp",
+        "可空": false,
+        "说明": "更新时刻"
+      }
+    ],
+    "dwd_carbon_factor": [
+      {
+        "列": "factor_id",
+        "类型": "bigint",
+        "可空": false,
+        "说明": "源库自增主键"
+      },
+      {
+        "列": "region",
+        "类型": "string",
+        "可空": false,
+        "说明": "区域"
+      },
+      {
+        "列": "version",
+        "类型": "string",
+        "可空": false,
+        "说明": "因子版本"
+      },
+      {
+        "列": "effect_from",
+        "类型": "timestamp",
+        "可空": false,
+        "说明": "生效起"
+      },
+      {
+        "列": "effect_to",
+        "类型": "timestamp",
+        "可空": true,
+        "说明": "生效止；**当前生效的因子为空（开口区间，设计如此）**"
+      },
+      {
+        "列": "factor_g_per_kwh",
+        "类型": "bigint",
+        "可空": false,
+        "说明": "排放因子 克/度"
+      },
+      {
+        "列": "source",
+        "类型": "string",
+        "可空": false,
+        "说明": "因子来源"
+      },
+      {
+        "列": "enabled",
+        "类型": "bigint",
+        "可空": false,
+        "说明": "0=停用 1=启用"
+      },
+      {
+        "列": "create_time",
+        "类型": "timestamp",
+        "可空": false,
+        "说明": "创建时间"
+      }
+    ],
+    "dwd_carbon_report": [
+      {
+        "列": "report_id",
+        "类型": "bigint",
+        "可空": false,
+        "说明": "源库自增主键"
+      },
+      {
+        "列": "scope",
+        "类型": "string",
+        "可空": false,
+        "说明": "STATION / ALL"
+      },
+      {
+        "列": "station_id",
+        "类型": "bigint",
+        "可空": false,
+        "说明": "0 表示全站范围"
+      },
+      {
+        "列": "date_from",
+        "类型": "date",
+        "可空": false,
+        "说明": "报告起始日"
+      },
+      {
+        "列": "date_to",
+        "类型": "date",
+        "可空": false,
+        "说明": "报告截止日"
+      },
+      {
+        "列": "version",
+        "类型": "bigint",
+        "可空": false,
+        "说明": "报告版本，≥ 1"
+      },
+      {
+        "列": "status",
+        "类型": "string",
+        "可空": false,
+        "说明": "GENERATING / READY / FAILED / STALE"
+      },
+      {
+        "列": "total_kwh_x100",
+        "类型": "bigint",
+        "可空": false,
+        "说明": "总电量 × 100"
+      },
+      {
+        "列": "peak_kwh_x100",
+        "类型": "bigint",
+        "可空": false,
+        "说明": "峰段电量 × 100"
+      },
+      {
+        "列": "flat_kwh_x100",
+        "类型": "bigint",
+        "可空": false,
+        "说明": "平段电量 × 100"
+      },
+      {
+        "列": "valley_kwh_x100",
+        "类型": "bigint",
+        "可空": false,
+        "说明": "谷段电量 × 100"
+      },
+      {
+        "列": "unalloc_kwh_x100",
+        "类型": "bigint",
+        "可空": false,
+        "说明": "未分配电量 × 100"
+      },
+      {
+        "列": "emission_g",
+        "类型": "bigint",
+        "可空": false,
+        "说明": "碳排放量，单位克"
+      },
+      {
+        "列": "intensity_g_per_kwh",
+        "类型": "bigint",
+        "可空": false,
+        "说明": "碳强度；-1 表示不可计算"
+      },
+      {
+        "列": "completeness",
+        "类型": "bigint",
+        "可空": false,
+        "说明": "完整度 0–100；-1 表示未知"
+      },
+      {
+        "列": "factor_version",
+        "类型": "string",
+        "可空": true,
+        "说明": "因子版本。源库 DEFAULT ''，空串经 R001 归一为 NULL"
+      },
+      {
+        "列": "algo_version",
+        "类型": "string",
+        "可空": true,
+        "说明": "算法版本。源库 DEFAULT ''，空串经 R001 归一为 NULL"
+      },
+      {
+        "列": "tariff_mode",
+        "类型": "string",
+        "可空": true,
+        "说明": "峰平谷划分模式。源库 DEFAULT ''，空串经 R001 归一为 NULL"
+      },
+      {
+        "列": "cutoff_time",
+        "类型": "string",
+        "可空": true,
+        "说明": "数据截止时刻。按字符串保留；源库 DEFAULT ''，空串经 R001 归一为 NULL"
+      },
+      {
+        "列": "run_time",
+        "类型": "timestamp",
+        "可空": false,
+        "说明": "生成时刻"
+      },
+      {
+        "列": "output_path",
+        "类型": "string",
+        "可空": true,
+        "说明": "导出文件路径。**未导出的报告本就没有路径**（合理缺失，见质量报告 3.1）；源库 DEFAULT ''，空串经 R001 归一为 NULL"
+      },
+      {
+        "列": "req_id",
+        "类型": "string",
+        "可空": true,
+        "说明": "请求 id，可空"
+      }
+    ],
+    "dwd_load_forecast": [
+      {
+        "列": "forecast_id",
+        "类型": "bigint",
+        "可空": false,
+        "说明": "源库自增主键"
+      },
+      {
+        "列": "station_id",
+        "类型": "bigint",
+        "可空": false,
+        "说明": "外键 → t_station"
+      },
+      {
+        "列": "horizon",
+        "类型": "bigint",
+        "可空": false,
+        "说明": "预测时长：1 / 6 / 24 小时"
+      },
+      {
+        "列": "predict_time",
+        "类型": "timestamp",
+        "可空": false,
+        "说明": "预测目标时刻"
+      },
+      {
+        "列": "load_kw",
+        "类型": "double",
+        "可空": false,
+        "说明": "预测充电负荷 kW"
+      },
+      {
+        "列": "idle_pile",
+        "类型": "bigint",
+        "可空": false,
+        "说明": "预测空闲桩数"
+      },
+      {
+        "列": "is_peak",
+        "类型": "bigint",
+        "可空": false,
+        "说明": "0=否 1=是高峰时段"
+      },
+      {
+        "列": "congestion",
+        "类型": "double",
+        "可空": false,
+        "说明": "拥堵度 0–1"
+      },
+      {
+        "列": "model_version",
+        "类型": "string",
+        "可空": true,
+        "说明": "模型版本。源库 DEFAULT ''，空串经 R001 归一为 NULL"
+      },
+      {
+        "列": "create_time",
+        "类型": "timestamp",
+        "可空": false,
+        "说明": "生成时刻"
+      }
+    ],
+    "dwd_wallet_tx": [
+      {
+        "列": "tx_id",
+        "类型": "bigint",
+        "可空": false,
+        "说明": "源库自增主键"
+      },
+      {
+        "列": "user_id",
+        "类型": "bigint",
+        "可空": false,
+        "说明": "外键 → t_user"
+      },
+      {
+        "列": "type",
+        "类型": "bigint",
+        "可空": false,
+        "说明": "0=充值 1=充电扣费 2=退款"
+      },
+      {
+        "列": "amount",
+        "类型": "bigint",
+        "可空": false,
+        "说明": "变动金额，单位**分**，正数表示绝对值"
+      },
+      {
+        "列": "balance_after",
+        "类型": "bigint",
+        "可空": false,
+        "说明": "变动后余额，单位**分**"
+      },
+      {
+        "列": "order_id",
+        "类型": "bigint",
+        "可空": true,
+        "说明": "关联订单；**充值类流水不关联订单（合理缺失）**"
+      },
+      {
+        "列": "remark",
+        "类型": "string",
+        "可空": true,
+        "说明": "备注。源库 NOT NULL DEFAULT ''，空串经 R001 归一为 NULL"
+      },
+      {
+        "列": "create_time",
+        "类型": "timestamp",
+        "可空": false,
+        "说明": "发生时刻"
+      }
+    ],
+    "dwd_station_review": [
+      {
+        "列": "review_id",
+        "类型": "bigint",
+        "可空": false,
+        "说明": "源库自增主键"
+      },
+      {
+        "列": "station_id",
+        "类型": "bigint",
+        "可空": false,
+        "说明": "外键 → t_station"
+      },
+      {
+        "列": "user_id",
+        "类型": "bigint",
+        "可空": false,
+        "说明": "外键 → t_user"
+      },
+      {
+        "列": "order_id",
+        "类型": "bigint",
+        "可空": true,
+        "说明": "关联订单，可空"
+      },
+      {
+        "列": "score",
+        "类型": "bigint",
+        "可空": false,
+        "说明": "评分 1–5"
+      },
+      {
+        "列": "content",
+        "类型": "string",
+        "可空": true,
+        "说明": "评价内容。源库 NOT NULL DEFAULT ''，空串经 R001 归一为 NULL"
+      },
+      {
+        "列": "create_time",
+        "类型": "timestamp",
+        "可空": false,
+        "说明": "评价时刻"
+      }
+    ]
+  }
+}

@@ -170,6 +170,7 @@ def main() -> int:
     mism = (o.join(p, o.pile_id == p.p_id, "left")
              .filter(F.col("p_station").isNotNull() & (F.col("station_id") != F.col("p_station"))))
     k = mism.count()
+    profile.setdefault("维度事实", {})["冗余station_id不一致行数"] = k
     if k:
         add_issue("一致性", "t_order", "station_id", "冗余字段与电桩所属站不一致",
                   "t_order.station_id <> t_pile.station_id", k, n_order,
@@ -227,6 +228,7 @@ def main() -> int:
              .withColumn("diff", F.abs(F.col("amount").cast("double") - F.col("expect"))))
     k = calc.filter(F.col("diff") > 1).count()
     n_settled = o.filter(F.col("status") == "3").count()
+    profile["维度事实"].update({"已结算订单数": n_settled, "金额与单价电量不符行数": k})
     if k:
         s = calc.filter(F.col("diff") > 1).first()
         add_issue("准确性", "t_order", "amount", "金额与单价×电量不符",
@@ -235,6 +237,9 @@ def main() -> int:
                   "高", "以 price×电量 重算，记录旧值新值")
     else:
         print(f"  [准确性] {n_settled} 笔已结算订单金额与单价×电量逐笔吻合（容差 1 分）✓")
+
+    #  下单用户数——遗留问题里「N 个用户、M 个有订单」过去是写死的
+    profile["维度事实"]["下单用户数"] = o.select("user_id").distinct().count()
 
     # ---------- 准确性：电量 IQR 异常 ----------
     q = (o.filter(F.col("status") == "3")
@@ -284,6 +289,9 @@ def main() -> int:
         ("t_carbon_report", "output_path"): "尚未导出的报告没有文件路径",
         ("t_admin_oplog", "detail"): "detail 是可选备注字段",
     }
+    #  合理缺失也要留痕。理由只 print 到终端等于没写——评审拿到归档包
+    #  看不到「为什么 avatar 缺失 60% 却不算问题」，无从判断是想清楚了还是漏了。
+    #  所以逐条落进 01_profile.json，质量报告再渲染成表。
     print()
     for t in tables:
         rows = profile["表"][t]["rows"]
@@ -301,6 +309,28 @@ def main() -> int:
                       "缺失率 > 50%，SOP 6.3 要求评估字段信息量",
                       v["缺失数"], rows, "", "高",
                       "该字段近乎全空，承载不了分析；剔除或改用其他字段")
+
+    #  ---- 合理缺失登记：**全量落盘，不只登记越过 50% 阈值的那几个** ----
+    #  上面的循环只在缺失率 > 50% 时才查这张字典，像 t_order.start_time（22%，
+    #  等于取消单数）就永远进不了登记表——而它恰恰是最该讲清楚的一条。
+    #  这里按字典逐条登记实测缺失率，顺带把「字段已不存在」「早已不缺失」的
+    #  过期条目暴露出来：字典与数据脱节比没有字典更危险。
+    reg = []
+    for (t, c), why in EXPECTED_MISSING.items():
+        info = profile["表"].get(t, {})
+        field = info.get("fields", {}).get(c)
+        if field is None:
+            reg.append({"表": t, "字段": c, "缺失数": None, "缺失率": "—",
+                        "判定": "⚠ 登记已过期：字段不存在", "理由": why})
+            continue
+        rate = field["缺失率"]
+        reg.append({
+            "表": t, "字段": c, "缺失数": field["缺失数"], "缺失率": f"{rate}%",
+            "判定": ("合理缺失，不计为问题" if rate > 0 else "⚠ 登记已过期：该字段当前无缺失"),
+            "超过SOP阈值": rate > 50, "理由": why,
+        })
+    profile["合理缺失登记"] = sorted(reg, key=lambda r: (r["表"], r["字段"]))
+    print(f"  合理缺失登记 {len(reg)} 条已写入 01_profile.json")
 
     # ---------- 完整性：枚举事件类型有无实际数据 ----------
     #  1800 行 pile_log 看着不少，但要看每种 event 下面是不是真有内容。

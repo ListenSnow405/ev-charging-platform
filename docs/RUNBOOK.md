@@ -192,7 +192,7 @@ set -a; . config/phase2-hdfs.env; set +a                # 下游切到 HDFS
 
 .venv-phase2/bin/python bigdata/spark/profiling.py      # 清洗阶段 1+2
 .venv-phase2/bin/python bigdata/spark/cleaning.py       # 清洗阶段 4
-.venv-phase2/bin/python bigdata/spark/validation.py     # 清洗阶段 5，20/20 必须全过
+.venv-phase2/bin/python bigdata/spark/validation.py     # 清洗阶段 5，82/82 必须全过
 .venv-phase2/bin/python bigdata/spark/quality_report.py # 清洗阶段 6
 .venv-phase2/bin/python bigdata/spark/analysis.py       # 13 维度 + 3 组对比 → MySQL
 ```

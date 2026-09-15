@@ -16,6 +16,7 @@
 """
 from __future__ import annotations
 
+import csv
 import hashlib
 import json
 import shutil
@@ -23,6 +24,13 @@ import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
+
+from openpyxl import Workbook
+from openpyxl.styles import Font, PatternFill
+from openpyxl.utils import get_column_letter
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "bigdata" / "spark"))
+import dwd_schema as DS                                       # noqa: E402
 
 REPO = Path(__file__).resolve().parents[1]
 BIGDATA = REPO / "bigdata"
@@ -74,6 +82,101 @@ def export_dwd_csv(dst: Path) -> dict[str, int]:
     return rows
 
 
+def _cell(v: str, typ: str | None):
+    """CSV 字符串 → Excel 单元格值。空串一律给 None，让单元格真正留空。"""
+    if v == "" or v is None:
+        return None
+    if typ == DS.LONG:
+        return int(v)
+    if typ == DS.DBL:
+        return float(v)
+    if typ == DS.BOOL:
+        return v.lower() == "true"
+    return v                     # 时间/日期/标识符按文本，避免 Excel 按区域设置乱改格式
+
+
+def _sheet(wb, name: str, rows: list[list], widths: dict[int, int] | None = None):
+    ws = wb.create_sheet(name[:31])       # Excel 工作表名上限 31 字符
+    for r in rows:
+        ws.append(r)
+    if rows:
+        for c in ws[1]:
+            c.font = Font(bold=True)
+            c.fill = PatternFill("solid", fgColor="DDEBF7")
+        ws.freeze_panes = "A2"
+        ws.auto_filter.ref = ws.dimensions
+        for i, head in enumerate(rows[0], 1):
+            w = (widths or {}).get(i) or min(max(len(str(head)) * 2 + 4, 10), 32)
+            ws.column_dimensions[get_column_letter(i)].width = w
+    return ws
+
+
+def write_excel(stage: Path) -> list[Path]:
+    """给 ODS 与 DWD 各出一份 Excel 副本。
+
+    **为什么要这一份**：CSV 是无 BOM 的 UTF-8，中文 Windows 的 Excel 按 GBK 解，
+    双击打开就是乱码。
+
+    **为什么不直接给 CSV 加 BOM**：`00_原始层_ODS/` 那份是 Spark 的真实输入，
+    BOM 会混进首列列名（`order_id` 变成 `\ufefforder_id`）把流水线搞坏；
+    DWD 那份要与重跑结果逐字节对拍。所以**加不是换**——CSV 原样保留，另出 Excel 供人看。
+    （`02_issues.csv` 是例外：它本来就是 utf-8-sig，Excel 打开就正常。）
+
+    ODS 一律按文本写，忠实于「原始层所有值都是字符串」这件事；
+    DWD 按 Schema 契约给类型——金额电量是数字就该能直接排序求和，
+    而手机号、订单号这类标识符仍按文本（SOP 6.2：避免前导零或大数精度丢失）。
+    """
+    out = []
+    for kind, src_dir, target, typed in (
+        ("ODS 原始层", stage / "00_原始层_ODS",
+         stage / "00_原始层_ODS" / "ODS原始数据.xlsx", False),
+        ("DWD 加工层", stage / "03_清洗结果_DWD" / "csv",
+         stage / "03_清洗结果_DWD" / "DWD清洗结果.xlsx", True),
+    ):
+        wb = Workbook()
+        wb.remove(wb.active)
+        catalog = [["表名", "行数", "列数", "说明"]]
+        #  按业务顺序排表，不按文件名字母序——否则 t_admin 排在 t_order 前面，
+        #  打开工作簿第一眼看到的是最不重要的表。
+        order = (list(DS.DWD_SCHEMA) if typed
+                 else list(json.loads((stage / "00_原始层_ODS" / "_manifest.json")
+                                      .read_text(encoding="utf-8"))["tables"]))
+        rank = {t: i for i, t in enumerate(order)}
+        files = sorted(src_dir.glob("*.csv"),
+                       key=lambda f: (rank.get(f.stem, len(rank)), f.stem))
+        for f in files:
+            with open(f, encoding="utf-8", newline="") as fh:
+                rows = list(csv.reader(fh))
+            head = rows[0] if rows else []
+            types = {c: t for c, t, _, _ in DS.DWD_SCHEMA.get(f.stem, [])} if typed else {}
+            body = [[_cell(v, types.get(head[i]) if i < len(head) else None)
+                     for i, v in enumerate(r)] for r in rows[1:]]
+            _sheet(wb, f.stem, [head] + body)
+            catalog.append([f.stem, len(body), len(head),
+                            "清洗后，类型按 Schema 契约" if typed else "只读原始快照，全部按文本"])
+
+        info = [["项", "说明"],
+                ["层次", kind],
+                ["来源", "由 scripts/pack-dataset-phase2.py 从同目录 CSV 生成，勿手改"],
+                ["与 CSV 的关系", "同一份数据的两种呈现；CSV 为权威副本，本文件仅便于查看"],
+                ["金额口径", "一律整数「分」。amount=12289 即 122.89 元"],
+                ["电量口径", "kwh_x100，即度 × 100。kwh_x100=8085 即 80.85 度"],
+                ["时间格式", "yyyy-MM-dd HH:mm:ss，本地时区，按文本存放"],
+                ["空单元格", "表示 NULL。取消单的时长类字段为空属合理缺失，未做任何填充"],
+                ["标识符", "手机号、订单号等按文本存放，避免前导零或大数精度丢失"]]
+        _sheet(wb, "说明", info, widths={1: 16, 2: 76})
+        _sheet(wb, "表清单", catalog, widths={1: 24, 2: 10, 3: 8, 4: 34})
+        #  把两张导航表挪到最前，打开就先看到口径说明。
+        #  move_sheet 收的是**相对偏移**，不是目标下标——按当前位置算偏移，
+        #  否则表多了以后顺序会错乱（首版就错在这里）。
+        for i, name in enumerate(("说明", "表清单")):
+            wb.move_sheet(name, offset=i - wb.sheetnames.index(name))
+        wb.save(target)
+        out.append(target)
+        print(f"  {kind}　{len(files)} 张表 → {target.name}　{target.stat().st_size / 1024:.0f} KB")
+    return out
+
+
 def copy(src: Path, dst: Path) -> None:
     dst.parent.mkdir(parents=True, exist_ok=True)
     if src.is_dir():
@@ -93,12 +196,13 @@ def main() -> int:
         shutil.rmtree(stage)
     stage.mkdir(parents=True)
 
-    print("== 1/4 汇集六阶段产物 ==\n")
+    print("== 1/5 汇集六阶段产物 ==\n")
     copy(BIGDATA / "ods", stage / "00_原始层_ODS")
     copy(QUALITY / "08_hdfs_deploy.json", stage / "00_原始层_ODS" / "_hdfs_deploy.json")
     copy(QUALITY / "01_profile.json", stage / "01_探查与质量评估" / "01_profile.json")
     copy(QUALITY / "02_issues.csv", stage / "01_探查与质量评估" / "02_issues.csv")
     copy(QUALITY / "03_rules.md", stage / "02_清洗规则" / "03_rules.md")
+    copy(QUALITY / "09_dwd_schema.json", stage / "03_清洗结果_DWD" / "09_dwd_schema.json")
     copy(BIGDATA / "dwd", stage / "03_清洗结果_DWD" / "parquet")
     #  Spark 会在每个 parquet 旁留一份 .crc 校验碎片，对评阅人是纯噪音。
     #  `_SUCCESS` 保留——它标记「这次写入是完整的」，是有意义的产物。
@@ -107,20 +211,52 @@ def main() -> int:
     copy(QUALITY / "04_clean_log.json", stage / "04_执行日志与待核清单" / "04_clean_log.json")
     copy(QUALITY / "pending", stage / "04_执行日志与待核清单" / "pending")
     copy(QUALITY / "05_validation.json", stage / "05_清洗校验" / "05_validation.json")
+    copy(QUALITY / "10_dwd_profile.json", stage / "05_清洗校验" / "10_dwd_profile.json")
     copy(QUALITY / "06_quality_report.md", stage / "06_质量报告" / "06_quality_report.md")
     copy(REPO / "数据清洗基本流程-操作SOP.md", stage / "06_质量报告" / "数据清洗基本流程-操作SOP.md")
-    for s in ["spark_session.py", "export_ods.py", "profiling.py",
+    for s in ["spark_session.py", "dwd_schema.py", "export_ods.py", "profiling.py",
               "cleaning.py", "validation.py", "quality_report.py"]:
         copy(BIGDATA / "spark" / s, stage / "脚本" / s)
     copy(Path(__file__), stage / "脚本" / Path(__file__).name)
     print("  ODS / 探查 / 规则 / DWD / 日志 / 校验 / 报告 / 脚本 / SOP 已就位")
 
-    print("\n== 2/4 DWD 导出可读 CSV（Spark，按会话时区还原时间） ==\n")
+    print("\n== 2/5 DWD 导出可读 CSV（Spark，按会话时区还原时间） ==\n")
     dwd_rows = export_dwd_csv(stage / "03_清洗结果_DWD" / "csv")
 
-    print("\n== 3/4 生成打包清单与导览 ==\n")
+    print("\n== 3/5 Excel 副本（治 Excel 打开 CSV 中文乱码）==\n")
+    write_excel(stage)
+
+    print("\n== 4/5 修相对链接、生成导览与打包清单 ==\n")
+    #  仓库里这些文档同处一个目录，链接写的是同级相对路径；进包后按六阶段分了目录，
+    #  同级路径就全断了。**在副本上重写，不动仓库原件**——原件的链接在仓库里是对的。
+    RELINK = {
+        "02_清洗规则/03_rules.md": [
+            ("(02_issues.csv)", "(../01_探查与质量评估/02_issues.csv)"),
+            ("(09_dwd_schema.json)", "(../03_清洗结果_DWD/09_dwd_schema.json)"),
+            ("(../spark/dwd_schema.py)", "(../脚本/dwd_schema.py)")],
+        "06_质量报告/06_quality_report.md": [
+            ("(03_rules.md)", "(../02_清洗规则/03_rules.md)"),
+            ("(04_clean_log.json)", "(../04_执行日志与待核清单/04_clean_log.json)"),
+            ("(09_dwd_schema.json)", "(../03_清洗结果_DWD/09_dwd_schema.json)")],
+    }
+    fixed = 0
+    for rel, subs in RELINK.items():
+        f = stage / rel
+        txt = f.read_text(encoding="utf-8")
+        for old, new in subs:
+            assert old in txt, f"{rel} 里找不到待修链接 {old}——文档变了，这里要跟着改"
+            txt = txt.replace(old, new)
+            fixed += 1
+        f.write_text(txt, encoding="utf-8")
+    print(f"  相对链接修正 {fixed} 处（仅改包内副本）")
+
+    #  **README 必须先写**：清单是扫描 stage 目录生成的，后写的文件登记不进去。
+    #  上一版就漏登了 README.md（2026-09-15 评审指出）。
+    write_readme(stage, dwd_rows)
+
     manifest = {
         "包名": PKG,
+        "说明": "包内每个文件的字节数与 sha256 指纹。清单自身不在其中——文件无法登记自己的指纹。",
         "打包时间": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "源库指纹": json.loads((BIGDATA / "ods" / "_manifest.json").read_text(encoding="utf-8"))["source_sha256_16"],
         "文件": [],
@@ -134,10 +270,11 @@ def main() -> int:
             })
     (stage / "_打包清单.json").write_text(
         json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
-    write_readme(stage, dwd_rows)
-    print(f"  清单 {len(manifest['文件'])} 个文件，导览 README.md 已生成")
+    names = {f["路径"] for f in manifest["文件"]}
+    assert "README.md" in names, "README.md 未登记进打包清单"
+    print(f"  导览 README.md 已生成；清单登记 {len(manifest['文件'])} 个文件")
 
-    print("\n== 4/4 压缩 ==\n")
+    print("\n== 5/5 压缩 ==\n")
     OUT_ZIP.parent.mkdir(parents=True, exist_ok=True)
     if OUT_ZIP.exists():
         OUT_ZIP.unlink()
@@ -167,12 +304,16 @@ def write_readme(stage: Path, dwd_rows: dict[str, int]) -> None:
          "| 目录 | 对应 SOP 阶段 | 内容 |",
          "| --- | --- | --- |",
          f"| `00_原始层_ODS/` | 前置 | 业务库 `charging.db` 的**只读原始快照**，"
-         f"{len(ods_mf['tables'])} 表 {ods_rows} 行 CSV + `_manifest.json` 血缘 + HDFS 落地留痕 |",
+         f"{len(ods_mf['tables'])} 表 {ods_rows} 行 CSV（另附 `ODS原始数据.xlsx`，Excel 直接打开）"
+         f" + `_manifest.json` 血缘 + HDFS 落地留痕 |",
          "| `01_探查与质量评估/` | 阶段 1+2 | 数据概况统计、六维度质量问题清单 |",
          "| `02_清洗规则/` | 阶段 3 | R001–R011 规则全文，每条含检测条件/处理动作/依据/验证方式 |",
-         "| `03_清洗结果_DWD/` | 阶段 4 | 清洗后数据：`parquet/` 为流水线真实产物，`csv/` 为等价可读副本 |",
+         "| `03_清洗结果_DWD/` | 阶段 4 | 清洗后数据：`parquet/` 为流水线真实产物，"
+         "`csv/` 与 `DWD清洗结果.xlsx` 为等价可读副本；"
+         "`09_dwd_schema.json` 是**列序/类型/可空的契约**，也是数据字典 |",
          "| `04_执行日志与待核清单/` | 阶段 4 | 每条规则的命中与处理量；无法判定的记录**逐条留档，不静默丢弃** |",
-         "| `05_清洗校验/` | 阶段 5 | 清洗前后指标对账与业务断言结果 |",
+         "| `05_清洗校验/` | 阶段 5 | 清洗前后指标对账、主外键/范围/时序断言、分层抽样；"
+         "`10_dwd_profile.json` 是**清洗后画像**，与 `01_profile.json` 的 ODS 画像对照读 |",
          "| `06_质量报告/` | 阶段 6 | 数据质量报告（由前五阶段产物程序生成）+ SOP 原文 |",
          "| `脚本/` | 全程 | 六个可重复执行的脚本，相同输入得到相同输出 |",
          "| `_打包清单.json` | — | 包内每个文件的字节数与 sha256 指纹 |", "",
@@ -197,7 +338,8 @@ def write_readme(stage: Path, dwd_rows: dict[str, int]) -> None:
          f"| 标记待核 | {c['标记待核']} 条（保留原值，不删不改） |",
          f"| 剔除列 | {c['剔除列']}（缺失率 > 50%，列级剔除，行不动） |",
          f"| 订单行数 | {c['订单行数']} |",
-         f"| 清洗校验 | **{valid['检查数'] - valid['失败数']}/{valid['检查数']} 全部通过** |", ""]
+         f"| 清洗校验 | **{valid['检查数'] - valid['失败数']}/{valid['检查数']} 全部通过** |",
+         f"| Schema 契约 | {len(dwd_rows)} 张表，列序/类型/可空逐列声明并断言 |", ""]
 
     if "类型转换失败" in c:
         tc = c["类型转换失败"]
@@ -215,8 +357,12 @@ def write_readme(stage: Path, dwd_rows: dict[str, int]) -> None:
     L += ["", "## 五、阅读建议", "",
           "1. 先看 `06_质量报告/06_quality_report.md`——它是全过程的汇总，含问题清单、处理动作、前后对比与遗留问题。",
           "2. 再看 `02_清洗规则/03_rules.md`——每条规则为什么这么定，依据写在「处理依据」一栏。",
-          "3. 想核对数字，用 `03_清洗结果_DWD/csv/` 里的 CSV 直接打开，与 `00_原始层_ODS/` 对拍。",
-          "4. `04_执行日志与待核清单/pending/` 是「不静默丢弃」的证据——无法判定的记录都在这里，含规则号与样例。", "",
+          "3. 想核对数字：**Excel 用户直接开 `.xlsx`**——CSV 是无 BOM 的 UTF-8，"
+          "中文 Windows 的 Excel 按 GBK 解会乱码；用脚本或 Spark 处理则以 `csv/` 为准，"
+          "它与流水线输出逐字节一致。两者内容相同，只是呈现不同。",
+          "4. `04_执行日志与待核清单/pending/` 是「不静默丢弃」的证据——无法判定的记录都在这里，含规则号与样例。",
+          "5. 想知道某字段「为什么缺一半却不算问题」，看报告第 **3.1 合理缺失登记**；"
+          "想知道某列的类型与含义，看第 **5.1 DWD Schema 契约**。", "",
           "## 六、口径说明", "",
           "- **金额一律整数「分」**，电量为 `kwh_x100`（度 × 100），聚合全在整数上做，仅展示层除 100。",
           "  CSV 里看到的 `amount=12289` 即 122.89 元，`kwh_x100=8085` 即 80.85 度。",
