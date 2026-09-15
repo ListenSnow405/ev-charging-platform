@@ -2,6 +2,9 @@
 
 > 电动汽车充电桩管理平台 · 课程设计
 > 按 2026-09-14 仓库实测核对。**44 个命令字**（核心 35 + 扩展 9），核心 11 张数据表 + 扩展 3 张，代码约 **2.2 万行**。
+>
+> 第 1–7 节描述**第一阶段 Qt 业务平台**。**第二阶段大数据子系统见第 8 节**——它与前者并存、
+> 技术栈不重叠，Qt 侧一行不改。任务与验收见 [PHASE2-PLAN.md](PHASE2-PLAN.md)。
 
 ## 1. 人员分工
 
@@ -11,7 +14,7 @@
 | **L2** 数据存储与业务服务 | （姓名） | `server/biz/`、`server/dao/`、`docs/db-schema.sql` | 2,042 行 |
 | **L3** PC 服务器管理端 | （姓名） | `admin-client/`、`scripts/` | 4,839 行 |
 | **L4** 充电用户端 | （姓名） | `user-client/`、充电流程服务 | 2,488 行 |
-| **L5** 数据可视化与机器学习 | （姓名） | `ml/`、`dataviz/`、碳排放扩展模块 | 8,657 行 |
+| **L5** 数据可视化与机器学习 | （姓名） | `ml/`、`dataviz/`、碳排放扩展模块；**二阶段 `bigdata/**`** | 8,657 行（+ 二阶段 4,472 行） |
 
 > 代码规模为 **2026-09-09** 实测，按**责任归属**而非目录统计（充电流程服务计入 L4，碳排放全栈的三个目录一并计入 L5）。09-10 之后的修复使总量增至约 2.2 万行，分线明细未重测。
 
@@ -118,6 +121,8 @@ flowchart TB
 | `user-client/` | L4 | 充电用户端 | 7 文件 · 2,167 行 |
 | `ml/` | L5 | 历史数据生成、特征工程、时序建模、预测回写、独立对拍 | 9 文件 · 3,234 行 |
 | `dataviz/` | L5 | 运营大屏与碳排放大屏 | 2 文件 · 593 行 |
+| `bigdata/` | L5 | **第二阶段**：ODS 导出、Spark 清洗与分析、MLlib 建模、Flask 只读 API、Vue3+DataV 大屏 | 26 文件 · 3,568 行 |
+| `scripts/*phase2*`　`*hadoop*`　`hdfs-ctl.sh` | L5 | **第二阶段**：环境安装与自检、Hadoop 起停、ODS 推 HDFS、接口与大屏冒烟 | 8 文件 · 904 行 |
 
 ## 5. 跨目录协作
 
@@ -165,6 +170,79 @@ flowchart TB
 | **金额一律 `qint64` 整数「分」** | 浮点累加会产生误差，八千余笔订单的营收统计必须能对上账；仅显示层除以 100 |
 | **协议、错误码、表结构冻结** | 跨模块契约由单一属主维护，非属主只读，变更走流程，避免五条线并行时接口反复漂移 |
 | **SQL 一律 `prepare` + 参数绑定** | 防注入，同时避免手工拼接字符串带来的类型错误 |
+
+## 8. 第二阶段 · 大数据子系统
+
+**与第一阶段并存，不是替代。** Qt 业务平台一行不改（仍是纯 Socket），
+本子系统只共用同一份数据源 `charging.db`，用另一套技术栈把同类分析重做一遍。
+两阶段技术栈基本不重叠，不要把一边的结论套到另一边。
+
+```mermaid
+flowchart TB
+    DB[("charging.db · QSQLite<br/>一阶段业务库（只读取数）")]
+
+    subgraph ODS["ODS 原始层 · 只读"]
+        O["bigdata/ods/ 或 hdfs:///ecp/ods<br/>14 表 10524 行 CSV<br/>444 只读 · _manifest.json 记血缘"]
+    end
+
+    subgraph COMPUTE["Spark 计算 &nbsp; bigdata/spark · mllib &nbsp; L5"]
+        direction TB
+        C["清洗 DWD<br/>SOP 六阶段 · R001–R011"]
+        AN["多维分析<br/>13 维度 + 3 组对比"]
+        MLB["Spark MLlib<br/>6 个 GBT · 1h/6h/24h"]
+    end
+
+    MY[("MySQL · 分析结果层<br/>只存结果，不存明细")]
+    API["Flask 只读 API &nbsp; bigdata/api &nbsp; L5<br/>4 个接口 · 只监听 127.0.0.1"]
+    WEB["Vue3 + DataV 大屏 &nbsp; bigdata/web &nbsp; L5<br/>5 页 17 面板 · 9 类图表"]
+
+    DB -->|export_ods.py&nbsp;mode=ro| O
+    O --> C
+    C --> AN
+    C --> MLB
+    AN -->|回写| MY
+    MLB -->|回写| MY
+    MY -->|SQL| API
+    API -->|HTTP/JSON| WEB
+
+    classDef l5 fill:#fceef3,stroke:#e87ba4,stroke-width:2px,color:#131722
+    classDef ro fill:#eef1f5,stroke:#6b7785,stroke-width:2px,color:#131722
+    class C,AN,MLB,API,WEB l5
+    class O,DB ro
+```
+
+### 8.1 分层与职责边界
+
+| 层 | 目录 | 职责 | 硬边界 |
+| --- | --- | --- | --- |
+| ODS 原始层 | `bigdata/ods/` 或 HDFS | `charging.db` 的只读快照 | **任何清洗都不在此层做**，原始快照一个字节不改 |
+| DWD 加工层 | `bigdata/dwd/` | 清洗、类型转换、派生字段 | 删除/修正/填充**必须留痕**，无法判定的进待核清单 |
+| 分析与建模 | `bigdata/spark/`　`mllib/` | 多维分析、MLlib 训练与预测 | **不得直连 `charging.db`**，一律走 ODS |
+| 结果层 | MySQL | 只存分析结果 | 不存明细，否则 Flask 查询压力不可控 |
+| Web 层 | `bigdata/api/` | 只读接口 | 不写任何业务库，不现场触发 Spark job |
+
+五条边界对应 [CLAUDE.md 第 5.2 节](CLAUDE.md)，逐条都有对应的实现手段，不是口头约定。
+
+### 8.2 第二阶段的关键设计决策
+
+| 决策 | 理由 |
+| --- | --- |
+| **ODS 的介质可换，代码只认路径** —— 本地目录与 HDFS 共用同一条代码路径，靠 `ECP_ODS_ROOT` 切换 | 本地开发期不必背着 Hadoop 调试，答辩时换成 `hdfs://` 前缀即可。**但这不会自动成立**：`pathlib` 会折叠 `//`、Hadoop 的 `FileInputFormat` 会过滤 `_` 开头的文件，都得专门处理（见 PHASE2-PLAN 第 13.5 节） |
+| **ODS 导出与推送 HDFS 分成两个脚本** | `export_ods.py` 是纯 Python 文件 I/O，对 HDFS 不可用；让它直写 HDFS 就要引入 Python 的 HDFS 客户端，去做 `hdfs dfs -put` 已经能做的事。现在它产出**本地权威快照**，`ods-to-hdfs.sh` 负责搬运与逐文件 MD5 校验 |
+| **HDFS 上的只读靠独立身份，不只靠 444** | HDFS 的超级用户（启动 NameNode 的账号）**绕过一切权限检查**，照搬本地的 `chmod 444` 会让「ODS 只读」在 HDFS 上变成一句自觉。ODS 属主设为 `ecp_ods`，分析侧固定以 `ecp_analyst` 连，上传脚本末尾以分析身份**实际试写一次并期待失败** |
+| **只部署 HDFS，不起 YARN** | Spark 跑 `local[*]`，用不上资源调度；多两个守护进程只是多两处会崩的地方 |
+| **统一的 `SparkSession` 入口** | worker 与 driver 的 Python 解释器、`JAVA_HOME`、HDFS 访问身份都在这里钉死。这些都是「shell 里 export 也能修，但总有人会忘」的东西 |
+| **金额仍是整数「分」，电量仍是 `kwh_x100`** | 与第一阶段同源。Spark 聚合一律在整数上做，只在展示层除以 100；八千余笔订单的营收必须能逐分对上账 |
+| **机器学习改用 Spark MLlib**，不沿用一阶段的 scikit-learn | 第二阶段任务书明文要求。方法论沿用一阶段：按时间切分、双基线对照、验证段选超参 |
+
+### 8.3 一条贯穿全程的硬校验
+
+营收 **53,936,279 分**与电量 **36,638,035**（×100 度）这两个数，在清洗校验、
+7 个含营收的分析维度、MySQL 落库后、MLlib 特征面板守恒自检**逐环节对账一致**，
+电量还与第一阶段碳排放对拍脚本独立算出的数字相同。
+
+口径在环节间漂移是这类项目最常见的暗伤——第一阶段就踩过（大屏与管理端把同一个指标显示成两个形状，
+见 [conventions.md](docs/conventions.md) 3.1 的 2026-09-04 记录），所以每一环都显式做了对账。
 
 ---
 
