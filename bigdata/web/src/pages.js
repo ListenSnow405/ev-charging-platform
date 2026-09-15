@@ -63,6 +63,19 @@ export const PAGES = [
       { dim: 'd13_carbon_station', title: '分站碳排放汇总', tag: 'D13', kind: 'table', table: 'carbonStation', span: 2 },
       { dim: 'd14_carbon_recent', title: '最近 15 日碳排放明细', tag: 'D14', kind: 'table', table: 'carbonRecent', span: 6 }
     ]
+  },
+  {
+    key: 'advice',
+    name: '智能运营建议',
+    // 前面几页回答「过去发生了什么、未来会怎样」，这一页回答「所以该干什么」——
+    // 把负荷预测翻译成分流、值守与处置动作，补上说明书里
+    // 「辅助运营端做电力调配与运维值守安排」那半句。
+    desc: '把预测变成动作：分流、值守、处置',
+    panels: [
+      { dim: 'd12_load_forecast', title: '值守 / 检修时段（1 / 6 / 24 小时）', tag: 'A2', opt: 'duty', span: 6 },
+      { dim: 'd16_dispatch_advice', title: '站点分流 / 引导建议（拥堵 ≥80% 分流；前二且 ≥40% 引导）', tag: 'A1', kind: 'table', table: 'dispatchAdvice', span: 6 },
+      { dim: 'd17_alert_actions', title: '预警处置清单（含模型可信度）', tag: 'A3', kind: 'table', table: 'alertActions', span: 6 }
+    ]
   }
 ]
 

@@ -19,6 +19,8 @@
     "c1_fast_vs_slow": "快充 vs 慢充：量价时长与取消率",
     "c2_weekday_vs_weekend": "工作日 vs 周末：日均单量与营收",
     "c2_weekday_weekend_hourly": "工作日 vs 周末：24 小时曲线形态",
-    "c3_station_radar": "站点多指标对标（归一 0-100，取消率已取反）"
+    "c3_station_radar": "站点多指标对标（归一 0-100，取消率已取反）",
+    "d16_dispatch_advice": "智能运营建议：高拥堵站 → 推荐更空闲替代站",
+    "d17_alert_actions": "智能运营建议：预警处置清单（含模型可信度）"
   }
 }

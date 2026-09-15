@@ -391,3 +391,60 @@ export function d12Forecast (rows) {
     }))
   })
 }
+
+/** A2 值守 / 检修时段：6 站 × 1/6/24h 的拥堵度热力，
+ *  高峰格描红边（= 需值守），最低负荷格由 tooltip 提示可检修。
+ *  只有 3 个时间点，所以是 6×3 矩阵，不是逐小时曲线——d12 就这么多行。 */
+export function d12DutyHeat (rows) {
+  const short = n => n.replace('充电站', '')
+  const stations = [...new Set(rows.map(r => r.station_name))]
+  const HS = [1, 6, 24]
+  const pctOf = r => (r.pile_total > 0
+    ? +((1 - r.idle_pile / r.pile_total) * 100).toFixed(1) : 0)
+
+  const cells = rows.map(r => ({
+    value: [HS.indexOf(r.horizon), stations.indexOf(r.station_name), pctOf(r)],
+    itemStyle: r.is_peak ? { borderColor: C.warn, borderWidth: 2 } : undefined
+  })).filter(c => c.value[0] >= 0 && c.value[1] >= 0)
+
+  return base({
+    tooltip: {
+      trigger: 'item',
+      backgroundColor: 'rgba(10,25,47,.92)',
+      borderColor: C.primary,
+      textStyle: { color: '#e6f7ff', fontSize: 11 },
+      formatter: p => {
+        const r = rows.find(x => x.station_name === stations[p.value[1]]
+                              && x.horizon === HS[p.value[0]])
+        if (!r) return ''
+        return `<b>${r.station_name}</b><br/>${r.horizon}h 后　负荷 ${r.load_kw} kW<br/>`
+             + `空闲 ${r.idle_pile}/${r.pile_total} 桩　拥堵度 ${pctOf(r)}%<br/>`
+             + (r.is_peak
+                 ? '<b style="color:#ff7875">高峰：需值守</b>'
+                 : '<span style="color:#73d13d">平峰：可安排检修</span>')
+      }
+    },
+    grid: { left: 96, right: 64, top: 16, bottom: 30, containLabel: true },
+    xAxis: {
+      type: 'category', data: HS.map(h => `${h}h 后`),
+      ...axis({ splitLine: { show: false } }),
+      splitArea: { show: true, areaStyle: { color: ['rgba(255,255,255,.02)', 'rgba(255,255,255,.05)'] } }
+    },
+    yAxis: {
+      type: 'category', data: stations.map(short),
+      ...axis({ splitLine: { show: false } }),
+      splitArea: { show: true, areaStyle: { color: ['rgba(255,255,255,.02)', 'rgba(255,255,255,.05)'] } }
+    },
+    visualMap: {
+      min: 0, max: 100, calculable: false, orient: 'vertical',
+      right: 0, top: 'middle', textStyle: { color: C.text, fontSize: 10 },
+      inRange: { color: ['#0c2c4a', '#146b6b', '#36cfc9', '#ffc53d', '#ff7875'] }
+    },
+    series: [{
+      type: 'heatmap',
+      data: cells,
+      label: { show: true, color: '#e6f7ff', fontSize: 10, formatter: p => `${p.value[2]}%` },
+      emphasis: { itemStyle: { shadowBlur: 6, shadowColor: 'rgba(0,0,0,.5)' } }
+    }]
+  })
+}
