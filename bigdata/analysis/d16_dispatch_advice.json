@@ -1,0 +1,42 @@
+{
+  "dimension": "d16_dispatch_advice",
+  "description": "智能运营建议：高拥堵站 → 推荐更空闲替代站",
+  "generated_at": "2026-09-16 10:43:43",
+  "row_count": 2,
+  "rows": [
+    {
+      "advice_level": "引导",
+      "from_station_id": 2,
+      "from_station_name": "南山科技园充电站",
+      "from_congestion_pct": 50.0,
+      "from_idle": 2,
+      "from_pile_total": 4,
+      "to1_station_name": "深圳湾公园充电站",
+      "to1_distance_km": 4.0,
+      "to1_idle": 3,
+      "to1_congestion_pct": 25.0,
+      "to2_station_name": "宝安中心充电站",
+      "to2_distance_km": 6.7,
+      "to2_idle": 3,
+      "to2_congestion_pct": 25.0,
+      "advice_text": "引导用户分流至 深圳湾公园充电站（4.0km，预测空闲 3 桩）、宝安中心充电站（6.7km，预测空闲 3 桩）"
+    },
+    {
+      "advice_level": "引导",
+      "from_station_id": 6,
+      "from_station_name": "龙岗大运充电站",
+      "from_congestion_pct": 50.0,
+      "from_idle": 2,
+      "from_pile_total": 4,
+      "to1_station_name": "深圳市民中心充电站",
+      "to1_distance_km": 22.3,
+      "to1_idle": 3,
+      "to1_congestion_pct": 25.0,
+      "to2_station_name": "福田CBD充电站",
+      "to2_distance_km": 23.3,
+      "to2_idle": 3,
+      "to2_congestion_pct": 25.0,
+      "advice_text": "引导用户分流至 深圳市民中心充电站（22.3km，预测空闲 3 桩）、福田CBD充电站（23.3km，预测空闲 3 桩）"
+    }
+  ]
+}

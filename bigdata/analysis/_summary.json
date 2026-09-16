@@ -1,6 +1,6 @@
 {
-  "generated_at": "2026-09-15 23:51:46",
-  "dimension_count": 13,
+  "generated_at": "2026-09-16 10:43:43",
+  "dimension_count": 15,
   "comparison_count": 3,
   "dimensions": {
     "d1_revenue_trend": "按日营收 / 订单量 / 电量",
