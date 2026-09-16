@@ -1,7 +1,7 @@
 {
   "dimension": "d5_kwh_distribution",
   "description": "充电量分桶（每 20 度一档）",
-  "generated_at": "2026-09-14 18:18:31",
+  "generated_at": "2026-09-15 23:51:46",
   "row_count": 6,
   "rows": [
     {

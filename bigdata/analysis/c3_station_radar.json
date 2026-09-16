@@ -1,7 +1,7 @@
 {
   "dimension": "c3_station_radar",
   "description": "站点多指标对标（归一 0-100，取消率已取反）",
-  "generated_at": "2026-09-14 18:18:31",
+  "generated_at": "2026-09-15 23:51:46",
   "row_count": 6,
   "rows": [
     {
