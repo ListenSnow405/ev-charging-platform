@@ -378,8 +378,8 @@ unset ECP_ODS_ROOT                       # 切回本地目录
 | API | `bigdata/api/app.py` + `README.md` | 4 个只读接口 |
 | 大屏 | `bigdata/web/` + `README.md` | Vue3 + DataV，5 页 18 面板 |
 | 建模 | `bigdata/mllib/{features,train,predict,report}.py` | 6 个 GBT 模型 + `quality/07_forecast_eval.md` |
-| 测试 | `scripts/smoke-api-phase2.py`　`scripts/smoke-screen-phase2.py` | 接口 14 项、渲染 15 项逐页断言，**含 SQL 注入与真实截图** |
-| 用例集 | `第二阶段测试用例.xlsx` ← `scripts/gen-testcases-phase2.py` | 9 表 **130 条用例** + 缺陷 8 条；表格由脚本生成，不手工维护 |
+| 测试 | `scripts/smoke-api-phase2.py`　`scripts/smoke-screen-phase2.py` | 接口 14 项、渲染 16 项逐页断言，**含 SQL 注入与真实截图** |
+| 用例集 | `第二阶段测试用例.xlsx` ← `scripts/gen-testcases-phase2.py` | 11 表 **169 条用例** + 缺陷 9 条；表格由脚本生成，不手工维护 |
 
 ### 全链路复现
 
